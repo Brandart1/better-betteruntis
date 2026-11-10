@@ -69,6 +69,8 @@ class ElementRef {
     required this.orgId,
     this.inlineName,
     this.inlineLongName,
+    this.orgInlineName,
+    this.orgInlineLongName,
   });
 
   final ElementType type;
@@ -79,6 +81,11 @@ class ElementRef {
   /// fallback when the id is missing from master data (teacher-bug fix).
   final String? inlineName;
   final String? inlineLongName;
+
+  /// Inline names of the ORIGINAL element ([orgId]) when it differs from the
+  /// current one, e.g. the replaced teacher in a substitution.
+  final String? orgInlineName;
+  final String? orgInlineLongName;
 
   ElementChange get change {
     if (id == 0 && orgId != 0) return ElementChange.removed;
@@ -172,6 +179,25 @@ class Period {
   final Exam? exam;
   final bool isOnline;
   final String? onlineLink;
+
+  /// Copy with a different element list (e.g. teachers merged from REST).
+  Period copyWithElements(List<ElementRef> elements) => Period(
+    id: id,
+    lessonId: lessonId,
+    start: start,
+    end: end,
+    elements: elements,
+    flags: flags,
+    lessonText: lessonText,
+    substitutionText: substitutionText,
+    infoText: infoText,
+    foreColor: foreColor,
+    backColor: backColor,
+    homework: homework,
+    exam: exam,
+    isOnline: isOnline,
+    onlineLink: onlineLink,
+  );
 
   Iterable<ElementRef> ofType(ElementType t) =>
       elements.where((e) => e.type == t);

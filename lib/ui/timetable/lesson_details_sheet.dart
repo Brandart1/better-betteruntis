@@ -305,7 +305,7 @@ class ElementChip extends StatelessWidget {
         _ => Icons.label_outline,
       }, size: 18),
       label: Text.rich(label),
-      onPressed: onOpen == null || id == 0
+      onPressed: onOpen == null || id <= 0 // <0: name-only (REST) element, no timetable
           ? null
           : () => onOpen!(TimetableTarget(r.type, id)),
     );

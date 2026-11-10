@@ -38,6 +38,8 @@ abstract final class PeriodCodec {
           'orgId': e.orgId,
           if (e.inlineName != null) 'name': e.inlineName,
           if (e.inlineLongName != null) 'longName': e.inlineLongName,
+          if (e.orgInlineName != null) 'orgName': e.orgInlineName,
+          if (e.orgInlineLongName != null) 'orgLongName': e.orgInlineLongName,
         },
     ],
     'flags': [for (final f in p.flags) f.name],
@@ -85,6 +87,8 @@ abstract final class PeriodCodec {
               orgId: _int(e['orgId']),
               inlineName: _strOrNull(e['name']),
               inlineLongName: _strOrNull(e['longName']),
+              orgInlineName: _strOrNull(e['orgName']),
+              orgInlineLongName: _strOrNull(e['orgLongName']),
             ),
       ],
       flags: {

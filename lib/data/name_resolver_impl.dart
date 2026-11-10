@@ -40,7 +40,7 @@ class NameResolverImpl implements NameResolver {
 
   @override
   String shortName(ElementRef ref, {bool original = false}) =>
-      _resolve(ref, original, (e) => e.name, [ref.inlineName]);
+      _resolve(ref, original, (e) => e.name, [ref.inlineName], [ref.orgInlineName]);
 
   @override
   String longName(ElementRef ref, {bool original = false}) => _resolve(
@@ -48,6 +48,7 @@ class NameResolverImpl implements NameResolver {
     original,
     (e) => e.longName.isNotEmpty ? e.longName : e.name,
     [ref.inlineLongName, ref.inlineName],
+    [ref.orgInlineLongName, ref.orgInlineName],
   );
 
   String _resolve(
@@ -55,6 +56,7 @@ class NameResolverImpl implements NameResolver {
     bool original,
     String Function(MasterElement) pick,
     List<String?> inline,
+    List<String?> orgInline,
   ) {
     // A removed element (id 0) is displayed by its original.
     final useOrg = original || (ref.id == 0 && ref.orgId != 0);
@@ -63,6 +65,11 @@ class NameResolverImpl implements NameResolver {
     if (e != null) {
       final n = pick(e);
       if (n.trim().isNotEmpty) return n;
+    }
+    if (useOrg) {
+      for (final n in orgInline) {
+        if (n != null && n.trim().isNotEmpty) return n;
+      }
     }
     // Inline names describe the current element (or the original when it was
     // removed). For the original of a substitution they would name the wrong

@@ -61,4 +61,25 @@ void main() {
   test('time grid falls back', () {
     expect(r.timeGrid.days.keys, [1, 2, 3, 4, 5]);
   });
+
+  test('name-only substitution (REST) resolves both sides from inline names', () {
+    const ref = ElementRef(
+      type: t,
+      id: -11,
+      orgId: -22,
+      inlineName: 'NEW',
+      inlineLongName: 'New Teacher',
+      orgInlineName: 'OLD2',
+      orgInlineLongName: 'Old Teacher',
+    );
+    expect(r.shortName(ref), 'NEW');
+    expect(r.longName(ref), 'New Teacher');
+    expect(r.shortName(ref, original: true), 'OLD2');
+    expect(r.longName(ref, original: true), 'Old Teacher');
+  });
+
+  test('name-only removed teacher shows original inline name', () {
+    const ref = ElementRef(type: t, id: 0, orgId: -22, orgInlineName: 'GONE');
+    expect(r.shortName(ref), 'GONE');
+  });
 }
