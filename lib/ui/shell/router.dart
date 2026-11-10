@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../accounts/manage_accounts_screen.dart';
+import '../infocenter/info_center_screen.dart';
+import '../infocenter/messages_tab.dart';
 import '../login/login_form_screen.dart';
 import '../login/login_screen.dart';
 import '../login/qr_scan_screen.dart';
@@ -18,6 +20,8 @@ import 'element_picker_screen.dart';
 ///   /                      own timetable (active account)
 ///   /timetable/:type/:id   any element's timetable
 ///   /browse                pick a class / teacher / room / subject
+///   /info                  info center (messages, homework, exams, …)
+///   /info/message/:id      one inbox message
 ///   /login, /login/add, /login/form (extra: School?), /login/qr
 ///   /accounts              manage accounts
 ///   /settings              timetable look (colors, text, cancelled)
@@ -58,6 +62,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(path: '/browse', builder: (_, _) => const ElementPickerScreen()),
+      GoRoute(
+        path: '/info',
+        builder: (_, _) => const InfoCenterScreen(),
+        routes: [
+          GoRoute(
+            path: 'message/:id',
+            builder: (_, s) => MessageDetailScreen(
+              messageId: int.tryParse(s.pathParameters['id'] ?? '') ?? 0,
+            ),
+          ),
+        ],
+      ),
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
       GoRoute(
         path: '/login/add',

@@ -3,6 +3,7 @@ library;
 
 import 'package:drift/drift.dart';
 
+import '../core/absence_details.dart';
 import '../core/models.dart';
 import 'db/database.dart';
 import 'name_resolver_impl.dart';
@@ -33,10 +34,14 @@ class MasterDataStore {
     await (db.delete(
       db.timeGrids,
     )..where((t) => t.accountId.equals(accountId))).go();
+    await (db.delete(
+      db.absenceLookupEntries,
+    )..where((t) => t.accountId.equals(accountId))).go();
   }
 
   /// Upserts the entries in [md]; nothing is deleted. A non-null time grid
-  /// replaces the stored one.
+  /// replaces the stored one. Absence lookups are stored when [md] is a
+  /// [MasterDataWithLookups].
   Future<void> upsertDelta(String accountId, MasterData md) =>
       db.transaction(() async {
         await db.batch((b) {
@@ -75,6 +80,9 @@ class MasterDataStore {
                 endDate: dateKey(y.end),
               ),
           ]);
+          if (md is MasterDataWithLookups) {
+            _batchLookups(b, accountId, md.lookups);
+          }
           if (md.timeGrid != null) {
             b.insert(
               db.timeGrids,
@@ -87,6 +95,46 @@ class MasterDataStore {
           }
         });
       });
+
+  void _batchLookups(Batch b, String accountId, AbsenceLookups l) {
+    b.insertAllOnConflictUpdate(db.absenceLookupEntries, [
+      for (final e in l.reasons.entries)
+        AbsenceLookupEntriesCompanion.insert(
+          accountId: accountId,
+          kind: 'reason',
+          id: e.key,
+          name: e.value,
+        ),
+      for (final e in l.statuses.entries)
+        AbsenceLookupEntriesCompanion.insert(
+          accountId: accountId,
+          kind: 'status',
+          id: e.key,
+          name: e.value,
+        ),
+    ]);
+  }
+
+  /// Upserts absence reasons / excuse statuses (nothing is deleted).
+  Future<void> upsertLookups(String accountId, AbsenceLookups lookups) =>
+      db.batch((b) => _batchLookups(b, accountId, lookups));
+
+  /// Stored absence reasons / excuse statuses of [accountId].
+  Future<AbsenceLookups> loadLookups(String accountId) async {
+    final rows = await (db.select(
+      db.absenceLookupEntries,
+    )..where((t) => t.accountId.equals(accountId))).get();
+    return AbsenceLookups(
+      reasons: {
+        for (final r in rows)
+          if (r.kind == 'reason') r.id: r.name,
+      },
+      statuses: {
+        for (final r in rows)
+          if (r.kind == 'status') r.id: r.name,
+      },
+    );
+  }
 
   /// Adds teachers known only by name (negative synthetic ids) to the master
   /// elements of [accountId]. Does not touch the master-data timestamp; delta

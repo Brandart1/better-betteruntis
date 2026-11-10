@@ -4,8 +4,12 @@
 /// it falls back to a default instead of throwing.
 library;
 
+import '../core/absence_details.dart';
+import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
+
+part 'info_parsers.dart';
 
 // ---------------------------------------------------------------------------
 // Primitive helpers
@@ -232,6 +236,8 @@ TimeGrid? parseTimeGrid(Object? raw) {
   return days.isEmpty ? null : TimeGrid(days);
 }
 
+/// Parses full or delta master data. The result is a [MasterDataWithLookups]
+/// carrying `absenceReasons` / `excuseStatuses`.
 MasterData parseMasterData(Object? raw) {
   final j = _map(raw);
   final elements = <MasterElement>[
@@ -246,7 +252,7 @@ MasterData parseMasterData(Object? raw) {
         .map((e) => parseSimpleElement(ElementType.room, e))
         .whereType<MasterElement>(),
   ];
-  return MasterData(
+  return MasterDataWithLookups(
     timestamp: _int(j['timeStamp'] ?? j['timestamp']),
     elements: elements,
     holidays: _maps(j['holidays'])
@@ -258,6 +264,7 @@ MasterData parseMasterData(Object? raw) {
         .whereType<SchoolYear>()
         .toList(),
     timeGrid: parseTimeGrid(j['timeGrid']),
+    lookups: parseAbsenceLookups(j),
   );
 }
 

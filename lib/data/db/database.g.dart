@@ -3198,6 +3198,626 @@ class AppStateCompanion extends UpdateCompanion<AppStateRow> {
   }
 }
 
+class $InfoCacheTable extends InfoCache
+    with TableInfo<$InfoCacheTable, InfoCacheRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $InfoCacheTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _accountIdMeta = const VerificationMeta(
+    'accountId',
+  );
+  @override
+  late final GeneratedColumn<String> accountId = GeneratedColumn<String>(
+    'account_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _keyMeta = const VerificationMeta('key');
+  @override
+  late final GeneratedColumn<String> key = GeneratedColumn<String>(
+    'key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _jsonMeta = const VerificationMeta('json');
+  @override
+  late final GeneratedColumn<String> json = GeneratedColumn<String>(
+    'json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _fetchedAtMeta = const VerificationMeta(
+    'fetchedAt',
+  );
+  @override
+  late final GeneratedColumn<int> fetchedAt = GeneratedColumn<int>(
+    'fetched_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [accountId, key, json, fetchedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'info_cache';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<InfoCacheRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('account_id')) {
+      context.handle(
+        _accountIdMeta,
+        accountId.isAcceptableOrUnknown(data['account_id']!, _accountIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_accountIdMeta);
+    }
+    if (data.containsKey('key')) {
+      context.handle(
+        _keyMeta,
+        key.isAcceptableOrUnknown(data['key']!, _keyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_keyMeta);
+    }
+    if (data.containsKey('json')) {
+      context.handle(
+        _jsonMeta,
+        json.isAcceptableOrUnknown(data['json']!, _jsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_jsonMeta);
+    }
+    if (data.containsKey('fetched_at')) {
+      context.handle(
+        _fetchedAtMeta,
+        fetchedAt.isAcceptableOrUnknown(data['fetched_at']!, _fetchedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_fetchedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {accountId, key};
+  @override
+  InfoCacheRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return InfoCacheRow(
+      accountId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_id'],
+      )!,
+      key: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}key'],
+      )!,
+      json: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}json'],
+      )!,
+      fetchedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}fetched_at'],
+      )!,
+    );
+  }
+
+  @override
+  $InfoCacheTable createAlias(String alias) {
+    return $InfoCacheTable(attachedDatabase, alias);
+  }
+}
+
+class InfoCacheRow extends DataClass implements Insertable<InfoCacheRow> {
+  final String accountId;
+  final String key;
+  final String json;
+
+  /// Milliseconds since epoch (UTC).
+  final int fetchedAt;
+  const InfoCacheRow({
+    required this.accountId,
+    required this.key,
+    required this.json,
+    required this.fetchedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['account_id'] = Variable<String>(accountId);
+    map['key'] = Variable<String>(key);
+    map['json'] = Variable<String>(json);
+    map['fetched_at'] = Variable<int>(fetchedAt);
+    return map;
+  }
+
+  InfoCacheCompanion toCompanion(bool nullToAbsent) {
+    return InfoCacheCompanion(
+      accountId: Value(accountId),
+      key: Value(key),
+      json: Value(json),
+      fetchedAt: Value(fetchedAt),
+    );
+  }
+
+  factory InfoCacheRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return InfoCacheRow(
+      accountId: serializer.fromJson<String>(json['accountId']),
+      key: serializer.fromJson<String>(json['key']),
+      json: serializer.fromJson<String>(json['json']),
+      fetchedAt: serializer.fromJson<int>(json['fetchedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'accountId': serializer.toJson<String>(accountId),
+      'key': serializer.toJson<String>(key),
+      'json': serializer.toJson<String>(json),
+      'fetchedAt': serializer.toJson<int>(fetchedAt),
+    };
+  }
+
+  InfoCacheRow copyWith({
+    String? accountId,
+    String? key,
+    String? json,
+    int? fetchedAt,
+  }) => InfoCacheRow(
+    accountId: accountId ?? this.accountId,
+    key: key ?? this.key,
+    json: json ?? this.json,
+    fetchedAt: fetchedAt ?? this.fetchedAt,
+  );
+  InfoCacheRow copyWithCompanion(InfoCacheCompanion data) {
+    return InfoCacheRow(
+      accountId: data.accountId.present ? data.accountId.value : this.accountId,
+      key: data.key.present ? data.key.value : this.key,
+      json: data.json.present ? data.json.value : this.json,
+      fetchedAt: data.fetchedAt.present ? data.fetchedAt.value : this.fetchedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('InfoCacheRow(')
+          ..write('accountId: $accountId, ')
+          ..write('key: $key, ')
+          ..write('json: $json, ')
+          ..write('fetchedAt: $fetchedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(accountId, key, json, fetchedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is InfoCacheRow &&
+          other.accountId == this.accountId &&
+          other.key == this.key &&
+          other.json == this.json &&
+          other.fetchedAt == this.fetchedAt);
+}
+
+class InfoCacheCompanion extends UpdateCompanion<InfoCacheRow> {
+  final Value<String> accountId;
+  final Value<String> key;
+  final Value<String> json;
+  final Value<int> fetchedAt;
+  final Value<int> rowid;
+  const InfoCacheCompanion({
+    this.accountId = const Value.absent(),
+    this.key = const Value.absent(),
+    this.json = const Value.absent(),
+    this.fetchedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  InfoCacheCompanion.insert({
+    required String accountId,
+    required String key,
+    required String json,
+    required int fetchedAt,
+    this.rowid = const Value.absent(),
+  }) : accountId = Value(accountId),
+       key = Value(key),
+       json = Value(json),
+       fetchedAt = Value(fetchedAt);
+  static Insertable<InfoCacheRow> custom({
+    Expression<String>? accountId,
+    Expression<String>? key,
+    Expression<String>? json,
+    Expression<int>? fetchedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (accountId != null) 'account_id': accountId,
+      if (key != null) 'key': key,
+      if (json != null) 'json': json,
+      if (fetchedAt != null) 'fetched_at': fetchedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  InfoCacheCompanion copyWith({
+    Value<String>? accountId,
+    Value<String>? key,
+    Value<String>? json,
+    Value<int>? fetchedAt,
+    Value<int>? rowid,
+  }) {
+    return InfoCacheCompanion(
+      accountId: accountId ?? this.accountId,
+      key: key ?? this.key,
+      json: json ?? this.json,
+      fetchedAt: fetchedAt ?? this.fetchedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (accountId.present) {
+      map['account_id'] = Variable<String>(accountId.value);
+    }
+    if (key.present) {
+      map['key'] = Variable<String>(key.value);
+    }
+    if (json.present) {
+      map['json'] = Variable<String>(json.value);
+    }
+    if (fetchedAt.present) {
+      map['fetched_at'] = Variable<int>(fetchedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('InfoCacheCompanion(')
+          ..write('accountId: $accountId, ')
+          ..write('key: $key, ')
+          ..write('json: $json, ')
+          ..write('fetchedAt: $fetchedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $AbsenceLookupEntriesTable extends AbsenceLookupEntries
+    with TableInfo<$AbsenceLookupEntriesTable, AbsenceLookupRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $AbsenceLookupEntriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _accountIdMeta = const VerificationMeta(
+    'accountId',
+  );
+  @override
+  late final GeneratedColumn<String> accountId = GeneratedColumn<String>(
+    'account_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [accountId, kind, id, name];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'absence_lookup_entries';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<AbsenceLookupRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('account_id')) {
+      context.handle(
+        _accountIdMeta,
+        accountId.isAcceptableOrUnknown(data['account_id']!, _accountIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_accountIdMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {accountId, kind, id};
+  @override
+  AbsenceLookupRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return AbsenceLookupRow(
+      accountId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_id'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+    );
+  }
+
+  @override
+  $AbsenceLookupEntriesTable createAlias(String alias) {
+    return $AbsenceLookupEntriesTable(attachedDatabase, alias);
+  }
+}
+
+class AbsenceLookupRow extends DataClass
+    implements Insertable<AbsenceLookupRow> {
+  final String accountId;
+  final String kind;
+  final int id;
+  final String name;
+  const AbsenceLookupRow({
+    required this.accountId,
+    required this.kind,
+    required this.id,
+    required this.name,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['account_id'] = Variable<String>(accountId);
+    map['kind'] = Variable<String>(kind);
+    map['id'] = Variable<int>(id);
+    map['name'] = Variable<String>(name);
+    return map;
+  }
+
+  AbsenceLookupEntriesCompanion toCompanion(bool nullToAbsent) {
+    return AbsenceLookupEntriesCompanion(
+      accountId: Value(accountId),
+      kind: Value(kind),
+      id: Value(id),
+      name: Value(name),
+    );
+  }
+
+  factory AbsenceLookupRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return AbsenceLookupRow(
+      accountId: serializer.fromJson<String>(json['accountId']),
+      kind: serializer.fromJson<String>(json['kind']),
+      id: serializer.fromJson<int>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'accountId': serializer.toJson<String>(accountId),
+      'kind': serializer.toJson<String>(kind),
+      'id': serializer.toJson<int>(id),
+      'name': serializer.toJson<String>(name),
+    };
+  }
+
+  AbsenceLookupRow copyWith({
+    String? accountId,
+    String? kind,
+    int? id,
+    String? name,
+  }) => AbsenceLookupRow(
+    accountId: accountId ?? this.accountId,
+    kind: kind ?? this.kind,
+    id: id ?? this.id,
+    name: name ?? this.name,
+  );
+  AbsenceLookupRow copyWithCompanion(AbsenceLookupEntriesCompanion data) {
+    return AbsenceLookupRow(
+      accountId: data.accountId.present ? data.accountId.value : this.accountId,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AbsenceLookupRow(')
+          ..write('accountId: $accountId, ')
+          ..write('kind: $kind, ')
+          ..write('id: $id, ')
+          ..write('name: $name')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(accountId, kind, id, name);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is AbsenceLookupRow &&
+          other.accountId == this.accountId &&
+          other.kind == this.kind &&
+          other.id == this.id &&
+          other.name == this.name);
+}
+
+class AbsenceLookupEntriesCompanion extends UpdateCompanion<AbsenceLookupRow> {
+  final Value<String> accountId;
+  final Value<String> kind;
+  final Value<int> id;
+  final Value<String> name;
+  final Value<int> rowid;
+  const AbsenceLookupEntriesCompanion({
+    this.accountId = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  AbsenceLookupEntriesCompanion.insert({
+    required String accountId,
+    required String kind,
+    required int id,
+    required String name,
+    this.rowid = const Value.absent(),
+  }) : accountId = Value(accountId),
+       kind = Value(kind),
+       id = Value(id),
+       name = Value(name);
+  static Insertable<AbsenceLookupRow> custom({
+    Expression<String>? accountId,
+    Expression<String>? kind,
+    Expression<int>? id,
+    Expression<String>? name,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (accountId != null) 'account_id': accountId,
+      if (kind != null) 'kind': kind,
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  AbsenceLookupEntriesCompanion copyWith({
+    Value<String>? accountId,
+    Value<String>? kind,
+    Value<int>? id,
+    Value<String>? name,
+    Value<int>? rowid,
+  }) {
+    return AbsenceLookupEntriesCompanion(
+      accountId: accountId ?? this.accountId,
+      kind: kind ?? this.kind,
+      id: id ?? this.id,
+      name: name ?? this.name,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (accountId.present) {
+      map['account_id'] = Variable<String>(accountId.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AbsenceLookupEntriesCompanion(')
+          ..write('accountId: $accountId, ')
+          ..write('kind: $kind, ')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3208,6 +3828,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $TimeGridsTable timeGrids = $TimeGridsTable(this);
   late final $CachedWeeksTable cachedWeeks = $CachedWeeksTable(this);
   late final $AppStateTable appState = $AppStateTable(this);
+  late final $InfoCacheTable infoCache = $InfoCacheTable(this);
+  late final $AbsenceLookupEntriesTable absenceLookupEntries =
+      $AbsenceLookupEntriesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3220,6 +3843,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     timeGrids,
     cachedWeeks,
     appState,
+    infoCache,
+    absenceLookupEntries,
   ];
 }
 
@@ -4921,6 +5546,402 @@ typedef $$AppStateTableProcessedTableManager =
       AppStateRow,
       PrefetchHooks Function()
     >;
+typedef $$InfoCacheTableCreateCompanionBuilder = InfoCacheCompanion Function({
+  required String accountId,
+  required String key,
+  required String json,
+  required int fetchedAt,
+  Value<int> rowid,
+});
+typedef $$InfoCacheTableUpdateCompanionBuilder = InfoCacheCompanion Function({
+  Value<String> accountId,
+  Value<String> key,
+  Value<String> json,
+  Value<int> fetchedAt,
+  Value<int> rowid,
+});
+
+class $$InfoCacheTableFilterComposer
+    extends Composer<_$AppDatabase, $InfoCacheTable> {
+  $$InfoCacheTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get accountId => $composableBuilder(
+    column: $table.accountId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get json => $composableBuilder(
+    column: $table.json,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get fetchedAt => $composableBuilder(
+    column: $table.fetchedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$InfoCacheTableOrderingComposer
+    extends Composer<_$AppDatabase, $InfoCacheTable> {
+  $$InfoCacheTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get accountId => $composableBuilder(
+    column: $table.accountId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get json => $composableBuilder(
+    column: $table.json,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get fetchedAt => $composableBuilder(
+    column: $table.fetchedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$InfoCacheTableAnnotationComposer
+    extends Composer<_$AppDatabase, $InfoCacheTable> {
+  $$InfoCacheTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get accountId =>
+      $composableBuilder(column: $table.accountId, builder: (column) => column);
+
+  GeneratedColumn<String> get key =>
+      $composableBuilder(column: $table.key, builder: (column) => column);
+
+  GeneratedColumn<String> get json =>
+      $composableBuilder(column: $table.json, builder: (column) => column);
+
+  GeneratedColumn<int> get fetchedAt =>
+      $composableBuilder(column: $table.fetchedAt, builder: (column) => column);
+}
+
+class $$InfoCacheTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $InfoCacheTable,
+          InfoCacheRow,
+          $$InfoCacheTableFilterComposer,
+          $$InfoCacheTableOrderingComposer,
+          $$InfoCacheTableAnnotationComposer,
+          $$InfoCacheTableCreateCompanionBuilder,
+          $$InfoCacheTableUpdateCompanionBuilder,
+          (
+            InfoCacheRow,
+            BaseReferences<_$AppDatabase, $InfoCacheTable, InfoCacheRow>,
+          ),
+          InfoCacheRow,
+          PrefetchHooks Function()
+        > {
+  $$InfoCacheTableTableManager(_$AppDatabase db, $InfoCacheTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$InfoCacheTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$InfoCacheTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$InfoCacheTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> accountId = const Value.absent(),
+                Value<String> key = const Value.absent(),
+                Value<String> json = const Value.absent(),
+                Value<int> fetchedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => InfoCacheCompanion(
+                accountId: accountId,
+                key: key,
+                json: json,
+                fetchedAt: fetchedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String accountId,
+                required String key,
+                required String json,
+                required int fetchedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => InfoCacheCompanion.insert(
+                accountId: accountId,
+                key: key,
+                json: json,
+                fetchedAt: fetchedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$InfoCacheTable, InfoCacheRow>(table),
+                  BaseReferences<_$AppDatabase, $InfoCacheTable, InfoCacheRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$InfoCacheTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $InfoCacheTable,
+      InfoCacheRow,
+      $$InfoCacheTableFilterComposer,
+      $$InfoCacheTableOrderingComposer,
+      $$InfoCacheTableAnnotationComposer,
+      $$InfoCacheTableCreateCompanionBuilder,
+      $$InfoCacheTableUpdateCompanionBuilder,
+      (
+        InfoCacheRow,
+        BaseReferences<_$AppDatabase, $InfoCacheTable, InfoCacheRow>,
+      ),
+      InfoCacheRow,
+      PrefetchHooks Function()
+    >;
+typedef $$AbsenceLookupEntriesTableCreateCompanionBuilder =
+    AbsenceLookupEntriesCompanion Function({
+      required String accountId,
+      required String kind,
+      required int id,
+      required String name,
+      Value<int> rowid,
+    });
+typedef $$AbsenceLookupEntriesTableUpdateCompanionBuilder =
+    AbsenceLookupEntriesCompanion Function({
+      Value<String> accountId,
+      Value<String> kind,
+      Value<int> id,
+      Value<String> name,
+      Value<int> rowid,
+    });
+
+class $$AbsenceLookupEntriesTableFilterComposer
+    extends Composer<_$AppDatabase, $AbsenceLookupEntriesTable> {
+  $$AbsenceLookupEntriesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get accountId => $composableBuilder(
+    column: $table.accountId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$AbsenceLookupEntriesTableOrderingComposer
+    extends Composer<_$AppDatabase, $AbsenceLookupEntriesTable> {
+  $$AbsenceLookupEntriesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get accountId => $composableBuilder(
+    column: $table.accountId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$AbsenceLookupEntriesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $AbsenceLookupEntriesTable> {
+  $$AbsenceLookupEntriesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get accountId =>
+      $composableBuilder(column: $table.accountId, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+}
+
+class $$AbsenceLookupEntriesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $AbsenceLookupEntriesTable,
+          AbsenceLookupRow,
+          $$AbsenceLookupEntriesTableFilterComposer,
+          $$AbsenceLookupEntriesTableOrderingComposer,
+          $$AbsenceLookupEntriesTableAnnotationComposer,
+          $$AbsenceLookupEntriesTableCreateCompanionBuilder,
+          $$AbsenceLookupEntriesTableUpdateCompanionBuilder,
+          (
+            AbsenceLookupRow,
+            BaseReferences<
+              _$AppDatabase,
+              $AbsenceLookupEntriesTable,
+              AbsenceLookupRow
+            >,
+          ),
+          AbsenceLookupRow,
+          PrefetchHooks Function()
+        > {
+  $$AbsenceLookupEntriesTableTableManager(
+    _$AppDatabase db,
+    $AbsenceLookupEntriesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$AbsenceLookupEntriesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$AbsenceLookupEntriesTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$AbsenceLookupEntriesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> accountId = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<int> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AbsenceLookupEntriesCompanion(
+                accountId: accountId,
+                kind: kind,
+                id: id,
+                name: name,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String accountId,
+                required String kind,
+                required int id,
+                required String name,
+                Value<int> rowid = const Value.absent(),
+              }) => AbsenceLookupEntriesCompanion.insert(
+                accountId: accountId,
+                kind: kind,
+                id: id,
+                name: name,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$AbsenceLookupEntriesTable, AbsenceLookupRow>(
+                    table,
+                  ),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $AbsenceLookupEntriesTable,
+                    AbsenceLookupRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$AbsenceLookupEntriesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $AbsenceLookupEntriesTable,
+      AbsenceLookupRow,
+      $$AbsenceLookupEntriesTableFilterComposer,
+      $$AbsenceLookupEntriesTableOrderingComposer,
+      $$AbsenceLookupEntriesTableAnnotationComposer,
+      $$AbsenceLookupEntriesTableCreateCompanionBuilder,
+      $$AbsenceLookupEntriesTableUpdateCompanionBuilder,
+      (
+        AbsenceLookupRow,
+        BaseReferences<
+          _$AppDatabase,
+          $AbsenceLookupEntriesTable,
+          AbsenceLookupRow
+        >,
+      ),
+      AbsenceLookupRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -4939,4 +5960,8 @@ class $AppDatabaseManager {
       $$CachedWeeksTableTableManager(_db, _db.cachedWeeks);
   $$AppStateTableTableManager get appState =>
       $$AppStateTableTableManager(_db, _db.appState);
+  $$InfoCacheTableTableManager get infoCache =>
+      $$InfoCacheTableTableManager(_db, _db.infoCache);
+  $$AbsenceLookupEntriesTableTableManager get absenceLookupEntries =>
+      $$AbsenceLookupEntriesTableTableManager(_db, _db.absenceLookupEntries);
 }

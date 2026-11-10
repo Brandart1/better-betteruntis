@@ -4,10 +4,12 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 
+import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/providers.dart';
 import 'account_repository_impl.dart';
 import 'db/database.dart';
+import 'info_center_repository_impl.dart';
 import 'secret_store.dart';
 import 'timetable_repository_impl.dart';
 
@@ -21,7 +23,9 @@ final appDatabaseProvider = Provider<AppDatabase>((ref) {
 
 final secretStoreProvider = Provider<SecretStore>((ref) => SecureSecretStore());
 
-/// Overrides for [accountRepositoryProvider] and [timetableRepositoryProvider].
+/// Overrides for [accountRepositoryProvider], [timetableRepositoryProvider]
+/// and [infoCenterRepositoryProvider] (the latter needs an API that also
+/// implements [InfoCenterApi]; reading it otherwise throws).
 ///
 /// [api] defaults to whatever [untisApiProvider] resolves to (main.dart
 /// overrides that). [database], [secrets] and [clock] are for tests/demo.
@@ -49,4 +53,12 @@ List<Override> dataOverrides({
     ref.onDispose(repo.dispose);
     return repo;
   }),
+  infoCenterRepositoryProvider.overrideWith(
+    (ref) => InfoCenterRepositoryImpl(
+      api: api ?? ref.watch(untisApiProvider),
+      db: ref.watch(appDatabaseProvider),
+      accounts: ref.watch(accountRepositoryProvider),
+      clock: clock,
+    ),
+  ),
 ];

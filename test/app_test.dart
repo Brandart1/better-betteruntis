@@ -53,8 +53,32 @@ void main() {
     expect(find.byKey(const ValueKey('week-label')), findsOneWidget);
     expect(find.textContaining('MUE', findRichText: true), findsWidgets);
 
-    await db.close();
+    // Drawer → Info center, served by the real repository over the demo API.
+    await tester.tap(find.byTooltip('Open navigation menu'));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.tap(find.text('Info center'));
+    for (var i = 0; i < 20; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('Homework'), findsWidgets);
+    await tester.tap(find.text('Homework').last);
+    for (var i = 0; i < 20; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(tester.takeException(), isNull);
+
+    // Unmount first so streams cancel, then close with real async time:
+    // queries started in the fake-async zone can only finish there.
     await tester.pumpWidget(const SizedBox());
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    }
+    await tester.runAsync(db.close);
     await tester.pump(const Duration(seconds: 1));
   });
 }

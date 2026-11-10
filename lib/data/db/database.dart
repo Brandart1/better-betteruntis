@@ -100,6 +100,34 @@ class CachedWeeks extends Table {
   Set<Column> get primaryKey => {accountId, targetType, targetId, weekStart};
 }
 
+/// Info-center cache: one JSON document per account and section key (e.g.
+/// `inbox`, `homework|STUDENT#7|2026-11-09..2026-11-22`). Added in v2.
+@DataClassName('InfoCacheRow')
+class InfoCache extends Table {
+  TextColumn get accountId => text()();
+  TextColumn get key => text()();
+  TextColumn get json => text()();
+
+  /// Milliseconds since epoch (UTC).
+  IntColumn get fetchedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {accountId, key};
+}
+
+/// Master-data absence reasons ([kind] `reason`) and excuse statuses
+/// (`status`) by id. Added in v2.
+@DataClassName('AbsenceLookupRow')
+class AbsenceLookupEntries extends Table {
+  TextColumn get accountId => text()();
+  TextColumn get kind => text()();
+  IntColumn get id => integer()();
+  TextColumn get name => text()();
+
+  @override
+  Set<Column> get primaryKey => {accountId, kind, id};
+}
+
 /// Key/value app state (e.g. `activeAccountId`).
 @DataClassName('AppStateRow')
 class AppState extends Table {
@@ -119,6 +147,8 @@ class AppState extends Table {
     TimeGrids,
     CachedWeeks,
     AppState,
+    InfoCache,
+    AbsenceLookupEntries,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -128,8 +158,20 @@ class AppDatabase extends _$AppDatabase {
   factory AppDatabase.open({String name = 'better_betteruntis'}) =>
       AppDatabase(driftDatabase(name: name));
 
+  /// v1: initial schema. v2: [InfoCache], [AbsenceLookupEntries].
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onCreate: (m) => m.createAll(),
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await m.createTable(infoCache);
+        await m.createTable(absenceLookupEntries);
+      }
+    },
+  );
 
   static const activeAccountKey = 'activeAccountId';
 }

@@ -124,6 +124,9 @@ class AccountRepositoryImpl implements AccountRepository {
       await (db.delete(
         db.cachedWeeks,
       )..where((t) => t.accountId.equals(accountId))).go();
+      await (db.delete(
+        db.infoCache,
+      )..where((t) => t.accountId.equals(accountId))).go();
       final active = await activeId();
       if (active == accountId || active == null) {
         final next = await (_ordered..limit(1)).getSingleOrNull();

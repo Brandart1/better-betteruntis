@@ -5,6 +5,7 @@ import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/settings.dart';
+import '../export/export_sheet.dart';
 import 'day_timeline.dart';
 import 'lesson_details_sheet.dart';
 import 'lesson_layout.dart';
@@ -409,6 +410,26 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                 tooltip: 'Jump to date',
                 onPressed: _pickDate,
                 icon: const Icon(Icons.calendar_month),
+              ),
+              PopupMenuButton<void>(
+                key: const ValueKey('timetable-menu'),
+                tooltip: 'More',
+                itemBuilder: (_) => [
+                  PopupMenuItem<void>(
+                    key: const ValueKey('export-action'),
+                    onTap: () => showExportSheet(
+                      context,
+                      account: account,
+                      target: target,
+                      initialWeek: day ?? ws,
+                    ),
+                    child: const ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.ios_share),
+                      title: Text('Export…'),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

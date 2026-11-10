@@ -5,13 +5,15 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
+import '../core/absence_details.dart';
+import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
 import 'json_rpc.dart';
 import 'parsers.dart';
 import 'rest_teachers.dart';
 
-class UntisApiImpl implements UntisApi {
+class UntisApiImpl implements FullUntisApi {
   UntisApiImpl({Dio? dio, DateTime Function()? now, bool isIos = false})
     : this._(
         dio ??
@@ -97,7 +99,9 @@ class UntisApiImpl implements UntisApi {
       'deviceOsVersion': '',
       'auth': _rpc.auth(creds),
     });
-    return parseLoginResult(result, secret: secret);
+    final login = parseLoginResult(result, secret: secret);
+    _rememberLookups(host, school.loginName, login.masterData);
+    return login;
   }
 
   @override
@@ -121,6 +125,7 @@ class UntisApiImpl implements UntisApi {
       'auth': _rpc.auth(auth),
     });
     final res = parseTimetableResponse(result);
+    _rememberLookups(host, school, res.masterDataDelta);
 
     // Some schools leave TEACHER elements out of the JSON-RPC timetable for
     // students, while the REST timetable (used by the official app) has them.
@@ -320,5 +325,245 @@ class UntisApiImpl implements UntisApi {
         _rpc.record('PROBE $label [no response]', '{"_requestFailed": "${e.type.name}"}');
       }
     }
+  }
+
+  // ---- Info center ----------------------------------------------------------
+
+  /// Absence lookups seen this session per `host|school` (from login, timetable
+  /// deltas and [absenceLookups]). Used by the contract [absences]; the data
+  /// layer persists its own copy.
+  final _lookups = <String, AbsenceLookups>{};
+
+  void _rememberLookups(String host, String school, MasterData? md) {
+    if (md is! MasterDataWithLookups || md.lookups.isEmpty) return;
+    final key = '$host|$school';
+    _lookups[key] = (_lookups[key] ?? const AbsenceLookups()).merge(md.lookups);
+  }
+
+  Map<String, Object?> _rangeParams(
+    TimetableTarget target,
+    DateTime start,
+    DateTime end,
+    UntisCredentials auth,
+  ) => {
+    'id': target.id,
+    'type': target.type.apiName,
+    'startDate': formatDate(start),
+    'endDate': formatDate(end),
+    'auth': _rpc.auth(auth),
+  };
+
+  @override
+  Future<List<HomeworkItem>> homework({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required TimetableTarget target,
+    required DateTime start,
+    required DateTime end,
+  }) async => parseHomeworkItems(
+    await _rpc.call(
+      rpcUrl(host, school),
+      'getHomeWork2017',
+      _rangeParams(target, start, end, auth),
+    ),
+  );
+
+  @override
+  Future<List<ExamItem>> exams({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required TimetableTarget target,
+    required DateTime start,
+    required DateTime end,
+  }) async => parseExamItems(
+    await _rpc.call(
+      rpcUrl(host, school),
+      'getExams2017',
+      _rangeParams(target, start, end, auth),
+    ),
+  );
+
+  @override
+  Future<List<RawAbsence>> rawAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required DateTime start,
+    required DateTime end,
+  }) async => parseRawAbsences(
+    await _rpc.call(rpcUrl(host, school), 'getStudentAbsences2017', {
+      'startDate': formatDate(start),
+      'endDate': formatDate(end),
+      'includeExcused': true,
+      'includeUnExcused': true,
+      'auth': _rpc.auth(auth),
+    }),
+  );
+
+  /// One getUserData2017 call (the only known source of the full master data).
+  @override
+  Future<AbsenceLookups> absenceLookups({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    final result = await _rpc.call(rpcUrl(host, school), 'getUserData2017', {
+      'elementId': 0,
+      'deviceOs': isIos ? 'IOS' : 'AND',
+      'deviceOsVersion': '',
+      'auth': _rpc.auth(auth),
+    });
+    final lookups = parseAbsenceLookups(
+      result is Map ? result['masterData'] : null,
+    );
+    _lookups['$host|$school'] =
+        (_lookups['$host|$school'] ?? const AbsenceLookups()).merge(lookups);
+    return lookups;
+  }
+
+  /// Resolves names with the lookups seen this session; loads them once via
+  /// [absenceLookups] when an id is unknown (failures leave names empty).
+  @override
+  Future<List<AbsenceItem>> absences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    final raw = await rawAbsences(
+      host: host,
+      school: school,
+      auth: auth,
+      start: start,
+      end: end,
+    );
+    final key = '$host|$school';
+    if (!_lookups.containsKey(key) &&
+        raw.any((a) => a.needsLookup(const AbsenceLookups()))) {
+      try {
+        await absenceLookups(host: host, school: school, auth: auth);
+      } on UntisException {
+        _lookups[key] = const AbsenceLookups(); // don't retry this session
+      }
+    }
+    final lookups = _lookups[key] ?? const AbsenceLookups();
+    return [for (final a in raw) a.resolve(lookups)];
+  }
+
+  @override
+  Future<List<OfficeHourItem>> officeHours({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int klasseId,
+    required DateTime start,
+  }) async => parseOfficeHourItems(
+    await _rpc.call(rpcUrl(host, school), 'getOfficeHours2017', {
+      'klasseId': klasseId,
+      'startDate': formatDate(start),
+      'auth': _rpc.auth(auth),
+    }),
+  );
+
+  @override
+  Future<List<InboxMessage>> inbox({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async => parseInbox(
+    await _restGet(host, school, auth, 'view/v1/messages', 'REST messages'),
+  );
+
+  @override
+  Future<InboxMessageDetail> inboxMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) async => parseInboxMessageDetail(
+    await _restGet(
+      host,
+      school,
+      auth,
+      'view/v1/messages/$id',
+      'REST messages/$id',
+    ),
+    id,
+  );
+
+  /// Authenticated REST GET returning decoded JSON. Every response is recorded
+  /// in the debug log. A 401 drops the cached token and retries once; other
+  /// non-2xx answers map to [restError].
+  Future<Object?> _restGet(
+    String host,
+    String school,
+    UntisCredentials auth,
+    String path,
+    String label,
+  ) async {
+    final url = 'https://$host/WebUntis/api/rest/$path';
+    final tokenKey = '$host|$school|${auth.username}';
+    Response<String>? resp;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final token = await _token(host, school, auth);
+      try {
+        resp = await _dio.get<String>(
+          url,
+          options: Options(
+            responseType: ResponseType.plain,
+            validateStatus: (_) => true,
+            headers: {
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          ),
+        );
+      } on DioException catch (e) {
+        final timedOut = switch (e.type) {
+          DioExceptionType.connectionTimeout ||
+          DioExceptionType.sendTimeout ||
+          DioExceptionType.receiveTimeout => true,
+          _ => false,
+        };
+        final msg = timedOut
+            ? 'Timeout (${e.type.name})'
+            : 'Network error: ${e.message ?? e.type.name}';
+        _rpc.record(
+          '$label [no response]',
+          jsonEncode({'_requestFailed': msg}),
+        );
+        throw UntisException(timedOut ? UntisException.timeout : 0, msg);
+      }
+      _rpc.record('$label [HTTP ${resp.statusCode}]', resp.data ?? '');
+      if (resp.statusCode != 401) break;
+      _tokens.remove(tokenKey);
+    }
+    final status = resp!.statusCode ?? 0;
+    final body = resp.data ?? '';
+    Object? decoded;
+    try {
+      decoded = body.trim().isEmpty ? null : jsonDecode(body);
+    } on FormatException {
+      if (status >= 200 && status < 300) {
+        throw const UntisException(-1, 'Invalid JSON response');
+      }
+    }
+    if (status < 200 || status >= 300) throw restError(status, decoded);
+    return decoded;
+  }
+
+  /// Maps a non-2xx REST answer: 403 -> [UntisException.noRight], 401 -> -8520
+  /// (authentication), anything else -> -1 (not "no connection").
+  static UntisException restError(int status, Object? body) {
+    final msg = parseRestErrorMessage(body) ?? 'HTTP $status';
+    final code = switch (status) {
+      403 => UntisException.noRight,
+      401 => -8520,
+      _ => -1,
+    };
+    return UntisException(code, msg);
   }
 }

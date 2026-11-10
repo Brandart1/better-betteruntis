@@ -8,6 +8,8 @@ library;
 
 import 'dart:async';
 
+import '../core/absence_details.dart';
+import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
 
@@ -26,7 +28,7 @@ import '../core/models.dart';
 /// Search rules: queries shorter than 3 chars or matching more than
 /// [maxResults] schools -> [UntisException.tooManyResults]; query `offline`
 /// -> network error.
-class FakeUntisApi implements UntisApi {
+class FakeUntisApi implements FullUntisApi {
   FakeUntisApi({this.latency = const Duration(milliseconds: 400)});
 
   /// Artificial delay for every call. Use [Duration.zero] in widget tests.
@@ -201,7 +203,8 @@ class FakeUntisApi implements UntisApi {
     return parts.isEmpty ? username : parts.join(' ');
   }
 
-  static final demoMasterData = MasterData(
+  static final demoMasterData = MasterDataWithLookups(
+    lookups: demoLookups,
     timestamp: 1700000000000,
     elements: const [
       MasterElement(
@@ -378,6 +381,257 @@ class FakeUntisApi implements UntisApi {
     required TimetableTarget target,
     required DateTime weekStart,
   }) async {}
+
+  // ---- Info center demo data --------------------------------------------
+
+  static const demoLookups = AbsenceLookups(
+    reasons: {1: 'Krankheit', 2: 'Arzttermin', 3: 'Familiäre Gründe'},
+    statuses: {1: 'entschuldigt', 2: 'nicht entschuldigt', 3: 'offen'},
+  );
+
+  static DateTime _day(DateTime d, int plus) =>
+      DateTime(d.year, d.month, d.day + plus);
+
+  @override
+  Future<List<HomeworkItem>> homework({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required TimetableTarget target,
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    await _delay();
+    const plan = [
+      (21, 11, 'Arbeitsblatt Bruchrechnung, Aufgaben 1–6'),
+      (22, 12, 'Kapitel 3 lesen und zusammenfassen'),
+      (23, 13, 'Vocabulary unit 4, p. 58'),
+      (24, 11, 'Versuchsprotokoll fertigstellen'),
+    ];
+    final items = <HomeworkItem>[];
+    for (var i = 0, off = 0; _day(start, off + 2).compareTo(end) <= 0; i++) {
+      final p = plan[i % plan.length];
+      items.add(
+        HomeworkItem(
+          id: 500 + i,
+          lessonId: p.$1,
+          assignedOn: _day(start, off),
+          dueOn: _day(start, off + 2),
+          text: p.$3,
+          remark: i == 1 ? 'Mit Quellenangabe' : '',
+          completed: i == 0,
+          subjectId: p.$1,
+          teacherIds: [p.$2],
+          klassenIds: const [1],
+        ),
+      );
+      off += 3;
+    }
+    return items;
+  }
+
+  @override
+  Future<List<ExamItem>> exams({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required TimetableTarget target,
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    await _delay();
+    const plan = [
+      (21, 'Klassenarbeit', 'Bruchrechnung', 31),
+      (23, 'Test', 'Unit 3 & 4', 32),
+      (24, 'Klassenarbeit', 'Mechanik', 33),
+    ];
+    final items = <ExamItem>[];
+    for (var i = 0, off = 4; _day(start, off).compareTo(end) <= 0; i++) {
+      final p = plan[i % plan.length];
+      final s = _day(start, off).add(const Duration(hours: 8));
+      items.add(
+        ExamItem(
+          id: 700 + i,
+          start: s,
+          end: s.add(const Duration(minutes: 90)),
+          examType: p.$2,
+          name: p.$3,
+          text: i == 0 ? 'Taschenrechner erlaubt' : '',
+          subjectId: p.$1,
+          klassenIds: const [1],
+          roomIds: [p.$4],
+          teacherIds: const [11],
+        ),
+      );
+      off += 9;
+    }
+    return items;
+  }
+
+  @override
+  Future<List<RawAbsence>> rawAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    await _delay();
+    final items = <RawAbsence>[];
+    for (var i = 0, off = 2; _day(start, off).compareTo(end) <= 0; i++) {
+      final s = _day(
+        start,
+        off,
+      ).add(Duration(hours: 8, minutes: i.isEven ? 0 : 50));
+      items.add(
+        RawAbsence(
+          id: 900 + i,
+          start: s,
+          end: s.add(Duration(minutes: i.isEven ? 45 * 6 : 45)),
+          excused: i != 1,
+          reasonId: 1 + i % 3,
+          text: i == 2 ? 'Bescheinigung liegt vor' : '',
+          excuseStatusId: i == 1 ? 3 : 1,
+        ),
+      );
+      off += 11;
+    }
+    return items.reversed.toList();
+  }
+
+  @override
+  Future<AbsenceLookups> absenceLookups({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    await _delay();
+    return demoLookups;
+  }
+
+  @override
+  Future<List<AbsenceItem>> absences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required DateTime start,
+    required DateTime end,
+  }) async => [
+    for (final a in await rawAbsences(
+      host: host,
+      school: school,
+      auth: auth,
+      start: start,
+      end: end,
+    ))
+      a.resolve(demoLookups),
+  ];
+
+  @override
+  Future<List<OfficeHourItem>> officeHours({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int klasseId,
+    required DateTime start,
+  }) async {
+    await _delay();
+    final monday = _day(start, -(start.weekday - 1));
+    OfficeHourItem at(int id, int day, int h, String t, String r, String mail) {
+      final s = _day(monday, day).add(Duration(hours: h));
+      return OfficeHourItem(
+        id: id,
+        start: s,
+        end: s.add(const Duration(minutes: 45)),
+        teacherName: t,
+        rooms: r,
+        email: mail,
+        registrationPossible: id != 3,
+        registered: id == 2,
+      );
+    }
+
+    return [
+      at(1, 0, 10, 'Anna Müller', 'R101', 'a.mueller@example.invalid'),
+      at(2, 2, 11, 'Jonas Schmidt', 'R204', 'j.schmidt@example.invalid'),
+      at(3, 3, 13, 'Lea Weber', 'Lehrerzimmer', ''),
+    ];
+  }
+
+  @override
+  Future<List<InboxMessage>> inbox({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    await _delay();
+    final now = DateTime.now();
+    return [
+      for (final m in _demoMessages)
+        InboxMessage(
+          id: m.id,
+          subject: m.subject,
+          preview: m.preview,
+          sender: m.sender,
+          sentAt: now.subtract(m.ago),
+          isRead: m.id != 1,
+          hasAttachments: m.id == 2,
+        ),
+    ];
+  }
+
+  @override
+  Future<InboxMessageDetail> inboxMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) async {
+    await _delay();
+    final m = _demoMessages.where((m) => m.id == id).firstOrNull;
+    if (m == null) {
+      throw const UntisException(-1, 'NOT_FOUND');
+    }
+    return InboxMessageDetail(
+      id: m.id,
+      subject: m.subject,
+      bodyHtml: '<p>${m.preview}</p><p>Viele Grüße<br>${m.sender}</p>',
+      sender: m.sender,
+      sentAt: DateTime.now().subtract(m.ago),
+      attachments: m.id == 2
+          ? const [
+              (
+                name: 'Elternbrief.pdf',
+                url: 'https://example.invalid/elternbrief.pdf',
+              ),
+            ]
+          : const [],
+    );
+  }
+
+  static const _demoMessages = [
+    (
+      id: 1,
+      subject: 'Wandertag am Freitag',
+      preview: 'Bitte denkt an festes Schuhwerk und Verpflegung.',
+      sender: 'Anna Müller',
+      ago: Duration(hours: 3),
+    ),
+    (
+      id: 2,
+      subject: 'Elternabend',
+      preview: 'Die Einladung zum Elternabend findet ihr im Anhang.',
+      sender: 'Sekretariat',
+      ago: Duration(days: 2),
+    ),
+    (
+      id: 3,
+      subject: 'Physik-AG',
+      preview: 'Die AG beginnt ab nächster Woche um 14:00 Uhr.',
+      sender: 'Jonas Schmidt',
+      ago: Duration(days: 9),
+    ),
+  ];
 }
 
 /// [AccountRepository] kept in memory. Streams are broadcast and emit the

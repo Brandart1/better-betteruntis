@@ -27,6 +27,12 @@ class AppDrawer extends StatelessWidget {
           onTap: () => Navigator.of(context).pop(),
         ),
         ListTile(
+          leading: const Icon(Icons.inbox_outlined),
+          title: const Text('Info center'),
+          subtitle: const Text('Messages, homework, exams'),
+          onTap: () => go('/info'),
+        ),
+        ListTile(
           leading: const Icon(Icons.search),
           title: const Text('Browse timetables'),
           subtitle: const Text('Classes, teachers, rooms, subjects'),
