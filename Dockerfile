@@ -7,6 +7,8 @@
 
 ARG FLUTTER_VERSION=3.47.9
 ARG DART_VERSION=3.13.7
+# Release channel baked into the web app: alpha keeps the Debug screen.
+ARG BBU_CHANNEL=beta
 
 # ---------------------------------------------------------------------------
 # Stage 1: build the Flutter web app.
@@ -18,6 +20,7 @@ ARG DART_VERSION=3.13.7
 # ---------------------------------------------------------------------------
 FROM --platform=$BUILDPLATFORM debian:trixie-slim AS web
 ARG FLUTTER_VERSION
+ARG BBU_CHANNEL
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl git unzip xz-utils \
@@ -38,7 +41,8 @@ COPY pubspec.yaml pubspec.lock ./
 RUN flutter pub get
 COPY . .
 RUN flutter pub get \
- && flutter build web --release --no-web-resources-cdn
+ && flutter build web --release --no-web-resources-cdn \
+      --dart-define=BBU_CHANNEL=${BBU_CHANNEL}
 
 # ---------------------------------------------------------------------------
 # Stage 2: compile the Dart server to a native executable.

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/build_channel.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../accounts/manage_accounts_screen.dart';
@@ -92,7 +93,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/settings',
         builder: (_, _) => const TimetableSettingsScreen(),
       ),
-      GoRoute(path: '/debug', builder: (_, _) => const DebugScreen()),
+      // Debug screen (raw API data) only in dev/alpha builds.
+      if (debugToolsEnabled)
+        GoRoute(path: '/debug', builder: (_, _) => const DebugScreen()),
     ],
   );
   ref.onDispose(router.dispose);

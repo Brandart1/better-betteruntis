@@ -23,7 +23,7 @@ docs/        API.md (protocol notes), FEATURES.md (parity checklist)
 - Parse JSON tolerantly. Unknown enum values, missing fields or wrong types fall back to defaults instead of throwing.
 - Accounts are independent: each has its own host, school, secret, master data and cache. One `UntisApi` instance serves all of them.
 - Secrets live only in secure storage. Passwords are never stored.
-- Clean-room rewrite: don't copy code from BetterUntis (GPL). The project is MIT licensed.
+- Clean-room rewrite: don't copy code from BetterUntis. The project is licensed under GPLv3 (it was MIT up to 0.3.x).
 
 ## Versioning
 `pubspec.yaml` `version: X.Y.Z+N` is the single source of truth: X.Y.Z becomes

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/build_channel.dart';
 import '../../core/providers.dart';
 import '../accounts/account_switcher.dart';
 import '../accounts/child_switcher.dart';
@@ -61,12 +62,14 @@ class AppDrawer extends StatelessWidget {
           title: const Text('Settings'),
           onTap: () => go('/settings'),
         ),
-        const Divider(indent: 28, endIndent: 28),
-        ListTile(
-          leading: const Icon(Icons.bug_report_outlined),
-          title: const Text('Debug: raw API data'),
-          onTap: () => go('/debug'),
-        ),
+        if (debugToolsEnabled) ...[
+          const Divider(indent: 28, endIndent: 28),
+          ListTile(
+            leading: const Icon(Icons.bug_report_outlined),
+            title: const Text('Debug: raw API data'),
+            onTap: () => go('/debug'),
+          ),
+        ],
       ],
     );
   }

@@ -61,7 +61,7 @@ Legend: `[ ]` todo · `[~]` partial · `[x]` done · **P** = polish / beyond par
 - [ ] Styling: all item colors, reset colors, theme color / dynamic color, dark mode auto/light/dark, OLED black
 - [ ] Timetable options (see above)
 - [ ] Notifications options
-- [ ] About: version, repo, license (MIT), libraries
+- [ ] About: version, repo, license (GPLv3), libraries
 - [ ] Opt-in crash reporting (default **off**, unlike BetterUntis)
 - [ ] **P** Backup/export & import of profiles + settings
 

@@ -15,6 +15,8 @@ permissions:
 env:
   FLUTTER_VERSION: "3.47.9"
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  # alpha builds keep the Debug screen; beta/stable hide it (lib/core/build_channel.dart).
+  CHANNEL: ${{ contains(github.event.inputs.tag || github.ref_name, '-alpha') && 'alpha' || (contains(github.event.inputs.tag || github.ref_name, '-beta') && 'beta' || 'stable') }}
 
 jobs:
   version:
@@ -67,7 +69,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: flutter build apk --release
+        run: flutter build apk --release --dart-define=BBU_CHANNEL=${{ env.CHANNEL }}
       - name: Verify release signature
         run: |
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
@@ -94,7 +96,7 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
-      - run: flutter build ios --release --no-codesign
+      - run: flutter build ios --release --no-codesign --dart-define=BBU_CHANNEL=${{ env.CHANNEL }}
       - name: Package IPA
         run: |
           mkdir -p Payload
@@ -120,7 +122,7 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
-      - run: flutter build web --release --no-web-resources-cdn
+      - run: flutter build web --release --no-web-resources-cdn --dart-define=BBU_CHANNEL=${{ env.CHANNEL }}
       - name: Server binary (linux x64)
         working-directory: server
         run: |
