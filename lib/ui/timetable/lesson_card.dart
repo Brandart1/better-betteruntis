@@ -7,6 +7,7 @@ import '../../core/settings.dart';
 import 'lesson_layout.dart';
 import 'lesson_style.dart';
 import 'timetable_utils.dart';
+import 'viewing_target.dart';
 
 /// A rounded lesson card. All text is one [Text.rich] (one paragraph per
 /// card) so the grid stays cheap to lay out; overflowing text is clipped.
@@ -46,7 +47,9 @@ class LessonCard extends ConsumerWidget {
       child: Align(
         alignment: centered ? Alignment.center : AlignmentDirectional.topStart,
         child: Text.rich(
-          TextSpan(children: _spans(fg, style, settings)),
+          TextSpan(
+            children: _spans(fg, style, settings, ViewingTarget.of(context)),
+          ),
           style: TextStyle(
             color: fg,
             fontSize: settings.detailFontSize,
@@ -86,6 +89,7 @@ class LessonCard extends ConsumerWidget {
     Color fg,
     LessonStyle style,
     TimetableSettings settings,
+    TimetableTarget? viewing,
   ) {
     final p = block.first;
     final subjects = p.ofType(ElementType.subject).toList();
@@ -137,15 +141,26 @@ class LessonCard extends ConsumerWidget {
         ),
       );
     }
-    // Teachers first: they must never be clipped away (BetterUntis bug).
-    line(elementSpans(names, teachers, long: detailed, oldStyle: oldStyle));
-    line(elementSpans(names, rooms, long: detailed, oldStyle: oldStyle));
+    final classes = p.ofType(ElementType.klasse).toList();
+    final classLine = elementSpans(names, classes, oldStyle: oldStyle);
+    final viewType = viewing?.type;
+    if (viewType == ElementType.room) {
+      // Room timetable: who is there. No class if the room is struck through.
+      line(elementSpans(names, teachers, long: detailed, oldStyle: oldStyle));
+      if (!roomVacated(p, viewing!.id)) line(classLine);
+    } else if (viewType == ElementType.teacher) {
+      // Teacher timetable: where and with whom.
+      line(classLine);
+      line(elementSpans(names, rooms, long: detailed, oldStyle: oldStyle));
+    } else {
+      // Teachers first: they must never be clipped away (BetterUntis bug).
+      line(elementSpans(names, teachers, long: detailed, oldStyle: oldStyle));
+      line(elementSpans(names, rooms, long: detailed, oldStyle: oldStyle));
+      if (detailed) {
+        line(classLine, st: TextStyle(color: fg.withValues(alpha: 0.75)));
+      }
+    }
     if (detailed) {
-      final classes = p.ofType(ElementType.klasse);
-      line(
-        elementSpans(names, classes, oldStyle: oldStyle),
-        st: TextStyle(color: fg.withValues(alpha: 0.75)),
-      );
       final texts = {
         for (final q in block.periods) ...[
           q.substitutionText,

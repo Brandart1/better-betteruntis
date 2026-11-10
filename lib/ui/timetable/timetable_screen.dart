@@ -11,6 +11,7 @@ import 'lesson_layout.dart';
 import 'open_element.dart';
 import 'timetable_providers.dart';
 import 'timetable_utils.dart';
+import 'viewing_target.dart';
 import 'week_data_view.dart';
 import 'week_grid.dart';
 
@@ -380,36 +381,39 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
       },
     );
 
-    return PopScope(
-      canPop: day == null,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _exitDay();
-      },
-      child: Scaffold(
-        drawer: widget.drawer,
-        appBar: AppBar(
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              title,
-              if (element != null)
-                Text(element.longName, style: theme.textTheme.labelMedium),
+    return ViewingTarget(
+      target: widget.target,
+      child: PopScope(
+        canPop: day == null,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _exitDay();
+        },
+        child: Scaffold(
+          drawer: widget.drawer,
+          appBar: AppBar(
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                title,
+                if (element != null)
+                  Text(element.longName, style: theme.textTheme.labelMedium),
+              ],
+            ),
+            actions: [
+              IconButton(
+                tooltip: 'Today',
+                onPressed: atToday ? null : () => _goToDate(DateTime.now()),
+                icon: const Icon(Icons.today),
+              ),
+              IconButton(
+                tooltip: 'Jump to date',
+                onPressed: _pickDate,
+                icon: const Icon(Icons.calendar_month),
+              ),
             ],
           ),
-          actions: [
-            IconButton(
-              tooltip: 'Today',
-              onPressed: atToday ? null : () => _goToDate(DateTime.now()),
-              icon: const Icon(Icons.today),
-            ),
-            IconButton(
-              tooltip: 'Jump to date',
-              onPressed: _pickDate,
-              icon: const Icon(Icons.calendar_month),
-            ),
-          ],
+          body: body,
         ),
-        body: body,
       ),
     );
   }

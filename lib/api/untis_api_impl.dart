@@ -166,6 +166,22 @@ class UntisApiImpl implements UntisApi {
     return token;
   }
 
+  /// Working `format` id per `host|school|timetableType`. The id is
+  /// school-specific: e.g. 4 works for MY_TIMETABLE while STANDARD (class)
+  /// timetables answer 404 "Timetable format not found". `null` value = no
+  /// format works; REST is skipped for that key this session.
+  final _formats = <String, Future<int?>>{};
+
+  /// Format ids tried in order, the default first.
+  static List<int> formatCandidates(String timetableType) => [
+    if (timetableType == 'MY_TIMETABLE') 4,
+    for (var i = 1; i <= 12; i++)
+      if (!(timetableType == 'MY_TIMETABLE' && i == 4)) i,
+  ];
+
+  static bool _isFormatNotFound(int? status, String body) =>
+      status == 404 && body.toLowerCase().contains('format not found');
+
   Future<List<RestEntry>> _restEntries({
     required String host,
     required String school,
@@ -175,28 +191,58 @@ class UntisApiImpl implements UntisApi {
     required DateTime end,
   }) async {
     final token = await _token(host, school, auth);
-    final own = target.type == ElementType.student;
-    final url = 'https://$host/WebUntis/api/rest/view/v1/timetable/entries'
-        '?start=${formatDate(start)}&end=${formatDate(end)}&format=4'
-        '&resourceType=${target.type.apiName}&resources=${target.id}'
-        '&periodTypes=&timetableType=${own ? 'MY_TIMETABLE' : 'STANDARD'}';
-    final resp = await _dio.get<String>(
-      url,
-      options: Options(
-        responseType: ResponseType.plain,
-        validateStatus: (_) => true,
-        headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
-      ),
-    );
-    final raw = resp.data ?? '';
-    _rpc.record(
-      'REST timetable/entries ${target.type.apiName}#${target.id} '
-      '${formatDate(start)}..${formatDate(end)} [HTTP ${resp.statusCode}]',
-      raw,
-    );
-    if ((resp.statusCode ?? 0) == 401) _tokens.remove('$host|$school|${auth.username}');
+    final type = target.type == ElementType.student ? 'MY_TIMETABLE' : 'STANDARD';
+
+    Future<Response<String>> get(int format) async {
+      final url = 'https://$host/WebUntis/api/rest/view/v1/timetable/entries'
+          '?start=${formatDate(start)}&end=${formatDate(end)}&format=$format'
+          '&resourceType=${target.type.apiName}&resources=${target.id}'
+          '&periodTypes=&timetableType=$type';
+      final resp = await _dio.get<String>(
+        url,
+        options: Options(
+          responseType: ResponseType.plain,
+          validateStatus: (_) => true,
+          headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
+        ),
+      );
+      _rpc.record(
+        'REST timetable/entries ${target.type.apiName}#${target.id} '
+        '${formatDate(start)}..${formatDate(end)} format=$format [HTTP ${resp.statusCode}]',
+        resp.data ?? '',
+      );
+      if (resp.statusCode == 401) _tokens.remove('$host|$school|${auth.username}');
+      return resp;
+    }
+
+    final key = '$host|$school|$type';
+    Response<String>? first;
+    // Only one request discovers the format; concurrent ones wait for it.
+    final format = await (_formats[key] ??= () async {
+      for (final f in formatCandidates(type)) {
+        final r = await get(f);
+        if (_isFormatNotFound(r.statusCode, r.data ?? '')) continue;
+        if ((r.statusCode ?? 0) >= 300) {
+          // Some other failure (permissions, auth): don't cache a verdict.
+          _formats.remove(key);
+          first = r;
+          return null;
+        }
+        first = r;
+        return f;
+      }
+      return null; // No format works: skip REST for this key this session.
+    }());
+    if (format == null) return const [];
+
+    // The discovering call already holds this target's response.
+    final resp = first ?? await get(format);
+    if (_isFormatNotFound(resp.statusCode, resp.data ?? '')) {
+      _formats.remove(key); // School changed its formats; rediscover next time.
+      return const [];
+    }
     if ((resp.statusCode ?? 0) >= 300) return const [];
-    return parseRestEntries(jsonDecode(raw));
+    return parseRestEntries(jsonDecode(resp.data ?? ''));
   }
 
   @override
