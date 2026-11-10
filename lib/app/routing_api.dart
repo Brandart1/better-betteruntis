@@ -62,6 +62,21 @@ class RoutingUntisApi implements UntisApi {
   }) => _for(host).messagesOfDay(host: host, school: school, auth: auth, date: date);
 
   @override
+  Future<void> probeTeacherSources({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required TimetableTarget target,
+    required DateTime weekStart,
+  }) => _for(host).probeTeacherSources(
+    host: host,
+    school: school,
+    auth: auth,
+    target: target,
+    weekStart: weekStart,
+  );
+
+  @override
   List<({String method, DateTime at, String json})> get debugLog =>
       [...real.debugLog, ...demo.debugLog]..sort((a, b) => a.at.compareTo(b.at));
 }

@@ -216,6 +216,8 @@ class TimetableRepositoryImpl implements TimetableRepository {
 
   Future<void> dispose() => _errors.close();
 
+  /// Code 0 means "network" to the UI, so internal failures must not use it —
+  /// otherwise a bug in our code shows up as "No connection".
   static UntisException _wrap(Object e) =>
-      e is UntisException ? e : UntisException(0, e.toString());
+      e is UntisException ? e : UntisException(-1, 'Internal error: $e');
 }

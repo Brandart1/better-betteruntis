@@ -369,6 +369,15 @@ class FakeUntisApi implements UntisApi {
 
   @override
   List<({String method, DateTime at, String json})> get debugLog => const [];
+
+  @override
+  Future<void> probeTeacherSources({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required TimetableTarget target,
+    required DateTime weekStart,
+  }) async {}
 }
 
 /// [AccountRepository] kept in memory. Streams are broadcast and emit the

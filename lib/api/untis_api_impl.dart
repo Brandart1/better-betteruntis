@@ -9,18 +9,24 @@ import 'json_rpc.dart';
 import 'parsers.dart';
 
 class UntisApiImpl implements UntisApi {
-  UntisApiImpl({Dio? dio, DateTime Function()? now, this.isIos = false})
-    : _rpc = JsonRpcClient(
-        dio:
-            dio ??
+  UntisApiImpl({Dio? dio, DateTime Function()? now, bool isIos = false})
+    : this._(
+        dio ??
             Dio(
               BaseOptions(
                 connectTimeout: const Duration(seconds: 15),
                 receiveTimeout: const Duration(seconds: 30),
               ),
             ),
-        now: now,
+        now,
+        isIos,
       );
+
+  UntisApiImpl._(Dio dio, DateTime Function()? now, this.isIos)
+    : _dio = dio,
+      _rpc = JsonRpcClient(dio: dio, now: now);
+
+  final Dio _dio;
 
   static const schoolSearchUrl =
       'https://schoolsearch.webuntis.com/schoolquery2';
@@ -127,5 +133,67 @@ class UntisApiImpl implements UntisApi {
       {'date': formatDate(date), 'auth': _rpc.auth(auth)},
     );
     return parseMessages(result);
+  }
+
+  @override
+  Future<void> probeTeacherSources({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required TimetableTarget target,
+    required DateTime weekStart,
+  }) async {
+    final start = formatDate(weekStart);
+    final end = formatDate(weekStart.add(const Duration(days: 6)));
+    final base = 'https://$host/WebUntis';
+
+    String? token;
+    try {
+      final r = await _rpc.call(rpcUrl(host, school), 'getAuthToken', {
+        'auth': _rpc.auth(auth),
+      });
+      token = r is Map ? r['token']?.toString() : r?.toString();
+    } catch (_) {
+      // Recorded in the log by the transport; continue with the other probes.
+    }
+
+    final probes = <(String, String)>[
+      (
+        'REST timetable/entries',
+        '$base/api/rest/view/v1/timetable/entries?start=$start&end=$end'
+            '&format=4&resourceType=${target.type.apiName}'
+            '&resources=${target.id}&periodTypes=&timetableType=MY_TIMETABLE',
+      ),
+      (
+        'REST timetable/filter',
+        '$base/api/rest/view/v1/timetable/filter?resourceType=${target.type.apiName}'
+            '&timetableType=STANDARD',
+      ),
+      (
+        'public weekly/data',
+        '$base/api/public/timetable/weekly/data?elementType=${target.type.code}'
+            '&elementId=${target.id}&date=$start&formatId=1',
+      ),
+      ('REST app/data', '$base/api/rest/view/v1/app/data'),
+    ];
+    for (final (label, url) in probes) {
+      try {
+        final resp = await _dio.get<String>(
+          url,
+          options: Options(
+            responseType: ResponseType.plain,
+            validateStatus: (_) => true,
+            headers: {
+              'Accept': 'application/json',
+              if (token != null) 'Authorization': 'Bearer $token',
+              'Tenant-Id': school,
+            },
+          ),
+        );
+        _rpc.record('PROBE $label [HTTP ${resp.statusCode}]', resp.data ?? '');
+      } on DioException catch (e) {
+        _rpc.record('PROBE $label [no response]', '{"_requestFailed": "${e.type.name}"}');
+      }
+    }
   }
 }

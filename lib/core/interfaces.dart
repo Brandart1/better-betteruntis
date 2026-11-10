@@ -118,6 +118,17 @@ abstract interface class UntisApi {
     required DateTime date,
   });
 
+  /// Debug only: requests endpoints that might carry teacher names (the
+  /// JSON-RPC timetable omits teachers for some schools) and records their raw
+  /// responses in [debugLog]. Never throws.
+  Future<void> probeTeacherSources({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required TimetableTarget target,
+    required DateTime weekStart,
+  });
+
   /// Raw JSON of the last N responses, for the debug screen.
   List<({String method, DateTime at, String json})> get debugLog;
 }

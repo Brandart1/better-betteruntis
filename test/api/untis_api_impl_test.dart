@@ -235,7 +235,7 @@ void main() {
       expect(a.requests.single.uri.toString(), UntisApiImpl.schoolSearchUrl);
       await api.searchSchools('demo');
       expect(a.requests.last.params, {'search': 'demo'});
-      expect(api.debugLog.map((e) => e.method), [
+      expect(api.debugLog.map((e) => e.method.split(' ').first), [
         'searchSchool',
         'searchSchool',
       ]);

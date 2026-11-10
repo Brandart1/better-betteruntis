@@ -60,13 +60,15 @@ class JsonRpcClient {
         ),
       );
       raw = resp.data ?? '';
-      _record(method, raw);
+      _record(_label(method, params, resp.statusCode), raw);
       final status = resp.statusCode ?? 0;
       if (raw.trim().isEmpty && (status < 200 || status >= 300)) {
         throw UntisException(0, 'HTTP $status');
       }
     } on DioException catch (e) {
-      throw UntisException(0, 'Network error: ${e.message ?? e.type.name}');
+      final msg = 'Network error: ${e.message ?? e.type.name}';
+      _record(_label(method, params, null), jsonEncode({'_requestFailed': msg}));
+      throw UntisException(0, msg);
     }
 
     final Object? decoded;
@@ -99,6 +101,20 @@ class JsonRpcClient {
     }
     return decoded['result'];
   }
+
+  /// "getTimetable2017 STUDENT#123 2026-11-09..2026-11-15 [HTTP 200]" — enough
+  /// to tell entries apart, without credentials.
+  static String _label(String method, Map<String, Object?> p, int? status) {
+    final parts = <String>[method];
+    if (p['type'] != null || p['id'] != null) parts.add('${p['type']}#${p['id']}');
+    if (p['startDate'] != null) parts.add('${p['startDate']}..${p['endDate']}');
+    if (p['date'] != null) parts.add('${p['date']}');
+    parts.add(status == null ? '[no response]' : '[HTTP $status]');
+    return parts.join(' ');
+  }
+
+  /// Records a non-JSON-RPC request (e.g. REST probes) in the debug log.
+  void record(String label, String raw) => _record(label, raw);
 
   void _record(String method, String raw) {
     _log.addLast((method: method, at: _now(), json: raw));
