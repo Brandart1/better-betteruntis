@@ -24,7 +24,9 @@ import '../core/models.dart';
 /// * anonymous login at a school whose loginName contains `private` ->
 ///   [UntisException.noPublicAccess]
 /// * username `parent` -> a parent account (no own timetable) with the two
-///   [demoChildren]; `parent-nochild` -> a parent account without children
+///   [demoChildren]; `parent-nochild` -> a parent account without children;
+///   `parent-noreport` -> like `parent`, but the school doesn't allow
+///   reporting absences
 /// * anything else (e.g. `demo`/`demo`) succeeds.
 ///
 /// Search rules: queries shorter than 3 chars or matching more than
@@ -195,7 +197,9 @@ class FakeUntisApi implements FullUntisApi {
         klassenIds: const [],
         rights: const {},
         masterData: demoMasterData,
-        children: username.toLowerCase() == 'parent' ? demoChildren : const [],
+        children: username.toLowerCase() == 'parent-nochild'
+            ? const []
+            : demoChildren,
       );
     }
     return LoginResult(
@@ -518,7 +522,87 @@ class FakeUntisApi implements FullUntisApi {
       );
       off += 11;
     }
+    for (final r in reported) {
+      if (studentId != null && r.studentId != studentId) continue;
+      if (r.absence.start.isBefore(start) ||
+          !r.absence.start.isBefore(_day(end, 1))) {
+        continue;
+      }
+      items.add(r.absence);
+    }
+    items.sort((a, b) => a.start.compareTo(b.start));
     return items.reversed.toList();
+  }
+
+  /// Absences reported via [reportAbsence] (demo mode keeps them in memory).
+  final reported = <({int studentId, RawAbsence absence})>[];
+
+  /// When set, [reportAbsence] throws it (tests).
+  UntisException? reportError;
+
+  static bool _mayReport(UntisCredentials auth) =>
+      auth.username.toLowerCase() != 'parent-noreport';
+
+  @override
+  Future<AbsenceReportOptions> absenceReportOptions({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int studentId,
+  }) async {
+    await _delay();
+    return AbsenceReportOptions(
+      reasons: [
+        for (final e in demoLookups.reasons.entries)
+          AbsenceReason(id: e.key, name: e.value),
+      ],
+      defaultReasonId: 1,
+      allowed: _mayReport(auth),
+    );
+  }
+
+  @override
+  Future<void> reportAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required AbsenceReport report,
+  }) async {
+    await _delay();
+    if (reportError case final e?) throw e;
+    if (!_mayReport(auth)) {
+      throw const UntisException(
+        UntisException.noRight,
+        "Your school doesn't allow reporting absences for this account.",
+      );
+    }
+    if (!report.end.isAfter(report.start)) {
+      throw const UntisException(-1, 'The end must be after the start.');
+    }
+    final clash = reported.any(
+      (r) =>
+          r.studentId == report.studentId &&
+          r.absence.start.isBefore(report.end) &&
+          report.start.isBefore(r.absence.end),
+    );
+    if (clash) {
+      throw const UntisException(
+        -1,
+        'Not saved: it overlaps an existing absence or entry.',
+      );
+    }
+    reported.add((
+      studentId: report.studentId,
+      absence: RawAbsence(
+        id: 5000 + reported.length,
+        start: report.start,
+        end: report.end,
+        excused: false,
+        reasonId: report.reasonId,
+        text: report.text,
+        excuseStatusId: 3,
+      ),
+    ));
   }
 
   @override

@@ -43,6 +43,7 @@ Legend: `[ ]` todo · `[~]` partial · `[x]` done · **P** = polish / beyond par
 - [ ] Messages of the day + inbox, attachments, clickable links
 - [ ] Events: exams, homework
 - [ ] Absences with filter (only unexcused, reverse, time range: school year / 7 / 14 / 30 / 90 days)
+- [ ] Parents: report an absence for a child (reason, from/until, note); endpoint assumed, see API.md
 - [ ] Office hours
 
 ## Free rooms

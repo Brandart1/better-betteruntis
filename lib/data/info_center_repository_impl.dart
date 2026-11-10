@@ -307,6 +307,88 @@ class InfoCenterRepositoryImpl implements InfoCenterRepository {
     return [for (final r in raw) r.resolve(lookups)];
   }
 
+  // ---- Reporting absences ----------------------------------------------------
+
+  AbsenceReportApi _reportApi() {
+    final Object a = api;
+    if (a is AbsenceReportApi) return a;
+    throw const UntisException(-1, 'Reporting absences is not supported.');
+  }
+
+  Future<List<AbsenceReason>> _masterDataReasons(String accountId) async {
+    final lookups = await _master.loadLookups(accountId);
+    return [
+      for (final e in lookups.reasons.entries)
+        if (e.value.trim().isNotEmpty && e.value.trim() != '---')
+          AbsenceReason(id: e.key, name: e.value.trim()),
+    ]..sort((x, y) => x.name.toLowerCase().compareTo(y.name.toLowerCase()));
+  }
+
+  /// The API's options; reasons missing there come from the persisted
+  /// master-data `absenceReasons`. If the API call fails but master data has
+  /// reasons, those are returned with the failure as
+  /// [AbsenceReportOptions.notice].
+  @override
+  Future<AbsenceReportOptions> absenceReportOptions(
+    Account a,
+    int studentId,
+  ) async {
+    if (a.anonymous) {
+      throw const UntisException(UntisException.noRight, 'Not signed in.');
+    }
+    final reportApi = _reportApi();
+    try {
+      final o = await reportApi.absenceReportOptions(
+        host: a.host,
+        school: a.school.loginName,
+        auth: await accounts.credentials(a.id),
+        studentId: studentId,
+      );
+      if (o.reasons.isNotEmpty) return o;
+      return AbsenceReportOptions(
+        reasons: await _masterDataReasons(a.id),
+        defaultReasonId: o.defaultReasonId,
+        allowed: o.allowed,
+        defaultStartMinutes: o.defaultStartMinutes,
+        defaultEndMinutes: o.defaultEndMinutes,
+        notice: o.notice,
+      );
+    } catch (e) {
+      final err = _wrap(e);
+      if (err.isNetwork || err.isTimeout) throw err;
+      final reasons = await _masterDataReasons(a.id);
+      if (reasons.isEmpty) throw err;
+      return AbsenceReportOptions(reasons: reasons, notice: err.message);
+    }
+  }
+
+  @override
+  Future<void> reportAbsence(Account a, AbsenceReport report) async {
+    if (a.anonymous) {
+      throw const UntisException(UntisException.noRight, 'Not signed in.');
+    }
+    final reportApi = _reportApi();
+    try {
+      await reportApi.reportAbsence(
+        host: a.host,
+        school: a.school.loginName,
+        auth: await accounts.credentials(a.id),
+        report: report,
+      );
+    } catch (e) {
+      throw _wrap(e);
+    }
+    await invalidateAbsences(a.id);
+  }
+
+  /// Drops every cached absence list of [accountId] (all children and
+  /// ranges), so the next subscription asks the server.
+  Future<void> invalidateAbsences(String accountId) =>
+      (db.delete(db.infoCache)..where(
+            (t) => t.accountId.equals(accountId) & t.key.like('absences|%'),
+          ))
+          .go();
+
   /// Office hours are always requested (even without a known class): for
   /// [Account.personalKlasseId] (own class, else the parent's selected
   /// child's class), else the class most common in the cached "My timetable"

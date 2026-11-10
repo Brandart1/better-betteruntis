@@ -94,6 +94,22 @@ Assumed (no real response seen yet):
 
 Client behaviour: "My timetable" is the own element when it is a timetable element (students, teachers — unchanged), else the selected child (first by default, switchable in the drawer, persisted per account), else a "no personal timetable" message pointing to Browse.
 
+## Reporting absences (parents)
+Parents report an absence for a child ("Abwesenheit melden") in the WebUntis web client; the school decides via rights whether that is allowed. No JSON-RPC method for this is known (`createImmediateAbsence2017` is the teacher's class-register call for one lesson, not this). We use the classic web endpoints instead.
+
+Seen in public community notes on the WebUntis web client (not yet against a real response from our app):
+- `GET /WebUntis/api/classreg/absences/meta` → `{data:{absenceReasons:[{id,name}], defaultAbsenceReason:{id}, defaultDate, defaultStartTime, defaultEndTime}}` (times as hhmm numbers, e.g. `750`).
+- `GET /WebUntis/api/classreg/absences/students?startDate=yyyymmdd&endDate=yyyymmdd&studentId=<id>&excuseStatusId=-1` → `{data:{absences:[…], absenceReasons, excuseStatuses, showCreateAbsence, …}}`. `showCreateAbsence` is the school's "may report" flag for this user.
+- `POST /WebUntis/api/classreg/absences/students/self` with JSON `{studentId, startDate, startTime, endDate, endTime, reasonId, text}`. Dates are yyyymmdd numbers, times hhmm numbers, `reasonId` -1 = none. Answer `{data:{result, conflicts:[…]}}`; saved only when `conflicts` is empty. Errors come as `{errors:[{code,title}]}`.
+- The browser sends these with its session cookie plus `X-CSRF-TOKEN` and `Tenant-Id`.
+
+Assumed (to be confirmed with a real parent account):
+- These endpoints also accept `Authorization: Bearer <getAuthToken JWT>` instead of the browser session. If they don't, the server answers with a redirect or a login page; our client then reports "The school's server didn't accept the app's sign-in for this function" (code `-8530`, internal).
+- For parents, `studentId` is the child's id from `userData.children`, and `.../students/self` is the right path (the web client uses the same absence module for students and parents).
+- The meta field names above; every field is optional in our parser. If the meta call fails, reasons come from the `absences/students` answer, else from master data `absenceReasons` (shown with a notice).
+
+Client behaviour: the Absences tab of parent accounts with children shows "Report absence". The form asks for the child (the selected one is the default), from/until (default: today, the whole school day from the time grid, else the server's default times, else 08:00 to 16:00), the reason and an optional note. If `showCreateAbsence` is false, the form says so and sending is disabled. HTTP 403 means no right. After a successful report every cached absence list of the account is dropped and reloaded.
+
 ## Office hours
 Assumed (no real response seen yet): `getOfficeHours2017 {klasseId, startDate, auth}`.
 - `klasseId`: the account's first `klassenIds` entry, else the parent's selected child's class, else the class that occurs most in the cached "My timetable" weeks, else `-1` (**assumed** to mean "all classes"). Some student accounts have empty `klassenIds` — before this the request was never sent at all.
@@ -101,7 +117,7 @@ Assumed (no real response seen yet): `getOfficeHours2017 {klasseId, startDate, a
 - Response: a list under `officeHours` (also accepted: top-level list, `officeHourList`, `items`). Per item: `startDateTime`/`endDateTime` (ISO or epoch ms) or `date`/`startDate` (yyyyMMdd int/string or ISO) plus `startTime`/`endTime` (hhmm int, `"1345"`, `"13:45"`, `"T13:45"`); teacher `displayNameTeacher`/`teacherName`/`teacher` (string or `{displayName|longName|name}`); rooms `displayNameRooms`/`rooms`/`roomName` (string or list); `email`, `phone`, `registrationPossible`, `registered`.
 
 ## Debug log
-Only responses are recorded, never requests (so no passwords, OTPs or secrets). `getAppSharedSecret` and `getAuthToken` results are replaced by their shape (`<redacted string, N chars>`). In `getUserData2017` responses, values of keys that look like credentials (`token`, `secret`, `password`, `otp`, `jwt`) are redacted. The latest `getUserData2017` response, a "userData only (master data left out)" copy of it, and the latest `getOfficeHours2017` response per `klasseId` stay in the log regardless of its 30-entry limit. The Debug screen menu can fetch both on demand.
+Only responses are recorded, never requests (so no passwords, OTPs or secrets). The one exception is the body of the absence report (`REST classreg absences/students/self request body`), which has no credentials in it. Redirect answers are logged with their target URL, without its query or `;jsessionid`. Bearer tokens are never logged. `getAppSharedSecret` and `getAuthToken` results are replaced by their shape (`<redacted string, N chars>`). In `getUserData2017` responses, values of keys that look like credentials (`token`, `secret`, `password`, `otp`, `jwt`) are redacted. The latest `getUserData2017` response, a "userData only (master data left out)" copy of it, and the latest `getOfficeHours2017` response per `klasseId` stay in the log regardless of its 30-entry limit. The Debug screen menu can fetch both on demand.
 
 ## Master data
 - `timeStamp`

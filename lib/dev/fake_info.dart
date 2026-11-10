@@ -143,6 +143,60 @@ class FakeInfoCenterRepository implements InfoCenterRepository {
 
   /// `onlyMyClass` of the most recent [officeHours] call.
   bool? lastOfficeHoursOnlyMyClass;
+
+  // ---- Reporting absences ----
+
+  /// Returned by [absenceReportOptions]; [reportOptionsError] wins.
+  AbsenceReportOptions reportOptions = const AbsenceReportOptions(
+    reasons: [
+      AbsenceReason(id: 1, name: 'Krankheit'),
+      AbsenceReason(id: 2, name: 'Arzttermin'),
+      AbsenceReason(id: 3, name: 'Familiäre Gründe'),
+    ],
+    defaultReasonId: 1,
+    allowed: true,
+  );
+  UntisException? reportOptionsError;
+
+  /// When set, [reportAbsence] throws it.
+  UntisException? reportError;
+
+  /// Every successful [reportAbsence], in order.
+  final reports = <AbsenceReport>[];
+
+  /// Lets a test hold [reportAbsence] open (to see the progress state).
+  Completer<void>? reportGate;
+
+  @override
+  Future<AbsenceReportOptions> absenceReportOptions(Account a, int studentId) async {
+    if (latency > Duration.zero) await Future<void>.delayed(latency);
+    if (reportOptionsError case final e?) throw e;
+    return reportOptions;
+  }
+
+  @override
+  Future<void> reportAbsence(Account a, AbsenceReport report) async {
+    if (latency > Duration.zero) await Future<void>.delayed(latency);
+    if (reportGate case final g?) await g.future;
+    if (reportError case final e?) throw e;
+    reports.add(report);
+    final reason = reportOptions.reasons
+        .where((r) => r.id == report.reasonId)
+        .map((r) => r.name)
+        .firstOrNull;
+    absenceItems = [
+      AbsenceItem(
+        id: 9000 + reports.length,
+        start: report.start,
+        end: report.end,
+        excused: false,
+        reason: reason ?? '',
+        text: report.text,
+        excuseStatus: 'offen',
+      ),
+      ...absenceItems,
+    ];
+  }
 }
 
 // ---------------------------------------------------------------------------

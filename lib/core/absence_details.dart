@@ -114,6 +114,24 @@ abstract interface class AbsenceDetailsApi {
   });
 }
 
+/// Optional API capability: parents report an absence for a child.
+/// See docs/API.md "Reporting absences" for what is confirmed and assumed.
+abstract interface class AbsenceReportApi {
+  Future<AbsenceReportOptions> absenceReportOptions({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int studentId,
+  });
+
+  Future<void> reportAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required AbsenceReport report,
+  });
+}
+
 /// Everything the app's API object provides.
 abstract interface class FullUntisApi
-    implements UntisApi, InfoCenterApi, AbsenceDetailsApi {}
+    implements UntisApi, InfoCenterApi, AbsenceDetailsApi, AbsenceReportApi {}

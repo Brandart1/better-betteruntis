@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
+import 'absence_report_screen.dart';
 import 'absences_tab.dart';
 import 'exams_tab.dart';
 import 'homework_tab.dart';
@@ -71,8 +72,26 @@ class InfoCenterScreen extends ConsumerWidget {
     final showNav = tabs.length > 1;
     final title = showNav ? tab.label : 'Messages of the day';
 
+    final reportFab = tab == InfoTab.absences && canReportAbsences(account)
+        ? FloatingActionButton.extended(
+            key: const ValueKey('absences-report'),
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
+              if (await showAbsenceReportScreen(context, account)) {
+                ref.invalidate(absencesProvider);
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Absence reported')),
+                );
+              }
+            },
+            icon: const Icon(Icons.edit_calendar_outlined),
+            label: const Text('Report absence'),
+          )
+        : null;
+
     return Scaffold(
       appBar: AppBar(title: Text(title)),
+      floatingActionButton: reportFab,
       body: showNav && wide
           ? SafeArea(
               top: false,

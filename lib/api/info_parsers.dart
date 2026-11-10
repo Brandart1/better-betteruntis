@@ -398,3 +398,130 @@ String? parseRestErrorMessage(Object? raw) {
   if (code != null) return validation.isEmpty ? code : '$code: $validation';
   return validation.isEmpty ? null : validation;
 }
+
+// ---------------------------------------------------------------------------
+// Reporting absences (classic WebUntis web endpoints, see docs/API.md)
+// ---------------------------------------------------------------------------
+
+/// The `data` object of a classic `/WebUntis/api/...` answer, else the root.
+Map<String, Object?> _classicData(Object? raw) {
+  final j = _map(raw);
+  final d = j['data'];
+  return d is Map ? _map(d) : j;
+}
+
+/// `showCreateAbsence`-like flag of [j]: true/false when present, else null.
+bool? _createFlag(Map<String, Object?> j) {
+  for (final k in const [
+    'showCreateAbsence',
+    'canCreateAbsence',
+    'allowCreateAbsence',
+    'createAbsenceAllowed',
+    'canCreate',
+  ]) {
+    final v = j[k];
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    if (v is String && (v == 'true' || v == 'false')) return v == 'true';
+  }
+  return null;
+}
+
+/// Reasons from a list of `{id, name|longName|displayName|label}`. Inactive
+/// entries (`active: false`) and placeholders ("---") are left out, since
+/// this list only fills a picker.
+List<AbsenceReason> parseAbsenceReasons(Object? raw) {
+  final out = <AbsenceReason>[];
+  final seen = <int>{};
+  for (final e in _maps(raw)) {
+    final id = _intOrNull(e['id'] ?? e['reasonId'] ?? e['absenceReasonId']);
+    final name = _firstStr(e, const ['longName', 'name', 'displayName', 'label']);
+    if (id == null || name == null || name.trim() == '---') continue;
+    if (e['active'] == false) continue;
+    if (seen.add(id)) out.add(AbsenceReason(id: id, name: name.trim()));
+  }
+  return out;
+}
+
+/// `GET /WebUntis/api/classreg/absences/meta`: `{data:{absenceReasons,
+/// defaultAbsenceReason:{id}, defaultStartTime:750, defaultEndTime:1600,
+/// …}}` (field names partly assumed; all optional).
+AbsenceReportOptions parseAbsenceMeta(Object? raw) {
+  final d = _classicData(raw);
+  final reasons = parseAbsenceReasons(d['absenceReasons'] ?? d['reasons']);
+  final def = d['defaultAbsenceReason'];
+  final defId = def is Map
+      ? _intOrNull(def['id'])
+      : _intOrNull(d['defaultReasonId'] ?? d['defaultAbsenceReasonId'] ?? def);
+  int? minutes(Object? v) {
+    final m = parseTime(v ?? '');
+    return (m == null || m < 0 || m >= 24 * 60) ? null : m;
+  }
+
+  return AbsenceReportOptions(
+    reasons: reasons,
+    defaultReasonId: reasons.any((r) => r.id == defId) ? defId : null,
+    allowed: _createFlag(d),
+    defaultStartMinutes: minutes(d['defaultStartTime']),
+    defaultEndMinutes: minutes(d['defaultEndTime']),
+  );
+}
+
+/// `showCreateAbsence` of a `GET /WebUntis/api/classreg/absences/students`
+/// answer (null when missing), plus any reasons it carries.
+({bool? allowed, List<AbsenceReason> reasons}) parseAbsenceListFlags(
+  Object? raw,
+) {
+  final d = _classicData(raw);
+  return (allowed: _createFlag(d), reasons: parseAbsenceReasons(d['absenceReasons']));
+}
+
+/// yyyyMMdd as a number, as the classic endpoints expect.
+int ymdNumber(DateTime d) => d.year * 10000 + d.month * 100 + d.day;
+
+/// hhmm as a number (7:50 -> 750).
+int hmNumber(DateTime d) => d.hour * 100 + d.minute;
+
+/// Body of `POST /WebUntis/api/classreg/absences/students/self`, as the
+/// WebUntis web client sends it. `reasonId` -1 = no reason.
+Map<String, Object?> absenceReportPayload(AbsenceReport r) => {
+  'studentId': r.studentId,
+  'startDate': ymdNumber(r.start),
+  'startTime': hmNumber(r.start),
+  'endDate': ymdNumber(r.end),
+  'endTime': hmNumber(r.end),
+  'reasonId': r.reasonId ?? -1,
+  'text': r.text,
+};
+
+/// Short texts of the `conflicts` of a write answer, whatever their shape.
+List<String> _conflictTexts(List<Object?> conflicts) => [
+  for (final c in conflicts.take(5))
+    if (c is String && c.trim().isNotEmpty)
+      c.trim()
+    else if (c is Map)
+      _firstStr(_map(c), const ['text', 'message', 'title', 'description', 'name']) ??
+          'overlaps an existing entry',
+];
+
+/// Checks a 2xx answer of the report call: `{errors:[{code,title}]}` and a
+/// non-empty `data.conflicts` mean nothing was saved. Returns normally when
+/// the absence was saved.
+void checkAbsenceWriteResult(Object? raw) {
+  final j = _map(raw);
+  final errors = _list(j['errors']);
+  if (errors.isNotEmpty) {
+    final first = _map(errors.first);
+    final msg = _firstStr(first, const ['title', 'message', 'detail', 'code']) ??
+        'The server rejected the absence.';
+    throw UntisException(-1, msg);
+  }
+  final conflicts = _list(_classicData(raw)['conflicts']);
+  if (conflicts.isNotEmpty) {
+    throw UntisException(
+      -1,
+      'Not saved: it overlaps an existing absence or entry '
+      '(${_conflictTexts(conflicts).join('; ')}).',
+    );
+  }
+}

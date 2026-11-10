@@ -138,6 +138,61 @@ class AbsenceItem {
   final String excuseStatus;
 }
 
+/// A reason a parent can pick when reporting an absence.
+class AbsenceReason {
+  const AbsenceReason({required this.id, required this.name});
+  final int id;
+  final String name;
+}
+
+/// What the "Report absence" form needs: the school's reasons and defaults.
+class AbsenceReportOptions {
+  const AbsenceReportOptions({
+    this.reasons = const [],
+    this.defaultReasonId,
+    this.allowed,
+    this.defaultStartMinutes,
+    this.defaultEndMinutes,
+    this.notice = '',
+  });
+
+  /// Selectable reasons (may be empty when the school sent none).
+  final List<AbsenceReason> reasons;
+  final int? defaultReasonId;
+
+  /// Whether the school lets this account report absences: true/false when
+  /// the server said so (`showCreateAbsence`), null when unknown.
+  final bool? allowed;
+
+  /// Default start/end time of day (minutes since midnight), when the server
+  /// suggests one.
+  final int? defaultStartMinutes;
+  final int? defaultEndMinutes;
+
+  /// Why options are incomplete (e.g. the reasons could not be loaded and
+  /// come from master data instead); '' when everything loaded.
+  final String notice;
+}
+
+/// A new absence reported by a parent for [studentId].
+class AbsenceReport {
+  const AbsenceReport({
+    required this.studentId,
+    required this.start,
+    required this.end,
+    this.reasonId,
+    this.text = '',
+  });
+
+  final int studentId;
+  final DateTime start;
+  final DateTime end;
+
+  /// Null when the school offers no reasons.
+  final int? reasonId;
+  final String text;
+}
+
 /// Office hour from getOfficeHours2017 (carries names directly).
 class OfficeHourItem {
   const OfficeHourItem({
@@ -243,6 +298,16 @@ abstract interface class InfoCenterRepository {
   Stream<Cached<List<HomeworkItem>>> homework(Account a, DateTime start, DateTime end, {bool force = false});
   Stream<Cached<List<ExamItem>>> exams(Account a, DateTime start, DateTime end, {bool force = false});
   Stream<Cached<List<AbsenceItem>>> absences(Account a, DateTime start, DateTime end, {bool force = false});
+
+  /// Reasons and defaults for reporting an absence for [studentId] (a child
+  /// of parent account [a]). Never throws for a missing reason list; throws
+  /// [UntisException] only when nothing at all is known.
+  Future<AbsenceReportOptions> absenceReportOptions(Account a, int studentId);
+
+  /// Reports a new absence ("Abwesenheit melden"). On success the cached
+  /// absences of [a] are dropped, so the next subscription loads fresh data.
+  /// Throws [UntisException].
+  Future<void> reportAbsence(Account a, AbsenceReport report);
   /// Office hours of all teachers, or with [onlyMyClass] those of the
   /// account's (or selected child's) class.
   Stream<Cached<List<OfficeHourItem>>> officeHours(

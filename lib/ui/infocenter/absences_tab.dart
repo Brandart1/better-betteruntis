@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/info.dart';
 import '../../core/models.dart';
 import '../timetable/timetable_utils.dart';
+import 'absence_report_screen.dart';
 import 'info_common.dart';
 import 'info_providers.dart';
 
@@ -171,6 +172,9 @@ class AbsencesTab extends ConsumerWidget {
             )
           else
             SliverList.list(children: [for (final a in shown) AbsenceCard(absence: a, now: now)]),
+          // Room for the "Report absence" button of parent accounts.
+          if (canReportAbsences(account))
+            const SliverToBoxAdapter(child: SizedBox(height: 72)),
         ];
       },
     );

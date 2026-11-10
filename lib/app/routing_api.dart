@@ -189,4 +189,26 @@ class RoutingUntisApi implements FullUntisApi {
     required UntisCredentials auth,
     required int id,
   }) => _for(host).inboxMessage(host: host, school: school, auth: auth, id: id);
+
+  @override
+  Future<AbsenceReportOptions> absenceReportOptions({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int studentId,
+  }) => _for(host).absenceReportOptions(
+    host: host,
+    school: school,
+    auth: auth,
+    studentId: studentId,
+  );
+
+  @override
+  Future<void> reportAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required AbsenceReport report,
+  }) => _for(host)
+      .reportAbsence(host: host, school: school, auth: auth, report: report);
 }

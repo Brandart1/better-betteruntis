@@ -35,9 +35,11 @@ class UntisApiImpl implements FullUntisApi {
 
   UntisApiImpl._(Dio dio, DateTime Function()? now, this.isIos)
     : _dio = dio,
+      _now = now ?? DateTime.now,
       _rpc = JsonRpcClient(dio: dio, now: now);
 
   final Dio _dio;
+  final DateTime Function() _now;
 
   static const schoolSearchUrl =
       'https://schoolsearch.webuntis.com/schoolquery2';
@@ -532,6 +534,243 @@ class UntisApiImpl implements FullUntisApi {
     ),
     id,
   );
+
+  // ---- Reporting absences ----------------------------------------------------
+  //
+  // The WebUntis web client reports an absence with
+  // `POST /WebUntis/api/classreg/absences/students/self` and loads reasons and
+  // defaults from `GET /WebUntis/api/classreg/absences/meta`. The browser
+  // authenticates them with its session cookie; we send the bearer token from
+  // getAuthToken instead (assumed to be accepted, see docs/API.md).
+
+  static String classregUrl(String host, String path) =>
+      'https://$host/WebUntis/api/classreg/$path';
+
+  /// Reasons/defaults from `absences/meta` plus the `showCreateAbsence` flag
+  /// of today's absence list. Either may fail; throws only when both fail.
+  @override
+  Future<AbsenceReportOptions> absenceReportOptions({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int studentId,
+  }) async {
+    AbsenceReportOptions? meta;
+    ({bool? allowed, List<AbsenceReason> reasons})? list;
+    UntisException? firstError;
+    try {
+      meta = parseAbsenceMeta(
+        await _classic(
+          host,
+          school,
+          auth,
+          'GET',
+          classregUrl(host, 'absences/meta'),
+          'REST classreg absences/meta',
+        ),
+      );
+    } on UntisException catch (e) {
+      firstError = e;
+    }
+    final today = ymdNumber(_now());
+    try {
+      list = parseAbsenceListFlags(
+        await _classic(
+          host,
+          school,
+          auth,
+          'GET',
+          classregUrl(
+            host,
+            'absences/students?startDate=$today&endDate=$today'
+            '&studentId=$studentId&excuseStatusId=-1',
+          ),
+          'REST classreg absences/students studentId=$studentId $today',
+        ),
+      );
+    } on UntisException catch (e) {
+      firstError ??= e;
+    }
+    if (meta == null && list == null) throw firstError!;
+    return AbsenceReportOptions(
+      reasons: (meta?.reasons.isNotEmpty ?? false)
+          ? meta!.reasons
+          : list?.reasons ?? const [],
+      defaultReasonId: meta?.defaultReasonId,
+      allowed: list?.allowed ?? meta?.allowed,
+      defaultStartMinutes: meta?.defaultStartMinutes,
+      defaultEndMinutes: meta?.defaultEndMinutes,
+    );
+  }
+
+  @override
+  Future<void> reportAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required AbsenceReport report,
+  }) async {
+    checkAbsenceReport(report);
+    final body = absenceReportPayload(report);
+    // The body has no credentials; it is logged so a failed report can be
+    // compared with what the web client sends.
+    _rpc.record(
+      'REST classreg absences/students/self request body',
+      jsonEncode(body),
+    );
+    checkAbsenceWriteResult(
+      await _classic(
+        host,
+        school,
+        auth,
+        'POST',
+        classregUrl(host, 'absences/students/self'),
+        'REST classreg absences/students/self studentId=${report.studentId}',
+        body: body,
+      ),
+    );
+  }
+
+  /// Client-side checks before anything is sent.
+  static void checkAbsenceReport(AbsenceReport r) {
+    if (r.studentId <= 0) {
+      throw const UntisException(-1, 'No pupil selected.');
+    }
+    if (!r.end.isAfter(r.start)) {
+      throw const UntisException(-1, 'The end must be after the start.');
+    }
+  }
+
+  /// Bearer-authenticated request to a classic `/WebUntis/api/...` endpoint.
+  /// Redirects are not followed: a 3xx (or an HTML page) means the server
+  /// wants a browser session and did not accept the token.
+  Future<Object?> _classic(
+    String host,
+    String school,
+    UntisCredentials auth,
+    String method,
+    String url,
+    String label, {
+    Object? body,
+  }) async {
+    final resp = await _bearerRequest(
+      host,
+      school,
+      auth,
+      method,
+      url,
+      label,
+      body: body,
+      followRedirects: false,
+    );
+    final status = resp.statusCode ?? 0;
+    final text = resp.data ?? '';
+    final looksHtml = text.trimLeft().startsWith('<');
+    if ((status >= 300 && status < 400) || (looksHtml && status < 400)) {
+      throw const UntisException(
+        sessionRequired,
+        "The school's server didn't accept the app's sign-in for this "
+        'function (it asked for a browser login). Please report the absence '
+        'on the WebUntis website for now, and send the Debug log so this '
+        'can be fixed.',
+      );
+    }
+    Object? decoded;
+    try {
+      decoded = text.trim().isEmpty ? null : jsonDecode(text);
+    } on FormatException {
+      if (status >= 200 && status < 300) {
+        throw const UntisException(-1, 'Invalid JSON response');
+      }
+    }
+    if (status == 403) {
+      throw UntisException(
+        UntisException.noRight,
+        parseRestErrorMessage(decoded) ??
+            "Your school doesn't allow reporting absences for this account "
+                '(HTTP 403).',
+      );
+    }
+    if (status == 404 || status == 405) {
+      throw UntisException(
+        -1,
+        "This school's WebUntis doesn't offer this function (HTTP $status).",
+      );
+    }
+    if (status < 200 || status >= 300) throw restError(status, decoded);
+    return decoded;
+  }
+
+  /// [UntisException.code] of [_classic] when the server answered with a
+  /// login redirect / page instead of JSON.
+  static const sessionRequired = -8530;
+
+  /// Sends one bearer-authenticated request; every answer is recorded in the
+  /// debug log (the token never is). A 401 drops the cached token and retries
+  /// once.
+  Future<Response<String>> _bearerRequest(
+    String host,
+    String school,
+    UntisCredentials auth,
+    String method,
+    String url,
+    String label, {
+    Object? body,
+    bool followRedirects = true,
+  }) async {
+    final tokenKey = '$host|$school|${auth.username}';
+    late Response<String> resp;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final token = await _token(host, school, auth);
+      try {
+        resp = await _dio.request<String>(
+          url,
+          data: body == null ? null : jsonEncode(body),
+          options: Options(
+            method: method,
+            responseType: ResponseType.plain,
+            validateStatus: (_) => true,
+            followRedirects: followRedirects,
+            maxRedirects: followRedirects ? 5 : 0,
+            contentType: body == null ? null : 'application/json',
+            headers: {
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          ),
+        );
+      } on DioException catch (e) {
+        final timedOut = switch (e.type) {
+          DioExceptionType.connectionTimeout ||
+          DioExceptionType.sendTimeout ||
+          DioExceptionType.receiveTimeout => true,
+          _ => false,
+        };
+        final msg = timedOut
+            ? 'Timeout (${e.type.name})'
+            : 'Network error: ${e.message ?? e.type.name}';
+        _rpc.record('$label [no response]', jsonEncode({'_requestFailed': msg}));
+        throw UntisException(timedOut ? UntisException.timeout : 0, msg);
+      }
+      final location = resp.headers.value('location');
+      final data = resp.data ?? '';
+      _rpc.record(
+        '$label [HTTP ${resp.statusCode}]',
+        location == null
+            ? data
+            : jsonEncode({'_redirectTo': _stripQuery(location), '_body': data}),
+      );
+      if (resp.statusCode != 401) break;
+      _tokens.remove(tokenKey);
+    }
+    return resp;
+  }
+
+  /// [url] without its query (a login redirect may carry session ids).
+  static String _stripQuery(String url) {
+    final i = url.indexOf(RegExp('[?;]'));
+    return i < 0 ? url : url.substring(0, i);
+  }
 
   /// Authenticated REST GET returning decoded JSON. Every response is recorded
   /// in the debug log. A 401 drops the cached token and retries once; other
