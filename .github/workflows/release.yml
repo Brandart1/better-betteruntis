@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)build and release, e.g. v0.1.0-alpha.1"
+        description: "Existing tag to (re)build and release, e.g. v0.2.0-alpha"
         required: true
 
 permissions:
@@ -17,8 +17,25 @@ env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
+  version:
+    name: Tag matches pubspec version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Compare
+        run: |
+          V=$(sed -n 's/^version: *\([^+]*\)+.*/\1/p' pubspec.yaml)
+          T=${TAG#v}; T=${T%%-*}
+          echo "pubspec $V, tag $TAG"
+          if [ "$V" != "$T" ]; then
+            echo "::error::Tag $TAG does not match pubspec version $V"; exit 1
+          fi
+
   android:
     name: Signed Android APK
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +67,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: flutter build apk --release --build-number=${{ github.run_number }}
+        run: flutter build apk --release
       - name: Verify release signature
         run: |
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
@@ -64,6 +81,7 @@ jobs:
 
   ios:
     name: iOS IPA (unsigned)
+    needs: version
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,7 +94,7 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
-      - run: flutter build ios --release --no-codesign --build-number=${{ github.run_number }}
+      - run: flutter build ios --release --no-codesign
       - name: Package IPA
         run: |
           mkdir -p Payload
@@ -87,9 +105,43 @@ jobs:
           name: ipa
           path: better-betteruntis-*-unsigned.ipa
 
+  web:
+    name: Web build + server binary
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: dart run build_runner build --delete-conflicting-outputs
+      - run: flutter build web --release --no-web-resources-cdn
+      - name: Server binary (linux x64)
+        working-directory: server
+        run: |
+          dart pub get
+          dart test
+          dart compile exe bin/server.dart -o bbu_server
+      - name: Package
+        run: |
+          mkdir -p pkg/better-betteruntis-web
+          cp -R build/web pkg/better-betteruntis-web/web
+          cp server/bbu_server pkg/better-betteruntis-web/
+          cp docs/WEB.md LICENSE pkg/better-betteruntis-web/
+          tar -C pkg -czf "better-betteruntis-${TAG}-web-linux-x64.tar.gz" better-betteruntis-web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: better-betteruntis-*-web-linux-x64.tar.gz
+
   release:
     name: GitHub release
-    needs: [android, ios]
+    needs: [android, ios, web]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

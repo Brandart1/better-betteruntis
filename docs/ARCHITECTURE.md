@@ -24,3 +24,10 @@ docs/        API.md (protocol notes), FEATURES.md (parity checklist)
 - Accounts are independent: each has its own host, school, secret, master data and cache. One `UntisApi` instance serves all of them.
 - Secrets live only in secure storage. Passwords are never stored.
 - Clean-room rewrite: don't copy code from BetterUntis (GPL). The project is MIT licensed.
+
+## Versioning
+`pubspec.yaml` `version: X.Y.Z+N` is the single source of truth: X.Y.Z becomes
+the app's version name and N the Android versionCode / iOS build number.
+- Every commit bumps the version: patch (`Z`) plus build number (`N`).
+- Releases with new features bump the minor version (`Y`).
+- Release tags are `vX.Y.Z[-alpha|-beta|-rc]` and must match pubspec (the release workflow checks this).
