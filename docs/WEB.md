@@ -106,8 +106,8 @@ Fonts, images and other assets are cached for a day.
 
 ## Security
 
-- **Serve it over HTTPS.** Your WebUntis password and app secret cross the
-  network on every request, and browsers only allow camera access (QR login)
+- **Serve it over HTTPS.** Your WebUntis password crosses the network at
+  login, and your session tokens on every request. Browsers only allow camera access (QR login)
   on HTTPS origins or `localhost`. Logins are kept in the browser's
   localStorage (browsers have no keychain), so they are as safe as that
   browser profile. Put a reverse proxy in front of it and let that handle
