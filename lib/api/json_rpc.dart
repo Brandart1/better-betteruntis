@@ -66,9 +66,17 @@ class JsonRpcClient {
         throw UntisException(0, 'HTTP $status');
       }
     } on DioException catch (e) {
-      final msg = 'Network error: ${e.message ?? e.type.name}';
+      final timedOut = switch (e.type) {
+        DioExceptionType.connectionTimeout ||
+        DioExceptionType.sendTimeout ||
+        DioExceptionType.receiveTimeout => true,
+        _ => false,
+      };
+      final msg = timedOut
+          ? 'Timeout (${e.type.name})'
+          : 'Network error: ${e.message ?? e.type.name}';
       _record(_label(method, params, null), jsonEncode({'_requestFailed': msg}));
-      throw UntisException(0, msg);
+      throw UntisException(timedOut ? UntisException.timeout : 0, msg);
     }
 
     final Object? decoded;

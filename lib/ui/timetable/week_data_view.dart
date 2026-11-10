@@ -103,6 +103,7 @@ class _WeekDataViewState extends ConsumerState<WeekDataView> {
 /// User-facing text for an error.
 String describeError(Object e) {
   if (e is UntisException) {
+    if (e.isTimeout) return "Server didn't respond. Showing saved timetable.";
     return e.isNetwork ? 'No connection. Showing saved timetable.' : e.message;
   }
   return 'Something went wrong: $e';

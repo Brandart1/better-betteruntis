@@ -25,7 +25,12 @@ class UntisException implements Exception {
   static const noPublicAccess = -8523;
   static const invalidClientTime = -8524;
 
+  /// Client-side: the server accepted no connection / sent no answer in time.
+  /// Seen after a wrong password, when Untis slows down repeated attempts.
+  static const timeout = -2;
+
   bool get isNetwork => code == 0;
+  bool get isTimeout => code == timeout;
 
   @override
   String toString() => 'UntisException($code): $message';

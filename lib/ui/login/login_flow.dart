@@ -68,6 +68,11 @@ String friendlyLoginError(Object error) {
   if (error is! UntisException) {
     return 'Something went wrong. Please try again.';
   }
+  if (error.isTimeout) {
+    return "The server didn't answer in time. If you just mistyped your "
+        'password, Untis may be slowing down repeated attempts. Wait a '
+        'minute, check your password, and try again.';
+  }
   if (error.isNetwork) {
     return "Couldn't reach the server. Check your internet connection "
         'and try again.';
