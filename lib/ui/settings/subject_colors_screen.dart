@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/settings.dart';
@@ -15,6 +16,16 @@ class _SubjectEntry {
   final String name;
   final String longName;
   final int? schoolColor;
+}
+
+/// Subjects offered for custom colors. Schools often flag subjects
+/// `displayAllowed: false` for students (like rooms), so that flag is
+/// ignored; inactive subjects (e.g. past school years) are left out unless
+/// none are active.
+List<MasterElement> colorableSubjects(NameResolver names) {
+  final all = names.elementsOf(ElementType.subject, onlyActive: false);
+  final active = [for (final e in all) if (e.active) e];
+  return active.isEmpty ? all : active;
 }
 
 /// Custom colors per subject. Lists the active subjects of the active
@@ -60,7 +71,7 @@ class _SubjectColorsScreenState extends ConsumerState<SubjectColorsScreen> {
     final cs = Theme.of(context).colorScheme;
 
     final subjects = namesAsync.hasValue
-        ? namesAsync.value!.elementsOf(ElementType.subject)
+        ? colorableSubjects(namesAsync.value!)
         : const <MasterElement>[];
     final all = _entries(subjects, s);
     final q = _query.toLowerCase();

@@ -43,7 +43,7 @@ class TimetableSettings {
     this.showCancelled = true,
     this.subjectColors = const {},
     this.examMode = StateColorMode.fill,
-    this.irregularMode = StateColorMode.border,
+    this.irregularMode = StateColorMode.fill,
     this.cancelledMode = StateColorMode.fill,
   });
 
@@ -68,11 +68,8 @@ class TimetableSettings {
   /// Highest priority for a lesson's base color.
   final Map<String, int> subjectColors;
 
-  /// Fill vs border per special state. The defaults reproduce the previous
-  /// look as closely as possible: exams and cancellations were filled;
-  /// substitutions were filled only without school colors, while school-
-  /// colored substitutions kept their color and got a border. Border is the
-  /// default for substitutions so no subject color is ever lost.
+  /// Fill vs border per special state. Everything defaults to fill (the
+  /// user's choice); border keeps the lesson's base color.
   final StateColorMode examMode;
   final StateColorMode irregularMode;
   final StateColorMode cancelledMode;

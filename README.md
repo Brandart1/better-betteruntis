@@ -49,6 +49,10 @@ long-standing annoyances, like **teachers missing from student timetables**.
 - Export any timetable as **CSV**, **XLSX** or **PDF**
 - Pick a specific week, or the *regular* timetable derived from the last few weeks
 
+## 🐞 Known issues
+
+- Parent accounts that log in through **ID Austria** don't work yet.
+
 ## 📲 Install
 
 | Platform | How |

@@ -227,7 +227,7 @@ class ExportPalette {
     this.exam = defaultExam,
     this.subjectColors = const {},
     this.examMode = StateColorMode.fill,
-    this.substitutionMode = StateColorMode.border,
+    this.substitutionMode = StateColorMode.fill,
     this.cancelledMode = StateColorMode.fill,
   });
 

@@ -81,7 +81,7 @@ void main() {
   });
 
   group('palette', () {
-    test('defaults: exam/cancelled filled, substitution as border', () {
+    test('defaults: everything filled', () {
       const p = ExportPalette();
       expect(p.colorFor(LessonStatus.exam, null), ExportPalette.defaultExam);
       expect(p.borderFor(LessonStatus.exam), isNull);
@@ -89,10 +89,15 @@ void main() {
         p.colorFor(LessonStatus.cancelled, 0xFF81C784),
         ExportPalette.defaultCancelled,
       );
-      // School-colored substitution keeps its color, as before.
-      expect(p.colorFor(LessonStatus.substitution, 0xFF81C784), 0xFF81C784);
       expect(
-        p.borderFor(LessonStatus.substitution),
+        p.colorFor(LessonStatus.substitution, 0xFF81C784),
+        ExportPalette.defaultSubstitution,
+      );
+      expect(p.borderFor(LessonStatus.substitution), isNull);
+      const b = ExportPalette(substitutionMode: StateColorMode.border);
+      expect(b.colorFor(LessonStatus.substitution, 0xFF81C784), 0xFF81C784);
+      expect(
+        b.borderFor(LessonStatus.substitution),
         ExportPalette.defaultSubstitutionBorder,
       );
       expect(p.borderFor(LessonStatus.regular), isNull);

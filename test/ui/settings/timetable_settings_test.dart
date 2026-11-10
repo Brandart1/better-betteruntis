@@ -75,7 +75,7 @@ void main() {
       expect(d.subjectColors, isEmpty);
       expect(d.examMode, StateColorMode.fill);
       expect(d.cancelledMode, StateColorMode.fill);
-      expect(d.irregularMode, StateColorMode.border);
+      expect(d.irregularMode, StateColorMode.fill);
 
       const s = TimetableSettings(
         subjectColors: {'M': 0xFF1976D2, 'PH': 0xFF388E3C},
@@ -106,7 +106,7 @@ void main() {
       });
       expect(s.subjectColors, {'M': 0xFF1976D2, 'PH': 0xFF388E3C});
       expect(s.examMode, StateColorMode.border);
-      expect(s.irregularMode, StateColorMode.border);
+      expect(s.irregularMode, StateColorMode.fill);
       expect(s.cancelledMode, StateColorMode.fill);
       expect(
         TimetableSettings.fromJson({'subjectColors': 'nope'}).subjectColors,
@@ -356,14 +356,9 @@ void main() {
       await pump(tester);
       final cs = Theme.of(tester.element(find.byType(TimetableSettingsScreen)))
           .colorScheme;
-      // Defaults: exam filled, substitution as border.
+      // Defaults: everything filled.
       expect(cardColor(tester, 'exam'), cs.errorContainer);
-      expect(cardColor(tester, 'substitution'), cardColor(tester, 'regular'));
-      expect(cardBorder(tester, 'substitution').color, cs.tertiary);
-      expect(
-        cardBorder(tester, 'substitution').width,
-        LessonStyle.stateBorderWidth,
-      );
+      expect(cardColor(tester, 'substitution'), cs.tertiaryContainer);
       expect(find.byKey(const ValueKey('mode-regular')), findsNothing);
 
       await tester.tap(

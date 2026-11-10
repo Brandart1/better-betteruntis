@@ -157,8 +157,11 @@ void main() {
         buildXlsx(demoExport(palette: palette)),
         'xl/styles.xml',
       )!;
-      expect(styles(const ExportPalette()), contains('thick'));
-      const allFill = ExportPalette(substitutionMode: StateColorMode.fill);
+      const allFill = ExportPalette();
+      expect(
+        styles(const ExportPalette(substitutionMode: StateColorMode.border)),
+        contains('thick'),
+      );
       expect(styles(allFill), isNot(contains('thick')));
       final exam = styles(
         const ExportPalette(

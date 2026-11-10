@@ -90,8 +90,17 @@ void main() {
       expect(e.borderWidth, LessonStyle.defaultBorderWidth);
     });
 
-    test('school-colored substitution keeps its color with a border', () {
+    test('substitution is filled by default, even over school colors', () {
       final st = styleOf({PeriodFlag.irregular}, s, backColor: school);
+      expect(st.background, cs.tertiaryContainer);
+    });
+
+    test('border mode: school-colored substitution keeps its color', () {
+      final st = styleOf(
+        {PeriodFlag.irregular},
+        s.copyWith(irregularMode: StateColorMode.border),
+        backColor: school,
+      );
       expect(st.background, const Color(school));
       expect(st.border, cs.tertiary);
     });
