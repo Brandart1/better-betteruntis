@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../timetable/lesson_style.dart';
 
@@ -139,6 +140,12 @@ class _ColorPickerSheetState extends State<ColorPickerSheet> {
             key: const ValueKey('hue-slider'),
             hue: HSLColor.fromColor(shown).hue,
             onChanged: (h) => _set(_fromHue(h)),
+          ),
+          const SizedBox(height: 20),
+          HexColorField(
+            key: const ValueKey('hex-field'),
+            value: shown.toARGB32(),
+            onChanged: _set,
           ),
           const SizedBox(height: 20),
           OverflowBar(
@@ -293,6 +300,92 @@ class HueSlider extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+
+/// Parses "#RGB", "#RRGGBB" or "#AARRGGBB" (the "#" is optional) to ARGB.
+/// Returns null for anything else.
+int? parseHexColor(String input) {
+  var h = input.trim().replaceFirst('#', '');
+  if (!RegExp(r'^[0-9a-fA-F]+$').hasMatch(h)) return null;
+  if (h.length == 3) h = h.split('').map((c) => '$c$c').join();
+  if (h.length == 6) h = 'FF$h';
+  if (h.length != 8) return null;
+  return int.parse(h, radix: 16);
+}
+
+/// "#RRGGBB", or "#AARRGGBB" when not fully opaque.
+String formatHexColor(int argb) {
+  final hex = argb.toRadixString(16).padLeft(8, '0').toUpperCase();
+  return '#${hex.startsWith('FF') ? hex.substring(2) : hex}';
+}
+
+/// Text field for a hex color. Applies valid input immediately and follows
+/// external changes (presets, hue slider) while not being edited.
+class HexColorField extends StatefulWidget {
+  const HexColorField({super.key, required this.value, required this.onChanged});
+
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  @override
+  State<HexColorField> createState() => _HexColorFieldState();
+}
+
+class _HexColorFieldState extends State<HexColorField> {
+  late final _controller = TextEditingController(text: formatHexColor(widget.value));
+  final _focus = FocusNode();
+  bool _invalid = false;
+
+  @override
+  void didUpdateWidget(HexColorField old) {
+    super.didUpdateWidget(old);
+    final current = parseHexColor(_controller.text);
+    if (!_focus.hasFocus && current != widget.value) {
+      _controller.text = formatHexColor(widget.value);
+      _invalid = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String text) {
+    final v = parseHexColor(text);
+    setState(() => _invalid = v == null && text.trim().isNotEmpty);
+    if (v != null && v != widget.value) widget.onChanged(v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _controller,
+      focusNode: _focus,
+      onChanged: _onChanged,
+      onSubmitted: (_) {
+        if (!_invalid) _controller.text = formatHexColor(widget.value);
+      },
+      autocorrect: false,
+      enableSuggestions: false,
+      textCapitalization: TextCapitalization.characters,
+      style: const TextStyle(fontFamily: 'monospace'),
+      inputFormatters: [
+        FilteringTextInputFormatter.allow(RegExp(r'[#0-9a-fA-F]')),
+        LengthLimitingTextInputFormatter(9),
+      ],
+      decoration: InputDecoration(
+        labelText: 'Hex code',
+        hintText: '#3F6FD8',
+        prefixIcon: const Icon(Icons.tag),
+        errorText: _invalid ? 'Use #RGB, #RRGGBB or #AARRGGBB' : null,
+        border: const OutlineInputBorder(),
+      ),
     );
   }
 }

@@ -51,9 +51,8 @@ class _ElementPickerScreenState extends ConsumerState<ElementPickerScreen> {
                 children: [
                   for (final t in _tabs)
                     _ElementList(
-                      header: _header(t.$1, names.elementsOf(t.$1), account),
-                      elements: names
-                          .elementsOf(t.$1)
+                      header: _header(t.$1, _browsable(names, t.$1), account),
+                      elements: _browsable(names, t.$1)
                           .where(
                             (e) =>
                                 _query.isEmpty ||
@@ -238,3 +237,11 @@ class _ElementList extends StatelessWidget {
     );
   }
 }
+
+/// Elements offered in the picker. Schools often flag teachers and rooms as
+/// not displayable for students (`displayAllowed: false`); their timetables are
+/// rebuilt from class timetables, so list every active one anyway.
+List<MasterElement> _browsable(NameResolver names, ElementType type) =>
+    type == ElementType.teacher || type == ElementType.room
+    ? names.elementsOf(type, onlyActive: false).where((e) => e.active).toList()
+    : names.elementsOf(type);
