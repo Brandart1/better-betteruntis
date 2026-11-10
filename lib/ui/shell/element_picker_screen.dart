@@ -19,7 +19,6 @@ class _ElementPickerScreenState extends ConsumerState<ElementPickerScreen> {
     (ElementType.klasse, 'Classes', Icons.groups_outlined),
     (ElementType.teacher, 'Teachers', Icons.school_outlined),
     (ElementType.room, 'Rooms', Icons.meeting_room_outlined),
-    (ElementType.subject, 'Subjects', Icons.menu_book_outlined),
   ];
   String _query = '';
 

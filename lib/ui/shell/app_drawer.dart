@@ -35,7 +35,7 @@ class AppDrawer extends StatelessWidget {
         ListTile(
           leading: const Icon(Icons.search),
           title: const Text('Browse timetables'),
-          subtitle: const Text('Classes, teachers, rooms, subjects'),
+          subtitle: const Text('Classes, teachers, rooms'),
           onTap: () => go('/browse'),
         ),
         ListTile(
