@@ -34,7 +34,7 @@ class LessonCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(timetableSettingsProvider);
     final cs = Theme.of(context).colorScheme;
-    final style = LessonStyle.of(cs, block, settings);
+    final style = LessonStyle.of(cs, block, settings, names);
     final radius = BorderRadius.circular(detailed ? 10 : 6);
     final fg = style.foreground;
     final centered = settings.centerText;
@@ -75,7 +75,7 @@ class LessonCard extends ConsumerWidget {
         borderRadius: radius,
         side: style.border == null
             ? BorderSide.none
-            : BorderSide(color: style.border!, width: 2),
+            : BorderSide(color: style.border!, width: style.borderWidth),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/settings.dart';
 import 'color_picker_sheet.dart';
 import 'lesson_preview.dart';
+import 'subject_colors_screen.dart';
 
 /// Lesson states with a configurable color.
 enum LessonColorKind { regular, irregular, cancelled, exam }
@@ -30,13 +31,34 @@ extension on LessonColorKind {
     LessonColorKind.exam => s.copyWith(examColor: v),
   };
 
-  /// Theme default background (mirrors [LessonStyle.of]).
-  Color themeDefault(ColorScheme cs) => switch (this) {
-    LessonColorKind.regular => cs.primaryContainer,
-    LessonColorKind.irregular => cs.tertiaryContainer,
-    LessonColorKind.cancelled => cs.surfaceContainerHighest,
-    LessonColorKind.exam => cs.errorContainer,
+  /// Fill/border mode of a special state; null for regular lessons.
+  StateColorMode? modeIn(TimetableSettings s) => switch (this) {
+    LessonColorKind.regular => null,
+    LessonColorKind.irregular => s.irregularMode,
+    LessonColorKind.cancelled => s.cancelledMode,
+    LessonColorKind.exam => s.examMode,
   };
+
+  TimetableSettings applyMode(TimetableSettings s, StateColorMode m) =>
+      switch (this) {
+        LessonColorKind.regular => s,
+        LessonColorKind.irregular => s.copyWith(irregularMode: m),
+        LessonColorKind.cancelled => s.copyWith(cancelledMode: m),
+        LessonColorKind.exam => s.copyWith(examMode: m),
+      };
+
+  /// Theme default color (mirrors [LessonStyle.of]): the background in fill
+  /// mode, the border color in border mode.
+  Color themeDefault(ColorScheme cs, [StateColorMode? mode]) {
+    final border = mode == StateColorMode.border;
+    return switch (this) {
+      LessonColorKind.regular => cs.primaryContainer,
+      LessonColorKind.irregular => border ? cs.tertiary : cs.tertiaryContainer,
+      LessonColorKind.cancelled =>
+        border ? cs.outline : cs.surfaceContainerHighest,
+      LessonColorKind.exam => border ? cs.error : cs.errorContainer,
+    };
+  }
 }
 
 /// Route `/settings`: lesson colors and text, with a live preview on top.
@@ -105,10 +127,29 @@ class TimetableSettingsScreen extends ConsumerWidget {
                   _ColorTile(
                     kind: kind,
                     value: kind.valueIn(s),
-                    defaultColor: kind.themeDefault(cs),
+                    defaultColor: kind.themeDefault(cs, kind.modeIn(s)),
                     onChanged: (v) =>
                         notifier.update((cur) => kind.apply(cur, v)),
+                    mode: kind.modeIn(s),
+                    onModeChanged: (m) =>
+                        notifier.update((cur) => kind.applyMode(cur, m)),
                   ),
+                ListTile(
+                  key: const ValueKey('subject-colors'),
+                  leading: const Icon(Icons.palette_outlined),
+                  title: const Text('Subject colors'),
+                  subtitle: Text(
+                    s.subjectColors.isEmpty
+                        ? 'Own colors for single subjects'
+                        : '${s.subjectColors.length} custom',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const SubjectColorsScreen(),
+                    ),
+                  ),
+                ),
                 SwitchListTile(
                   key: const ValueKey('school-colors'),
                   title: const Text('School colors'),
@@ -197,12 +238,18 @@ class _ColorTile extends StatelessWidget {
     required this.value,
     required this.defaultColor,
     required this.onChanged,
+    this.mode,
+    this.onModeChanged,
   });
 
   final LessonColorKind kind;
   final int? value;
   final Color defaultColor;
   final ValueChanged<int?> onChanged;
+
+  /// Fill/border choice (special states only).
+  final StateColorMode? mode;
+  final ValueChanged<StateColorMode>? onModeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -224,7 +271,46 @@ class _ColorTile extends StatelessWidget {
         ),
       ),
       title: Text(kind.label),
-      subtitle: Text(hex),
+      // The fill/border choice sits right under the color, so it reads as
+      // part of the row without squeezing the title on narrow phones.
+      subtitle: mode == null
+          ? Text(hex)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(hex),
+                const SizedBox(height: 6),
+                // Scales down instead of overflowing on very narrow screens.
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerStart,
+                  child: SegmentedButton<StateColorMode>(
+                    key: ValueKey('mode-${kind.name}'),
+                    showSelectedIcon: false,
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    segments: const [
+                      ButtonSegment(
+                        value: StateColorMode.fill,
+                        label: Text('Fill'),
+                        icon: Icon(Icons.format_color_fill, size: 18),
+                        tooltip: 'Color the whole lesson',
+                      ),
+                      ButtonSegment(
+                        value: StateColorMode.border,
+                        label: Text('Border'),
+                        icon: Icon(Icons.border_outer, size: 18),
+                        tooltip: 'Color only the border',
+                      ),
+                    ],
+                    selected: {mode!},
+                    onSelectionChanged: (sel) => onModeChanged?.call(sel.first),
+                  ),
+                ),
+              ],
+            ),
       trailing: value == null
           ? const Icon(Icons.chevron_right)
           : IconButton(

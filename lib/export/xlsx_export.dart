@@ -101,24 +101,32 @@ Uint8List buildXlsx(
   final subjectPt = text == null
       ? kXlsxDetailPt
       : _halfPt(kXlsxSubjectPt * text.subjectScale);
-  CellStyle cellStyle({int? fill, bool strike = false, bool italic = false}) =>
-      CellStyle(
-        backgroundColorHex: fill == null ? ExcelColor.none : _argb(fill),
-        fontColorHex: fill != null && isDarkColor(fill)
-            ? ExcelColor.white
-            : ExcelColor.black,
-        fontSize: text == null ? null : detailPt.round(),
-        verticalAlign: centered ? VerticalAlign.Center : VerticalAlign.Top,
-        horizontalAlign: centered
-            ? HorizontalAlign.Center
-            : HorizontalAlign.Left,
-        textWrapping: TextWrapping.WrapText,
-        italic: italic,
-        leftBorder: thin,
-        rightBorder: thin,
-        topBorder: thin,
-        bottomBorder: thin,
-      );
+  CellStyle cellStyle({
+    int? fill,
+    bool strike = false,
+    bool italic = false,
+    int? border,
+  }) {
+    // Border mode: thick border in the state color around the lesson cell.
+    final edge = border == null
+        ? thin
+        : Border(borderStyle: BorderStyle.Thick, borderColorHex: _argb(border));
+    return CellStyle(
+      backgroundColorHex: fill == null ? ExcelColor.none : _argb(fill),
+      fontColorHex: fill != null && isDarkColor(fill)
+          ? ExcelColor.white
+          : ExcelColor.black,
+      fontSize: text == null ? null : detailPt.round(),
+      verticalAlign: centered ? VerticalAlign.Center : VerticalAlign.Top,
+      horizontalAlign: centered ? HorizontalAlign.Center : HorizontalAlign.Left,
+      textWrapping: TextWrapping.WrapText,
+      italic: italic,
+      leftBorder: edge,
+      rightBorder: edge,
+      topBorder: edge,
+      bottomBorder: edge,
+    );
+  }
 
   // ---- Grid sheet
   final rows = gridRows(t.grid, t.weekdays, t.lessons);
@@ -205,7 +213,11 @@ Uint8List buildXlsx(
       final first = here.isEmpty ? null : here.first;
       final fill = colors ? first?.color : null;
       final italic = first != null && first.status == LessonStatus.cancelled;
-      final style = cellStyle(fill: fill, italic: italic);
+      final style = cellStyle(
+        fill: fill,
+        italic: italic,
+        border: colors ? first?.borderColor : null,
+      );
       grid.updateCell(
         at(col, r + 1),
         here.isEmpty ? null : TextCellValue(value),

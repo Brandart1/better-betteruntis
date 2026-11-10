@@ -10,21 +10,25 @@ import '../../core/models.dart';
 /// Key of one info stream. Equality uses the account id (not the instance)
 /// so re-emitted accounts don't resubscribe.
 class InfoQuery {
-  const InfoQuery(this.account, {this.start, this.end});
+  const InfoQuery(this.account, {this.start, this.end, this.onlyMine = false});
 
   final Account account;
   final DateTime? start;
   final DateTime? end;
+
+  /// Office hours: only teachers of the account's class.
+  final bool onlyMine;
 
   @override
   bool operator ==(Object other) =>
       other is InfoQuery &&
       other.account.id == account.id &&
       other.start == start &&
-      other.end == end;
+      other.end == end &&
+      other.onlyMine == onlyMine;
 
   @override
-  int get hashCode => Object.hash(account.id, start, end);
+  int get hashCode => Object.hash(account.id, start, end, onlyMine);
 }
 
 /// Queries whose next subscription should bypass the freshness window
@@ -79,7 +83,12 @@ final officeHoursProvider = StreamProvider.autoDispose
     .family<Cached<List<OfficeHourItem>>, InfoQuery>(
       (ref, q) => ref
           .watch(infoCenterRepositoryProvider)
-          .officeHours(q.account, q.start!, force: _takeForce(ref, #officeHours, q)),
+          .officeHours(
+            q.account,
+            q.start!,
+            force: _takeForce(ref, #officeHours, q),
+            onlyMyClass: q.onlyMine,
+          ),
       retry: (_, _) => null,
     );
 

@@ -447,7 +447,11 @@ pw.Widget _lessonBox(
 
   final PdfColor borderColor;
   final double borderW;
-  if (exam) {
+  if (colors && l.borderColor != null) {
+    // Border mode: the state color only as a thick border.
+    borderColor = _c(l.borderColor!);
+    borderW = 2.0;
+  } else if (exam) {
     borderColor = colors ? PdfColor.fromInt(0xFFBA1A1A) : PdfColors.black;
     borderW = 1.4;
   } else if (subst) {

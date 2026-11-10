@@ -80,6 +80,79 @@ void main() {
     expect(l.color, isNull);
   });
 
+  group('palette', () {
+    test('defaults: exam/cancelled filled, substitution as border', () {
+      const p = ExportPalette();
+      expect(p.colorFor(LessonStatus.exam, null), ExportPalette.defaultExam);
+      expect(p.borderFor(LessonStatus.exam), isNull);
+      expect(
+        p.colorFor(LessonStatus.cancelled, 0xFF81C784),
+        ExportPalette.defaultCancelled,
+      );
+      // School-colored substitution keeps its color, as before.
+      expect(p.colorFor(LessonStatus.substitution, 0xFF81C784), 0xFF81C784);
+      expect(
+        p.borderFor(LessonStatus.substitution),
+        ExportPalette.defaultSubstitutionBorder,
+      );
+      expect(p.borderFor(LessonStatus.regular), isNull);
+    });
+
+    test('fromSettings: subject colors win, modes are taken over', () {
+      final p = ExportPalette.fromSettings(
+        const TimetableSettings(
+          regularColor: 0xFF00796B,
+          examColor: 0xFFD32F2F,
+          subjectColors: {'M': 0xFF1976D2},
+          examMode: StateColorMode.border,
+          irregularMode: StateColorMode.fill,
+          cancelledMode: StateColorMode.border,
+        ),
+      );
+      expect(p.colorFor(LessonStatus.regular, 0xFF81C784, 'm'), 0xFF1976D2);
+      expect(p.colorFor(LessonStatus.regular, 0xFF81C784, 'D'), 0xFF81C784);
+      expect(p.colorFor(LessonStatus.regular, null, 'D'), 0xFF00796B);
+      // Exam as border: base color + custom exam color as border.
+      expect(p.colorFor(LessonStatus.exam, null, 'M'), 0xFF1976D2);
+      expect(p.borderFor(LessonStatus.exam), 0xFFD32F2F);
+      // Substitution filled even over the school color.
+      expect(
+        p.colorFor(LessonStatus.substitution, 0xFF81C784, 'M'),
+        ExportPalette.defaultSubstitution,
+      );
+      expect(p.borderFor(LessonStatus.substitution), isNull);
+      expect(
+        p.borderFor(LessonStatus.cancelled),
+        ExportPalette.defaultCancelledBorder,
+      );
+    });
+
+    test('lessons carry subject colors and border colors', () {
+      final palette = ExportPalette.fromSettings(
+        const TimetableSettings(
+          subjectColors: {'M': 0xFF1976D2},
+          examMode: StateColorMode.border,
+        ),
+      );
+      final lessons = buildExportLessons(
+        buildDemoWeek(mon),
+        names,
+        regular: false,
+        palette: palette,
+      );
+      final maths = lessons.firstWhere(
+        (l) => l.weekday == 1 && l.subject == 'M',
+      );
+      expect(maths.color, 0xFF1976D2);
+      expect(maths.borderColor, isNull);
+      final exam = lessons.firstWhere(
+        (l) => l.weekday == 2 && l.subject == 'M',
+      );
+      expect(exam.color, 0xFF1976D2);
+      expect(exam.borderColor, ExportPalette.defaultExamBorder);
+    });
+  });
+
   test('file names are sanitized', () {
     expect(
       exportFileName('Anna Müller', ExportKind.regular, mon, ExportFormat.csv),

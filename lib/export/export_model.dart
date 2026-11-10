@@ -56,6 +56,7 @@ class ExportLesson {
     this.status = LessonStatus.regular,
     this.info = '',
     this.color,
+    this.borderColor,
   });
 
   /// Day of the lesson (in a regular export: a day of the reference week,
@@ -89,6 +90,10 @@ class ExportLesson {
 
   /// ARGB background, or null for "no color".
   final int? color;
+
+  /// ARGB state color drawn as a thick border ([StateColorMode.border]):
+  /// [color] is then the lesson's normal color. Null = state shown as fill.
+  final int? borderColor;
 
   int get weekday => date.weekday;
 
@@ -211,8 +216,8 @@ String exportFileName(
 // Colors
 
 /// Background colors for exported lessons, from the user's
-/// [TimetableSettings] (custom state colors, school colors) with fixed light
-/// defaults suitable for printing.
+/// [TimetableSettings] (custom subject and state colors, school colors,
+/// fill/border per state) with fixed light defaults suitable for printing.
 class ExportPalette {
   const ExportPalette({
     this.useSchoolColors = true,
@@ -220,6 +225,10 @@ class ExportPalette {
     this.substitution = defaultSubstitution,
     this.cancelled = defaultCancelled,
     this.exam = defaultExam,
+    this.subjectColors = const {},
+    this.examMode = StateColorMode.fill,
+    this.substitutionMode = StateColorMode.border,
+    this.cancelledMode = StateColorMode.fill,
   });
 
   factory ExportPalette.fromSettings(TimetableSettings s) => ExportPalette(
@@ -228,6 +237,10 @@ class ExportPalette {
     substitution: s.irregularColor ?? defaultSubstitution,
     cancelled: s.cancelledColor ?? defaultCancelled,
     exam: s.examColor ?? defaultExam,
+    subjectColors: s.subjectColors,
+    examMode: s.examMode,
+    substitutionMode: s.irregularMode,
+    cancelledMode: s.cancelledMode,
   );
 
   static const defaultRegular = 0xFFD8E2FF;
@@ -235,20 +248,75 @@ class ExportPalette {
   static const defaultCancelled = 0xFFE3E3E3;
   static const defaultExam = 0xFFFFDAD6;
 
+  /// Border colors used in [StateColorMode.border] when the state color is
+  /// the default: stronger shades that stand out on paper (the default fill
+  /// colors are too pale for a border).
+  static const defaultSubstitutionBorder = 0xFFE65100;
+  static const defaultCancelledBorder = 0xFF757575;
+  static const defaultExamBorder = 0xFFBA1A1A;
+
   final bool useSchoolColors;
   final int regular;
   final int substitution;
   final int cancelled;
   final int exam;
 
-  int colorFor(LessonStatus status, int? schoolColor) => switch (status) {
-    LessonStatus.cancelled => cancelled,
-    LessonStatus.exam => exam,
-    LessonStatus.substitution =>
-      useSchoolColors && schoolColor != null ? schoolColor : substitution,
-    LessonStatus.regular =>
-      useSchoolColors && schoolColor != null ? schoolColor : regular,
+  /// Keyed by [TimetableSettings.subjectKey].
+  final Map<String, int> subjectColors;
+  final StateColorMode examMode;
+  final StateColorMode substitutionMode;
+  final StateColorMode cancelledMode;
+
+  /// The lesson's normal color: custom subject color > school color (if
+  /// enabled) > regular color.
+  int baseColor(int? schoolColor, [String? subject]) {
+    if (subject != null) {
+      final c = subjectColors[TimetableSettings.subjectKey(subject)];
+      if (c != null) return c;
+    }
+    return useSchoolColors && schoolColor != null ? schoolColor : regular;
+  }
+
+  StateColorMode? _mode(LessonStatus status) => switch (status) {
+    LessonStatus.regular => null,
+    LessonStatus.substitution => substitutionMode,
+    LessonStatus.cancelled => cancelledMode,
+    LessonStatus.exam => examMode,
   };
+
+  /// Background of a lesson with [status]: the state color in fill mode,
+  /// otherwise [baseColor].
+  int colorFor(LessonStatus status, int? schoolColor, [String? subject]) {
+    if (_mode(status) != StateColorMode.fill) {
+      return baseColor(schoolColor, subject);
+    }
+    return switch (status) {
+      LessonStatus.cancelled => cancelled,
+      LessonStatus.exam => exam,
+      LessonStatus.substitution => substitution,
+      LessonStatus.regular => baseColor(schoolColor, subject),
+    };
+  }
+
+  /// State color as border ([StateColorMode.border]), else null.
+  int? borderFor(LessonStatus status) {
+    if (_mode(status) != StateColorMode.border) return null;
+    int pick(int c, int def, int border) => c == def ? border : c;
+    return switch (status) {
+      LessonStatus.cancelled => pick(
+        cancelled,
+        defaultCancelled,
+        defaultCancelledBorder,
+      ),
+      LessonStatus.exam => pick(exam, defaultExam, defaultExamBorder),
+      LessonStatus.substitution => pick(
+        substitution,
+        defaultSubstitution,
+        defaultSubstitutionBorder,
+      ),
+      LessonStatus.regular => null,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -480,6 +548,12 @@ List<ExportLesson> buildExportLessons(
       ],
     ].map((t) => t.trim()).where((t) => t.isNotEmpty).toSet().join(' · ');
 
+    // Short name of the first subject, for custom subject colors.
+    String? subjectKeyName;
+    for (final r in subjectRefs) {
+      subjectKeyName ??= _short(names, r);
+    }
+
     int? schoolColor = p.backColor;
     if (schoolColor == null) {
       for (final r in subjectRefs) {
@@ -504,7 +578,8 @@ List<ExportLesson> buildExportLessons(
         replacedRooms: replacedOf(ElementType.room),
         status: status,
         info: info,
-        color: palette?.colorFor(status, schoolColor),
+        color: palette?.colorFor(status, schoolColor, subjectKeyName),
+        borderColor: palette?.borderFor(status),
       ),
     );
   }

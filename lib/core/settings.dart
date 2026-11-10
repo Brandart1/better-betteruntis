@@ -10,6 +10,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// Sentinel so [TimetableSettings.copyWith] can tell "not passed" from null.
 const Object _keep = Object();
 
+/// How the color of a special lesson state (exam, substitution, cancelled)
+/// is applied: [fill] paints the whole lesson in the state color, [border]
+/// keeps the lesson's normal color (subject / school / regular) and draws a
+/// thick border in the state color.
+enum StateColorMode {
+  fill,
+  border;
+
+  /// Tolerant parse: unknown values fall back to [def].
+  static StateColorMode parse(Object? v, StateColorMode def) {
+    for (final m in values) {
+      if (m.name == v) return m;
+    }
+    return def;
+  }
+}
+
 /// Immutable timetable styling options. Colors are ARGB (0xAARRGGBB); null
 /// means "use the theme-derived default".
 class TimetableSettings {
@@ -24,6 +41,10 @@ class TimetableSettings {
     this.cancelledColor,
     this.examColor,
     this.showCancelled = true,
+    this.subjectColors = const {},
+    this.examMode = StateColorMode.fill,
+    this.irregularMode = StateColorMode.border,
+    this.cancelledMode = StateColorMode.fill,
   });
 
   static const minSubjectFontSize = 11.0;
@@ -42,6 +63,43 @@ class TimetableSettings {
   final int? examColor;
   final bool showCancelled;
 
+  /// Custom colors per subject, keyed by [subjectKey] of the subject's short
+  /// name (subject ids differ per school/account, settings are global).
+  /// Highest priority for a lesson's base color.
+  final Map<String, int> subjectColors;
+
+  /// Fill vs border per special state. The defaults reproduce the previous
+  /// look as closely as possible: exams and cancellations were filled;
+  /// substitutions were filled only without school colors, while school-
+  /// colored substitutions kept their color and got a border. Border is the
+  /// default for substitutions so no subject color is ever lost.
+  final StateColorMode examMode;
+  final StateColorMode irregularMode;
+  final StateColorMode cancelledMode;
+
+  /// Normalized key for [subjectColors]: trimmed, upper case.
+  static String subjectKey(String shortName) => shortName.trim().toUpperCase();
+
+  /// Custom color of the subject with short name [shortName], if any.
+  int? subjectColorFor(String? shortName) {
+    if (shortName == null || subjectColors.isEmpty) return null;
+    final k = subjectKey(shortName);
+    return k.isEmpty ? null : subjectColors[k];
+  }
+
+  /// Sets ([color] non-null) or removes the custom color of a subject.
+  TimetableSettings withSubjectColor(String shortName, int? color) {
+    final k = subjectKey(shortName);
+    if (k.isEmpty) return this;
+    final next = {...subjectColors};
+    if (color == null) {
+      next.remove(k);
+    } else {
+      next[k] = color & 0xFFFFFFFF;
+    }
+    return copyWith(subjectColors: next);
+  }
+
   /// Pass `null` for a color to reset it to the theme default; omit it to keep.
   TimetableSettings copyWith({
     bool? centerText,
@@ -54,6 +112,10 @@ class TimetableSettings {
     Object? cancelledColor = _keep,
     Object? examColor = _keep,
     bool? showCancelled,
+    Map<String, int>? subjectColors,
+    StateColorMode? examMode,
+    StateColorMode? irregularMode,
+    StateColorMode? cancelledMode,
   }) {
     int? pick(Object? v, int? old) => identical(v, _keep) ? old : v as int?;
     return TimetableSettings(
@@ -67,6 +129,12 @@ class TimetableSettings {
       cancelledColor: pick(cancelledColor, this.cancelledColor),
       examColor: pick(examColor, this.examColor),
       showCancelled: showCancelled ?? this.showCancelled,
+      subjectColors: subjectColors == null
+          ? this.subjectColors
+          : Map.unmodifiable(subjectColors),
+      examMode: examMode ?? this.examMode,
+      irregularMode: irregularMode ?? this.irregularMode,
+      cancelledMode: cancelledMode ?? this.cancelledMode,
     );
   }
 
@@ -81,6 +149,10 @@ class TimetableSettings {
     'cancelledColor': cancelledColor,
     'examColor': examColor,
     'showCancelled': showCancelled,
+    'subjectColors': subjectColors,
+    'examMode': examMode.name,
+    'irregularMode': irregularMode.name,
+    'cancelledMode': cancelledMode.name,
   };
 
   /// Tolerant parse: missing or wrongly typed fields fall back to defaults,
@@ -105,8 +177,7 @@ class TimetableSettings {
       return n.clamp(min, max).toDouble();
     }
 
-    int? color(String k) {
-      final v = json[k];
+    int? colorOf(Object? v) {
       if (v is int) return v & 0xFFFFFFFF;
       if (v is String) {
         final s = v.startsWith('#') ? v.substring(1) : v;
@@ -115,6 +186,18 @@ class TimetableSettings {
         return s.length <= 6 ? 0xFF000000 | n : n & 0xFFFFFFFF;
       }
       return null;
+    }
+
+    int? color(String k) => colorOf(json[k]);
+
+    final subjects = <String, int>{};
+    if (json['subjectColors'] case final Map m) {
+      m.forEach((k, v) {
+        if (k is! String) return;
+        final key = subjectKey(k);
+        final c = colorOf(v);
+        if (key.isNotEmpty && c != null) subjects[key] = c;
+      });
     }
 
     return TimetableSettings(
@@ -138,6 +221,16 @@ class TimetableSettings {
       cancelledColor: color('cancelledColor'),
       examColor: color('examColor'),
       showCancelled: b('showCancelled', d.showCancelled),
+      subjectColors: Map.unmodifiable(subjects),
+      examMode: StateColorMode.parse(json['examMode'], d.examMode),
+      irregularMode: StateColorMode.parse(
+        json['irregularMode'],
+        d.irregularMode,
+      ),
+      cancelledMode: StateColorMode.parse(
+        json['cancelledMode'],
+        d.cancelledMode,
+      ),
     );
   }
 
@@ -153,7 +246,20 @@ class TimetableSettings {
       other.irregularColor == irregularColor &&
       other.cancelledColor == cancelledColor &&
       other.examColor == examColor &&
-      other.showCancelled == showCancelled;
+      other.showCancelled == showCancelled &&
+      _mapEquals(other.subjectColors, subjectColors) &&
+      other.examMode == examMode &&
+      other.irregularMode == irregularMode &&
+      other.cancelledMode == cancelledMode;
+
+  static bool _mapEquals(Map<String, int> a, Map<String, int> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (final e in a.entries) {
+      if (b[e.key] != e.value) return false;
+    }
+    return true;
+  }
 
   @override
   int get hashCode => Object.hash(
@@ -167,6 +273,12 @@ class TimetableSettings {
     cancelledColor,
     examColor,
     showCancelled,
+    Object.hashAllUnordered([
+      for (final e in subjectColors.entries) Object.hash(e.key, e.value),
+    ]),
+    examMode,
+    irregularMode,
+    cancelledMode,
   );
 }
 

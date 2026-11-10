@@ -122,7 +122,7 @@ class LessonDetailsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final settings = ref.watch(timetableSettingsProvider);
-    final accent = LessonStyle.of(theme.colorScheme, block, settings);
+    final accent = LessonStyle.of(theme.colorScheme, block, settings, names);
     final p = block.first;
     final subjects = p.ofType(ElementType.subject).toList();
     final title = subjects.isNotEmpty

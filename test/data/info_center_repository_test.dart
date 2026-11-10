@@ -204,9 +204,18 @@ void main() {
     ),
   ];
 
-  test('office hours use the first class', () async {
+  test('office hours default to all teachers (-1)', () async {
     whenOfficeHours().thenAnswer((_) async => oneOfficeHour);
     final events = await repo.officeHours(acc, start).toList();
+    expect(events.last.data, hasLength(1));
+    expect(officeHourKlassen(), [-1]);
+  });
+
+  test('office hours use the first class', () async {
+    whenOfficeHours().thenAnswer((_) async => oneOfficeHour);
+    final events = await repo
+        .officeHours(acc, start, onlyMyClass: true)
+        .toList();
     expect(events.last.data!.single.teacherName, 'Erika Beispiel');
     expect(events.last.data!.single.registered, isTrue);
     expect(officeHourKlassen(), [1]);
@@ -216,7 +225,9 @@ void main() {
     whenOfficeHours().thenAnswer(
       (i) async => i.namedArguments[#klasseId] == -1 ? oneOfficeHour : [],
     );
-    final events = await repo.officeHours(acc, start).toList();
+    final events = await repo
+        .officeHours(acc, start, onlyMyClass: true)
+        .toList();
     expect(events.last.data, hasLength(1));
     expect(officeHourKlassen(), [1, -1]);
   });
@@ -236,7 +247,9 @@ void main() {
       's',
       masterData(),
     );
-    final events = await repo.officeHours(noClass, start).toList();
+    final events = await repo
+        .officeHours(noClass, start, onlyMyClass: true)
+        .toList();
     expect(events.last.data, hasLength(1));
     expect(officeHourKlassen(), [-1], reason: 'nothing cached: all classes');
   });
@@ -261,7 +274,9 @@ void main() {
       lessonId: id,
       start: DateTime(2026, 11, 9, 8),
       end: DateTime(2026, 11, 9, 9),
-      elements: [ElementRef(type: ElementType.klasse, id: klasse, orgId: klasse)],
+      elements: [
+        ElementRef(type: ElementType.klasse, id: klasse, orgId: klasse),
+      ],
       flags: const {PeriodFlag.regular},
     );
     await db
@@ -276,7 +291,7 @@ void main() {
             fetchedAt: 1,
           ),
         );
-    await repo.officeHours(noClass, start).toList();
+    await repo.officeHours(noClass, start, onlyMyClass: true).toList();
     expect(officeHourKlassen(), [5]);
   });
 
@@ -315,7 +330,9 @@ void main() {
         ),
       ).thenAnswer((_) async => []);
       await repo.homework(parent, start, end).toList();
-      await repo.exams(parent.copyWith(selectedChildId: 12), start, end).toList();
+      await repo
+          .exams(parent.copyWith(selectedChildId: 12), start, end)
+          .toList();
       final hwTarget = verify(
         () => api.homework(
           host: any(named: 'host'),
@@ -367,9 +384,15 @@ void main() {
 
     test("office hours use the child's class, else -1", () async {
       whenOfficeHours().thenAnswer((_) async => oneOfficeHour);
-      await repo.officeHours(parent, start).toList();
+      await repo.officeHours(parent, start, onlyMyClass: true).toList();
       expect(officeHourKlassen(), [3]);
-      await repo.officeHours(parent.copyWith(selectedChildId: 12), start).toList();
+      await repo
+          .officeHours(
+            parent.copyWith(selectedChildId: 12),
+            start,
+            onlyMyClass: true,
+          )
+          .toList();
       expect(officeHourKlassen(), [-1]);
     });
 
@@ -386,8 +409,14 @@ void main() {
         's',
         masterData(),
       );
-      expect((await repo.homework(none, start, end).toList()).single.data, isEmpty);
-      expect((await repo.exams(none, start, end).toList()).single.data, isEmpty);
+      expect(
+        (await repo.homework(none, start, end).toList()).single.data,
+        isEmpty,
+      );
+      expect(
+        (await repo.exams(none, start, end).toList()).single.data,
+        isEmpty,
+      );
       verifyZeroInteractions(api);
     });
   });

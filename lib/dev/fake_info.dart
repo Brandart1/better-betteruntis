@@ -128,11 +128,21 @@ class FakeInfoCenterRepository implements InfoCenterRepository {
       ]);
 
   @override
-  Stream<Cached<List<OfficeHourItem>>> officeHours(Account a, DateTime start, {bool force = false}) =>
-      _stream(FakeInfoKind.officeHours, force, () => [
+  Stream<Cached<List<OfficeHourItem>>> officeHours(
+    Account a,
+    DateTime start, {
+    bool force = false,
+    bool onlyMyClass = false,
+  }) {
+    lastOfficeHoursOnlyMyClass = onlyMyClass;
+    return _stream(FakeInfoKind.officeHours, force, () => [
         for (final o in officeHourItems)
           if (!o.start.isBefore(DateTime(start.year, start.month, start.day))) o,
       ]);
+  }
+
+  /// `onlyMyClass` of the most recent [officeHours] call.
+  bool? lastOfficeHoursOnlyMyClass;
 }
 
 // ---------------------------------------------------------------------------

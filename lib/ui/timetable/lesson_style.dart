@@ -11,6 +11,25 @@ Color onColorFor(Color background) =>
     ? Colors.white
     : Colors.black87;
 
+/// Short name of the lesson's subject (for [TimetableSettings.subjectColors]):
+/// the current subject, else the removed original one; null if the period
+/// has no subject or the name can't be resolved.
+String? lessonSubjectName(Period p, NameResolver? names) {
+  final subjects = p.ofType(ElementType.subject).toList();
+  if (subjects.isEmpty) return null;
+  final r = subjects.firstWhere(
+    (r) => r.change != ElementChange.removed,
+    orElse: () => subjects.first,
+  );
+  final original = r.change == ElementChange.removed;
+  final name = names != null
+      ? names.shortName(r, original: original)
+      : (original ? r.orgInlineName : r.inlineName);
+  if (name == null) return null;
+  final t = name.trim();
+  return t.isEmpty || t == '?' || RegExp(r'^#-?\d+$').hasMatch(t) ? null : t;
+}
+
 /// Visual style of a lesson card derived from its state, the theme and the
 /// user's [TimetableSettings].
 class LessonStyle {
@@ -18,13 +37,22 @@ class LessonStyle {
     required this.background,
     required this.foreground,
     this.border,
+    this.borderWidth = defaultBorderWidth,
     this.cancelled = false,
     this.exam = false,
   });
 
+  /// Width of the accent border of filled state colors (exam, substitution).
+  static const defaultBorderWidth = 2.0;
+
+  /// Width of the border in [StateColorMode.border]: clearly visible even on
+  /// small week-grid cards.
+  static const stateBorderWidth = 3.0;
+
   final Color background;
   final Color foreground;
   final Color? border;
+  final double borderWidth;
   final bool cancelled;
   final bool exam;
 
@@ -36,15 +64,57 @@ class LessonStyle {
     return (bg, fg, Color.lerp(bg, fg, 0.45)!);
   }
 
+  /// The lesson's normal color, ignoring its state. Priority: custom subject
+  /// color > school color (if enabled) > custom regular color > theme.
+  static (Color, Color) base(
+    ColorScheme cs,
+    Period p,
+    TimetableSettings settings, [
+    NameResolver? names,
+  ]) {
+    final subject = settings.subjectColorFor(lessonSubjectName(p, names));
+    final argb =
+        subject ??
+        (settings.useSchoolColors ? p.backColor : null) ??
+        settings.regularColor;
+    if (argb == null) return (cs.primaryContainer, cs.onPrimaryContainer);
+    final bg = Color(argb);
+    return (bg, onColorFor(bg));
+  }
+
+  /// [names] resolves the subject for custom subject colors; without it only
+  /// inline subject names are matched.
   factory LessonStyle.of(
     ColorScheme cs,
     LessonBlock block, [
     TimetableSettings settings = const TimetableSettings(),
+    NameResolver? names,
   ]) {
     final p = block.first;
-    if (block.isCancelled) {
-      if (settings.cancelledColor case final c?) {
-        final (bg, fg, _) = _custom(c);
+    final cancelled = block.isCancelled;
+    final exam = !cancelled && block.isExam;
+    final irregular = !cancelled && !exam && block.isIrregular;
+
+    // State color as a border around the normal lesson color.
+    LessonStyle bordered(Color border) {
+      final (bg, fg) = base(cs, p, settings, names);
+      return LessonStyle(
+        background: bg,
+        foreground: fg,
+        border: border,
+        borderWidth: stateBorderWidth,
+        cancelled: cancelled,
+        exam: exam,
+      );
+    }
+
+    if (cancelled) {
+      final custom = settings.cancelledColor;
+      if (settings.cancelledMode == StateColorMode.border) {
+        return bordered(custom != null ? Color(custom) : cs.outline);
+      }
+      if (custom != null) {
+        final (bg, fg, _) = _custom(custom);
         return LessonStyle(background: bg, foreground: fg, cancelled: true);
       }
       return LessonStyle(
@@ -53,9 +123,13 @@ class LessonStyle {
         cancelled: true,
       );
     }
-    if (block.isExam) {
-      if (settings.examColor case final c?) {
-        final (bg, fg, border) = _custom(c);
+    if (exam) {
+      final custom = settings.examColor;
+      if (settings.examMode == StateColorMode.border) {
+        return bordered(custom != null ? Color(custom) : cs.error);
+      }
+      if (custom != null) {
+        final (bg, fg, border) = _custom(custom);
         return LessonStyle(
           background: bg,
           foreground: fg,
@@ -70,22 +144,13 @@ class LessonStyle {
         exam: true,
       );
     }
-    final irregular = block.isIrregular;
-    if (settings.useSchoolColors && p.backColor != null) {
-      final bg = Color(p.backColor!);
-      return LessonStyle(
-        background: bg,
-        foreground: onColorFor(bg),
-        border: irregular
-            ? (settings.irregularColor != null
-                  ? Color(settings.irregularColor!)
-                  : cs.tertiary)
-            : null,
-      );
-    }
     if (irregular) {
-      if (settings.irregularColor case final c?) {
-        final (bg, fg, border) = _custom(c);
+      final custom = settings.irregularColor;
+      if (settings.irregularMode == StateColorMode.border) {
+        return bordered(custom != null ? Color(custom) : cs.tertiary);
+      }
+      if (custom != null) {
+        final (bg, fg, border) = _custom(custom);
         return LessonStyle(background: bg, foreground: fg, border: border);
       }
       return LessonStyle(
@@ -94,14 +159,8 @@ class LessonStyle {
         border: cs.tertiary,
       );
     }
-    if (settings.regularColor case final c?) {
-      final (bg, fg, _) = _custom(c);
-      return LessonStyle(background: bg, foreground: fg);
-    }
-    return LessonStyle(
-      background: cs.primaryContainer,
-      foreground: cs.onPrimaryContainer,
-    );
+    final (bg, fg) = base(cs, p, settings, names);
+    return LessonStyle(background: bg, foreground: fg);
   }
 }
 

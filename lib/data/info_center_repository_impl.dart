@@ -317,9 +317,11 @@ class InfoCenterRepositoryImpl implements InfoCenterRepository {
     Account a,
     DateTime start, {
     bool force = false,
+    bool onlyMyClass = false,
   }) async* {
-    final klasse =
-        a.personalKlasseId ?? await _klasseFromTimetable(a) ?? allClasses;
+    final klasse = onlyMyClass
+        ? a.personalKlasseId ?? await _klasseFromTimetable(a) ?? allClasses
+        : allClasses;
     Future<List<OfficeHourItem>> load(UntisCredentials auth, int k) =>
         _info.officeHours(
           host: a.host,

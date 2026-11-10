@@ -243,7 +243,14 @@ abstract interface class InfoCenterRepository {
   Stream<Cached<List<HomeworkItem>>> homework(Account a, DateTime start, DateTime end, {bool force = false});
   Stream<Cached<List<ExamItem>>> exams(Account a, DateTime start, DateTime end, {bool force = false});
   Stream<Cached<List<AbsenceItem>>> absences(Account a, DateTime start, DateTime end, {bool force = false});
-  Stream<Cached<List<OfficeHourItem>>> officeHours(Account a, DateTime start, {bool force = false});
+  /// Office hours of all teachers, or with [onlyMyClass] those of the
+  /// account's (or selected child's) class.
+  Stream<Cached<List<OfficeHourItem>>> officeHours(
+    Account a,
+    DateTime start, {
+    bool force = false,
+    bool onlyMyClass = false,
+  });
 }
 
 final infoCenterRepositoryProvider = Provider<InfoCenterRepository>(

@@ -9,6 +9,7 @@ import 'package:better_betteruntis/ui/infocenter/info_center_screen.dart';
 import 'package:better_betteruntis/ui/infocenter/info_common.dart';
 import 'package:better_betteruntis/ui/infocenter/info_providers.dart';
 import 'package:better_betteruntis/ui/infocenter/messages_tab.dart';
+import 'package:better_betteruntis/ui/infocenter/office_hours_tab.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -70,7 +71,9 @@ void main() {
       ProviderScope(
         overrides: [
           infoCenterRepositoryProvider.overrideWithValue(repo),
-          activeAccountProvider.overrideWith((ref) => Stream.value(acct ?? account())),
+          activeAccountProvider.overrideWith(
+            (ref) => Stream.value(acct ?? account()),
+          ),
           nameResolverProvider.overrideWith(
             (ref) => Stream<NameResolver>.value(FakeNameResolver()),
           ),
@@ -86,14 +89,24 @@ void main() {
   }
 
   Future<void> openTab(WidgetTester tester, String label) async {
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text(label)));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text(label),
+      ),
+    );
     await tester.pumpAndSettle();
   }
 
   Finder rich(String text) => find.textContaining(text, findRichText: true);
-  final today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+  final today = DateTime(
+    DateTime.now().year,
+    DateTime.now().month,
+    DateTime.now().day,
+  );
   String dayLabel(DateTime d) =>
-      DateFormat(d.year == today.year ? 'EEE, d MMM' : 'EEE, d MMM yyyy').format(d);
+      DateFormat(d.year == today.year ? 'EEE, d MMM' : 'EEE, d MMM yyyy')
+          .format(d);
 
   testWidgets('tabs render and switch; last tab remembered', (tester) async {
     await pump(tester);
@@ -127,7 +140,10 @@ void main() {
 
   test('empty rights = unknown → all tabs; anonymous → messages only', () {
     expect(visibleInfoTabs(account()), InfoTab.values);
-    expect(visibleInfoTabs(account(rights: {'R_OFFICEHOURS'})), isNot(contains(InfoTab.absences)));
+    expect(
+      visibleInfoTabs(account(rights: {'R_OFFICEHOURS'})),
+      isNot(contains(InfoTab.absences)),
+    );
     expect(visibleInfoTabs(account(anonymous: true)), [InfoTab.messages]);
   });
 
@@ -150,7 +166,10 @@ void main() {
     await tester.tap(find.byTooltip('Previous day'));
     await tester.pumpAndSettle();
     expect(
-      find.descendant(of: find.byType(InfoSectionHeader), matching: find.text('Yesterday')),
+      find.descendant(
+        of: find.byType(InfoSectionHeader),
+        matching: find.text('Yesterday'),
+      ),
       findsOneWidget,
     );
     expect(find.text('Fundsachen'), findsOneWidget);
@@ -159,7 +178,9 @@ void main() {
     expect(find.text('No messages on this day'), findsOneWidget);
   });
 
-  testWidgets('inbox: unread marked; detail renders HTML and links', (tester) async {
+  testWidgets('inbox: unread marked; detail renders HTML and links', (
+    tester,
+  ) async {
     await pump(tester);
     expect(find.byKey(const ValueKey('unread-dot')), findsNWidgets(2));
     final unreadTitle = tester.widget<Text>(find.text('Sekretariat'));
@@ -175,7 +196,9 @@ void main() {
 
     final linkText = tester.widget<RichText>(
       find.byWidgetPredicate(
-        (w) => w is RichText && w.text.toPlainText().contains('Anmeldung: example.org/sprechtag'),
+        (w) =>
+            w is RichText &&
+            w.text.toPlainText().contains('Anmeldung: example.org/sprechtag'),
       ),
     );
     final hrefs = <String>[];
@@ -197,31 +220,60 @@ void main() {
     expect(opened.last, Uri.parse('https://example.org/raumplan.pdf'));
   });
 
-  testWidgets('homework: grouped by due date, overdue highlighted, hidden teachers', (tester) async {
-    await pump(tester);
-    await openTab(tester, 'Homework');
-    await tester.tap(find.text('Next 2 weeks'));
-    await tester.pumpAndSettle();
-    expect(find.text('Due tomorrow'), findsOneWidget);
-    expect(find.text('Due ${dayLabel(today.add(const Duration(days: 3)))}'), findsOneWidget);
-    expect(find.text('Gedichtanalyse „Der Panther“ fertigstellen'), findsOneWidget);
-    expect(find.text('Vocabulary Unit 4 lernen'), findsOneWidget);
-    expect(find.text('Deutsch'), findsOneWidget);
-    expect(find.text('Anna Müller'), findsOneWidget, reason: 'resolved teacher');
-    expect(find.textContaining('#77'), findsNothing, reason: 'unresolved teacher hidden');
-    expect(find.text('Overdue'), findsNothing);
+  testWidgets(
+    'homework: grouped by due date, overdue highlighted, hidden teachers',
+    (tester) async {
+      await pump(tester);
+      await openTab(tester, 'Homework');
+      await tester.tap(find.text('Next 2 weeks'));
+      await tester.pumpAndSettle();
+      expect(find.text('Due tomorrow'), findsOneWidget);
+      expect(
+        find.text('Due ${dayLabel(today.add(const Duration(days: 3)))}'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Gedichtanalyse „Der Panther“ fertigstellen'),
+        findsOneWidget,
+      );
+      expect(find.text('Vocabulary Unit 4 lernen'), findsOneWidget);
+      expect(find.text('Deutsch'), findsOneWidget);
+      expect(
+        find.text('Anna Müller'),
+        findsOneWidget,
+        reason: 'resolved teacher',
+      );
+      expect(
+        find.textContaining('#77'),
+        findsNothing,
+        reason: 'unresolved teacher hidden',
+      );
+      expect(find.text('Overdue'), findsNothing);
 
-    await tester.tap(find.text('Past 4 weeks'));
-    await tester.pumpAndSettle();
-    final overdue = find.byKey(const ValueKey('homework-4'));
-    expect(overdue, findsOneWidget);
-    expect(find.descendant(of: overdue, matching: find.text('Overdue')), findsOneWidget);
-    final done = find.byKey(const ValueKey('homework-5'));
-    expect(find.descendant(of: done, matching: find.text('Overdue')), findsNothing);
-    expect(find.descendant(of: done, matching: find.text('Done')), findsOneWidget);
-    final card = tester.widget<Card>(overdue);
-    expect(card.color, Theme.of(tester.element(overdue)).colorScheme.errorContainer);
-  });
+      await tester.tap(find.text('Past 4 weeks'));
+      await tester.pumpAndSettle();
+      final overdue = find.byKey(const ValueKey('homework-4'));
+      expect(overdue, findsOneWidget);
+      expect(
+        find.descendant(of: overdue, matching: find.text('Overdue')),
+        findsOneWidget,
+      );
+      final done = find.byKey(const ValueKey('homework-5'));
+      expect(
+        find.descendant(of: done, matching: find.text('Overdue')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: done, matching: find.text('Done')),
+        findsOneWidget,
+      );
+      final card = tester.widget<Card>(overdue);
+      expect(
+        card.color,
+        Theme.of(tester.element(overdue)).colorScheme.errorContainer,
+      );
+    },
+  );
 
   testWidgets('exams: upcoming with countdown, past collapsed', (tester) async {
     await pump(tester);
@@ -249,7 +301,8 @@ void main() {
     final summary = absenceSummary(inYear);
     await pump(tester);
     await openTab(tester, 'Absences');
-    Text stat(String k) => tester.widget<Text>(find.byKey(ValueKey('absences-summary-$k')));
+    Text stat(String k) =>
+        tester.widget<Text>(find.byKey(ValueKey('absences-summary-$k')));
     expect(stat('total').data, '${summary.total}');
     expect(stat('unexcused').data, '${summary.unexcused}');
     expect(stat('hours').data, formatHours(summary.hours));
@@ -262,13 +315,27 @@ void main() {
     expect(find.byKey(const ValueKey('absence-1')), findsOneWidget);
     expect(find.byKey(const ValueKey('absence-2')), findsNothing);
     expect(find.text('Excused'), findsNothing);
-    expect(stat('total').data, '${summary.total}', reason: 'summary covers the range');
+    expect(
+      stat('total').data,
+      '${summary.total}',
+      reason: 'summary covers the range',
+    );
   });
 
   test('absence summary counts', () {
     final s = absenceSummary([
-      AbsenceItem(id: 1, start: DateTime(2026, 1, 1, 8), end: DateTime(2026, 1, 1, 9, 30), excused: false),
-      AbsenceItem(id: 2, start: DateTime(2026, 1, 2, 8), end: DateTime(2026, 1, 2, 9), excused: true),
+      AbsenceItem(
+        id: 1,
+        start: DateTime(2026, 1, 1, 8),
+        end: DateTime(2026, 1, 1, 9, 30),
+        excused: false,
+      ),
+      AbsenceItem(
+        id: 2,
+        start: DateTime(2026, 1, 2, 8),
+        end: DateTime(2026, 1, 2, 9),
+        excused: true,
+      ),
     ]);
     expect((s.total, s.unexcused, s.hours), (2, 1, 2.5));
     expect(formatHours(2.5), '2.5 h');
@@ -276,7 +343,9 @@ void main() {
     expect(schoolYearStart(DateTime(2027, 3, 1)), DateTime(2026, 9, 1));
   });
 
-  testWidgets('office hours: next 2 weeks with mailto/tel actions', (tester) async {
+  testWidgets('office hours: next 2 weeks with mailto/tel actions', (
+    tester,
+  ) async {
     await pump(tester);
     await openTab(tester, 'Office hours');
     expect(find.text('Registration possible'), findsOneWidget);
@@ -290,7 +359,44 @@ void main() {
     expect(opened.last, Uri.parse('tel:+4912345678912'));
   });
 
-  testWidgets('refresh failure keeps cached data and shows a banner', (tester) async {
+  testWidgets(
+    'office hours: all teachers by default, chip narrows to my class',
+    (tester) async {
+      await pump(tester);
+      await openTab(tester, 'Office hours');
+      expect(repo.lastOfficeHoursOnlyMyClass, isFalse);
+      await tester.tap(find.byKey(const ValueKey('officehours-only-mine')));
+      await tester.pumpAndSettle();
+      expect(repo.lastOfficeHoursOnlyMyClass, isTrue);
+      expect(
+        find.byKey(const ValueKey('officehours-only-mine')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  test('office hours are grouped by teacher A–Z, then by time', () {
+    OfficeHourItem oh(int id, String t, int day) => OfficeHourItem(
+      id: id,
+      start: DateTime(2026, 11, day, 10),
+      end: DateTime(2026, 11, day, 11),
+      teacherName: t,
+    );
+    final g = groupByTeacher([
+      oh(1, 'Zimmer', 10),
+      oh(2, 'Özdemir', 12),
+      oh(3, 'anders', 11),
+      oh(4, 'Özdemir', 9),
+      oh(5, '', 9),
+      oh(6, 'Otto', 9),
+    ]);
+    expect(g.map((e) => e.key), ['anders', 'Otto', 'Özdemir', 'Zimmer', '']);
+    expect(g[2].value.map((o) => o.id), [4, 2]);
+  });
+
+  testWidgets('refresh failure keeps cached data and shows a banner', (
+    tester,
+  ) async {
     repo.error = const UntisException(0, 'offline');
     repo.failing = {FakeInfoKind.homework};
     await pump(tester);
@@ -304,7 +410,9 @@ void main() {
     expect(find.byKey(const ValueKey('info-error-banner')), findsNothing);
   });
 
-  testWidgets('no cache + failure: full error state, retry recovers', (tester) async {
+  testWidgets('no cache + failure: full error state, retry recovers', (
+    tester,
+  ) async {
     repo
       ..hasCache = false
       ..error = const UntisException(-8509, 'no right');
@@ -324,7 +432,9 @@ void main() {
     final before = repo.calls.length;
     await tester.drag(find.byType(CustomScrollView), const Offset(0, 500));
     await tester.pumpAndSettle();
-    final forced = repo.calls.skip(before).where((c) => c.force && c.kind == FakeInfoKind.exams);
+    final forced = repo.calls
+        .skip(before)
+        .where((c) => c.force && c.kind == FakeInfoKind.exams);
     expect(forced.length, 2, reason: 'upcoming + past');
   });
 

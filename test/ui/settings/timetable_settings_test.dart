@@ -1,11 +1,14 @@
 import 'dart:io';
 
 import 'package:better_betteruntis/app/settings_store.dart';
+import 'package:better_betteruntis/core/interfaces.dart';
 import 'package:better_betteruntis/core/providers.dart';
 import 'package:better_betteruntis/core/settings.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
+import 'package:better_betteruntis/ui/settings/subject_colors_screen.dart';
 import 'package:better_betteruntis/ui/settings/timetable_settings_screen.dart';
 import 'package:better_betteruntis/ui/timetable/lesson_card.dart';
+import 'package:better_betteruntis/ui/timetable/lesson_style.dart';
 import 'package:better_betteruntis/ui/timetable/timetable_screen.dart';
 import 'package:better_betteruntis/ui/timetable/timetable_utils.dart';
 import 'package:flutter/material.dart';
@@ -65,6 +68,59 @@ void main() {
       expect(s.regularColor, 0xFF336699);
       expect(s.examColor, isNull);
       expect(s.cancelledColor, isNull);
+    });
+
+    test('subject colors and state modes: defaults, round-trip', () {
+      const d = TimetableSettings();
+      expect(d.subjectColors, isEmpty);
+      expect(d.examMode, StateColorMode.fill);
+      expect(d.cancelledMode, StateColorMode.fill);
+      expect(d.irregularMode, StateColorMode.border);
+
+      const s = TimetableSettings(
+        subjectColors: {'M': 0xFF1976D2, 'PH': 0xFF388E3C},
+        examMode: StateColorMode.border,
+        irregularMode: StateColorMode.fill,
+        cancelledMode: StateColorMode.border,
+      );
+      final back = TimetableSettings.fromJson(s.toJson());
+      expect(back, s);
+      expect(back.hashCode, s.hashCode);
+      expect(back.subjectColors, {'M': 0xFF1976D2, 'PH': 0xFF388E3C});
+      expect(back.examMode, StateColorMode.border);
+      expect(s == s.copyWith(subjectColors: {'M': 0xFF1976D2}), isFalse);
+    });
+
+    test('subject colors and modes parse tolerantly', () {
+      final s = TimetableSettings.fromJson({
+        'subjectColors': {
+          ' m ': '#1976D2',
+          'ph': 0xFF388E3C,
+          'bad': 'zzz',
+          '': 0xFF000000,
+          'x': [1],
+        },
+        'examMode': 'border',
+        'irregularMode': 'sparkles',
+        'cancelledMode': 3,
+      });
+      expect(s.subjectColors, {'M': 0xFF1976D2, 'PH': 0xFF388E3C});
+      expect(s.examMode, StateColorMode.border);
+      expect(s.irregularMode, StateColorMode.border);
+      expect(s.cancelledMode, StateColorMode.fill);
+      expect(
+        TimetableSettings.fromJson({'subjectColors': 'nope'}).subjectColors,
+        isEmpty,
+      );
+    });
+
+    test('withSubjectColor sets, normalizes and removes', () {
+      final s = const TimetableSettings().withSubjectColor('bio ', 0xFF81C784);
+      expect(s.subjectColorFor('BIO'), 0xFF81C784);
+      expect(s.subjectColorFor(' Bio'), 0xFF81C784);
+      expect(s.subjectColorFor('M'), isNull);
+      expect(s.withSubjectColor('BIO', null).subjectColors, isEmpty);
+      expect(s.withSubjectColor('  ', 0xFF000000), s);
     });
 
     test('copyWith keeps colors unless passed, null resets', () {
@@ -158,13 +214,18 @@ void main() {
     Future<void> pump(
       WidgetTester tester, {
       Brightness brightness = Brightness.light,
+      NameResolver? names,
     }) async {
       tester.view.physicalSize = const Size(400 * 3, 900 * 3);
       tester.view.devicePixelRatio = 3;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [settingsStoreProvider.overrideWithValue(store)],
+          overrides: [
+            settingsStoreProvider.overrideWithValue(store),
+            if (names != null)
+              nameResolverProvider.overrideWith((ref) => Stream.value(names)),
+          ],
           child: MaterialApp(
             theme: ThemeData(brightness: brightness),
             home: const TimetableSettingsScreen(),
@@ -250,6 +311,12 @@ void main() {
     ) async {
       await pump(tester);
       expect(subjectSize(tester), 15);
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('detail-size-slider')),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pumpAndSettle();
       final slider = find.descendant(
         of: find.byKey(const ValueKey('subject-size-slider')),
         matching: find.byType(Slider),
@@ -272,6 +339,130 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('reset-all')));
       await tester.pumpAndSettle();
       expect(cardColor(tester, 'school'), const Color(0xFF81C784));
+    });
+
+    BorderSide cardBorder(WidgetTester tester, String kind) {
+      final m = tester.widget<Material>(
+        find
+            .descendant(of: preview(kind), matching: find.byType(Material))
+            .first,
+      );
+      return (m.shape! as RoundedRectangleBorder).side;
+    }
+
+    testWidgets('fill/border toggle per state updates preview and store', (
+      tester,
+    ) async {
+      await pump(tester);
+      final cs = Theme.of(tester.element(find.byType(TimetableSettingsScreen)))
+          .colorScheme;
+      // Defaults: exam filled, substitution as border.
+      expect(cardColor(tester, 'exam'), cs.errorContainer);
+      expect(cardColor(tester, 'substitution'), cardColor(tester, 'regular'));
+      expect(cardBorder(tester, 'substitution').color, cs.tertiary);
+      expect(
+        cardBorder(tester, 'substitution').width,
+        LessonStyle.stateBorderWidth,
+      );
+      expect(find.byKey(const ValueKey('mode-regular')), findsNothing);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('mode-exam')),
+          matching: find.text('Border'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(cardColor(tester, 'exam'), cardColor(tester, 'regular'));
+      expect(cardBorder(tester, 'exam').color, cs.error);
+      expect(cardBorder(tester, 'exam').width, LessonStyle.stateBorderWidth);
+      expect((store.values['timetable'] as Map)['examMode'], 'border');
+
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('mode-irregular')),
+          matching: find.text('Fill'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(cardColor(tester, 'substitution'), cs.tertiaryContainer);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('mode-cancelled')),
+          matching: find.text('Border'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(cardColor(tester, 'cancelled'), cardColor(tester, 'regular'));
+      expect(cardBorder(tester, 'cancelled').color, cs.outline);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('subject colors: pick, reset one, reset all', (tester) async {
+      await pump(tester, names: FakeNameResolver());
+      await tester.tap(find.byKey(const ValueKey('subject-colors')));
+      await tester.pumpAndSettle();
+      expect(find.byType(SubjectColorsScreen), findsOneWidget);
+      // Active demo subjects, sorted by name.
+      expect(find.byKey(const ValueKey('subject-M')), findsOneWidget);
+      expect(find.text('Mathematik · Default'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('subject-M')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('preset-ff1976d2')));
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(200, 40)); // close the sheet
+      await tester.pumpAndSettle();
+      final saved = (store.values['timetable'] as Map)['subjectColors'] as Map;
+      expect(saved, {'M': 0xFF1976D2});
+      final swatch = tester.widget<Container>(
+        find.byKey(const ValueKey('subject-swatch-M')),
+      );
+      expect(
+        (swatch.decoration! as BoxDecoration).color,
+        const Color(0xFF1976D2),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('subject-reset-M')));
+      await tester.pumpAndSettle();
+      expect(
+        (store.values['timetable'] as Map)['subjectColors'] as Map,
+        isEmpty,
+      );
+
+      // Colors from another account (unknown here) are listed too.
+      final notifier = ProviderScope.containerOf(
+        tester.element(find.byType(SubjectColorsScreen)),
+      ).read(timetableSettingsProvider.notifier);
+      notifier.update(
+        (s) => s
+            .withSubjectColor('D', 0xFFD32F2F)
+            .withSubjectColor('LAT', 0xFF388E3C),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('subject-LAT')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('reset-subject-colors')));
+      await tester.pumpAndSettle();
+      expect(
+        ProviderScope.containerOf(
+          tester.element(find.byType(SubjectColorsScreen)),
+        ).read(timetableSettingsProvider).subjectColors,
+        isEmpty,
+      );
+      expect(find.byKey(const ValueKey('subject-LAT')), findsNothing);
+      // Undo brings them back.
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('subject-LAT')), findsOneWidget);
+    });
+
+    testWidgets('subject color shows in the preview', (tester) async {
+      store.values['timetable'] = const TimetableSettings(
+        subjectColors: {'M': 0xFF1976D2},
+      ).toJson();
+      await pump(tester);
+      expect(cardColor(tester, 'regular'), const Color(0xFF1976D2));
     });
 
     testWidgets('dark mode renders without errors', (tester) async {

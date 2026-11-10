@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:better_betteruntis/core/models.dart';
+import 'package:better_betteruntis/core/settings.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
 import 'package:better_betteruntis/export/csv_export.dart';
 import 'package:better_betteruntis/export/export_model.dart';
@@ -20,6 +21,7 @@ ExportTimetable demoExport({
   ExportKind kind = ExportKind.week,
   List<Period>? periods,
   Map<int, String> holidays = const {},
+  ExportPalette palette = const ExportPalette(),
 }) {
   final names = FakeNameResolver();
   return ExportTimetable(
@@ -36,6 +38,7 @@ ExportTimetable demoExport({
       periods ?? buildDemoWeek(mon),
       names,
       regular: kind == ExportKind.regular,
+      palette: palette,
     ),
     exportedAt: DateTime(2026, 11, 10, 12),
     holidays: holidays,
@@ -147,6 +150,30 @@ void main() {
         '1–2',
         'M',
       ]);
+    });
+
+    test('border mode: thick state-colored cell border, base fill', () {
+      String styles(ExportPalette palette) => readZipText(
+        buildXlsx(demoExport(palette: palette)),
+        'xl/styles.xml',
+      )!;
+      expect(styles(const ExportPalette()), contains('thick'));
+      const allFill = ExportPalette(substitutionMode: StateColorMode.fill);
+      expect(styles(allFill), isNot(contains('thick')));
+      final exam = styles(
+        const ExportPalette(
+          substitutionMode: StateColorMode.fill,
+          examMode: StateColorMode.border,
+          exam: 0xFF7B1FA2,
+        ),
+      );
+      expect(exam, contains('thick'));
+      expect(exam, contains('FF7B1FA2'));
+      // The excel package still reads it.
+      expect(
+        () => Excel.decodeBytes(buildXlsx(demoExport(palette: allFill))),
+        returnsNormally,
+      );
     });
 
     test('header row/column are frozen', () {
@@ -326,6 +353,19 @@ void main() {
       expect(isPdf(bytes), isTrue);
       final text = latin1.decode(bytes);
       expect(RegExp(r'/Type\s*/Page\b').allMatches(text), hasLength(1));
+    });
+
+    test('border mode for every state renders', () async {
+      final t = demoExport(
+        palette: const ExportPalette(
+          examMode: StateColorMode.border,
+          cancelledMode: StateColorMode.border,
+          subjectColors: {'M': 0xFF1976D2},
+        ),
+      );
+      expect(t.lessons.where((l) => l.borderColor != null), isNotEmpty);
+      final bytes = await buildPdf(t, fonts: testFonts());
+      expect(isPdf(bytes), isTrue);
     });
 
     test('grayscale, portrait, holiday', () async {
