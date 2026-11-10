@@ -48,7 +48,8 @@ WORKDIR /server
 COPY server/pubspec.yaml server/pubspec.lock ./
 RUN dart pub get
 COPY server/ ./
-RUN dart pub get --offline \
+RUN mkdir -p /out \
+ && dart pub get --offline \
  && dart compile exe bin/server.dart -o /out/bbu_server
 
 # ---------------------------------------------------------------------------
