@@ -382,10 +382,9 @@ class ElementChip extends StatelessWidget {
         _ => Icons.label_outline,
       }, size: 18),
       label: Text.rich(label),
-      onPressed:
-          onOpen == null ||
-              id <=
-                  0 // <0: name-only (REST) element, no timetable
+      // id 0: nothing to open. Negative ids are name-only teachers, whose
+      // timetable is rebuilt from class timetables, so they open too.
+      onPressed: onOpen == null || id == 0
           ? null
           : () => onOpen!(TimetableTarget(r.type, id)),
     );
