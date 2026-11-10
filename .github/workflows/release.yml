@@ -158,8 +158,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -la dist
-          PRE=""
-          case "$TAG" in *-alpha*|*-beta*|*-rc*) PRE="--prerelease" ;; esac
+          # Only alphas are pre-releases; betas, rcs and stable are full
+          # releases and become "Latest".
+          PRE="--latest"
+          case "$TAG" in *-alpha*) PRE="--prerelease" ;; esac
           NOTES=.github/release-notes/${TAG}.md
           [ -f "$NOTES" ] || NOTES=.github/release-notes/default.md
           if gh release view "$TAG" >/dev/null 2>&1; then
