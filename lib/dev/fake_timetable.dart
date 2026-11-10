@@ -719,6 +719,23 @@ class FakeTimetableRepository implements TimetableRepository {
     DateTime weekStart,
   ) => _refreshed[(account.id, target, weekStart)] ?? _initialRefreshed;
 
+  int discoverCount = 0;
+
+  @override
+  Future<void> discoverTeachers(
+    Account account,
+    DateTime weekStart, {
+    void Function(int done, int total)? onProgress,
+  }) async {
+    discoverCount++;
+    const total = 3;
+    for (var i = 1; i <= total; i++) {
+      if (latency > Duration.zero) await Future<void>.delayed(latency);
+      onProgress?.call(i, total);
+    }
+    if (refreshError != null) throw refreshError!;
+  }
+
   void dispose() => _changes.close();
 }
 

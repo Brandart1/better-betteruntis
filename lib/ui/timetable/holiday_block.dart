@@ -21,9 +21,8 @@ class HolidayBlock extends StatelessWidget {
           textAlign: TextAlign.center,
           maxLines: narrow ? 1 : 3,
           overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            color: cs.onSecondaryContainer,
-          ),
+          style: Theme.of(context).textTheme.titleSmall
+              ?.copyWith(color: cs.onSecondaryContainer),
         );
         return DecoratedBox(
           decoration: BoxDecoration(

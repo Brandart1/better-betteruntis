@@ -12,9 +12,11 @@ const kPagerOrigin = 10000;
 DateTime dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
 /// Monday of the week containing [d] (date only, DST-safe).
-DateTime mondayOf(DateTime d) => DateTime(d.year, d.month, d.day - (d.weekday - 1));
+DateTime mondayOf(DateTime d) =>
+    DateTime(d.year, d.month, d.day - (d.weekday - 1));
 
-DateTime addDays(DateTime d, int days) => DateTime(d.year, d.month, d.day + days);
+DateTime addDays(DateTime d, int days) =>
+    DateTime(d.year, d.month, d.day + days);
 
 bool sameDay(DateTime a, DateTime b) =>
     a.year == b.year && a.month == b.month && a.day == b.day;

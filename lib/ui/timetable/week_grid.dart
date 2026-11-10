@@ -16,9 +16,13 @@ class WeekModel {
 
   factory WeekModel.build(
     DateTime weekStart,
-    List<Period> periods,
-    NameResolver names,
-  ) {
+    List<Period> allPeriods,
+    NameResolver names, {
+    bool showCancelled = true,
+  }) {
+    final periods = showCancelled
+        ? allPeriods
+        : allPeriods.where((p) => !p.isCancelled).toList();
     final grid = names.timeGrid;
     final weekdays = visibleWeekdays(grid, periods);
     final holidays = names.holidays;

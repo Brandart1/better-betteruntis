@@ -1,10 +1,13 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
+import '../../core/settings.dart';
 import 'lesson_layout.dart';
+import 'lesson_style.dart';
 import 'timetable_utils.dart';
 
 /// Opens the lesson details for [blocks] (several = overlapping lessons, shown
@@ -103,7 +106,7 @@ class _LessonDetailsSheetState extends State<LessonDetailsSheet> {
 }
 
 /// Details of one (possibly merged) lesson.
-class LessonDetailsPage extends StatelessWidget {
+class LessonDetailsPage extends ConsumerWidget {
   const LessonDetailsPage({
     super.key,
     required this.block,
@@ -116,8 +119,10 @@ class LessonDetailsPage extends StatelessWidget {
   final ValueChanged<TimetableTarget>? onOpenElement;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final settings = ref.watch(timetableSettingsProvider);
+    final accent = LessonStyle.of(theme.colorScheme, block, settings);
     final p = block.first;
     final subjects = p.ofType(ElementType.subject).toList();
     final title = subjects.isNotEmpty
@@ -131,27 +136,66 @@ class LessonDetailsPage extends StatelessWidget {
     ].join(' · ');
 
     final texts = <String>{
-      for (final q in block.periods) ...[q.substitutionText, q.lessonText, q.infoText],
+      for (final q in block.periods) ...[
+        q.substitutionText,
+        q.lessonText,
+        q.infoText,
+      ],
       if (p.exam != null) ...[p.exam!.name, p.exam!.text],
     }.where((t) => t.trim().isNotEmpty && t != title).toList();
     final homework = <int, Homework>{
       for (final h in block.periods.expand((q) => q.homework)) h.id: h,
     }.values.toList();
-    final link = block.periods.map((q) => q.onlineLink).firstWhereOrNull(
-          (l) => l != null && l.isNotEmpty,
-        );
+    final link = block.periods
+        .map((q) => q.onlineLink)
+        .firstWhereOrNull((l) => l != null && l.isNotEmpty);
 
     return ListView(
       shrinkWrap: true,
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
       children: [
-        Text(title, style: theme.textTheme.headlineSmall),
-        const SizedBox(height: 4),
-        Text(when, style: theme.textTheme.bodyMedium?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        )),
-        _StatusChips(block: block),
-        _ElementSection('Teachers', ElementType.teacher, p, names, onOpenElement),
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                key: const ValueKey('details-accent'),
+                width: 6,
+                margin: const EdgeInsets.only(right: 12),
+                decoration: BoxDecoration(
+                  color: accent.background,
+                  border: accent.border == null
+                      ? null
+                      : Border.all(color: accent.border!, width: 1.5),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: theme.textTheme.headlineSmall),
+                    const SizedBox(height: 4),
+                    Text(
+                      when,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        _StatusChips(block: block, settings: settings),
+        _ElementSection(
+          'Teachers',
+          ElementType.teacher,
+          p,
+          names,
+          onOpenElement,
+        ),
         _ElementSection('Classes', ElementType.klasse, p, names, onOpenElement),
         _ElementSection('Rooms', ElementType.room, p, names, onOpenElement),
         for (final t in texts)
@@ -172,12 +216,16 @@ class LessonDetailsPage extends StatelessWidget {
           for (final h in homework)
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: Icon(h.completed ? Icons.check_circle : Icons.menu_book_outlined),
+              leading: Icon(
+                h.completed ? Icons.check_circle : Icons.menu_book_outlined,
+              ),
               title: Text(h.text),
-              subtitle: Text([
-                'Due ${dateFormat(context, 'EEE d MMM').format(h.endDate)}',
-                if (h.remark.isNotEmpty) h.remark,
-              ].join(' · ')),
+              subtitle: Text(
+                [
+                  'Due ${dateFormat(context, 'EEE d MMM').format(h.endDate)}',
+                  if (h.remark.isNotEmpty) h.remark,
+                ].join(' · '),
+              ),
             ),
         ],
         if (p.isOnline || link != null) ...[
@@ -192,11 +240,13 @@ class LessonDetailsPage extends StatelessWidget {
               label: const Text('Join online lesson'),
             )
           else
-            const Row(children: [
-              Icon(Icons.wifi),
-              SizedBox(width: 8),
-              Text('Online lesson'),
-            ]),
+            const Row(
+              children: [
+                Icon(Icons.wifi),
+                SizedBox(width: 8),
+                Text('Online lesson'),
+              ],
+            ),
         ],
       ],
     );
@@ -204,19 +254,35 @@ class LessonDetailsPage extends StatelessWidget {
 }
 
 class _StatusChips extends StatelessWidget {
-  const _StatusChips({required this.block});
+  const _StatusChips({required this.block, required this.settings});
   final LessonBlock block;
+  final TimetableSettings settings;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    (Color, Color) colors(int? custom, Color bg, Color fg) =>
+        custom == null ? (bg, fg) : (Color(custom), onColorFor(Color(custom)));
+    final (cBg, cFg) = colors(
+      settings.cancelledColor,
+      cs.errorContainer,
+      cs.onErrorContainer,
+    );
+    final (eBg, eFg) = colors(
+      settings.examColor,
+      cs.errorContainer,
+      cs.onErrorContainer,
+    );
+    final (iBg, iFg) = colors(
+      settings.irregularColor,
+      cs.tertiaryContainer,
+      cs.onTertiaryContainer,
+    );
     final chips = <Widget>[
-      if (block.isCancelled)
-        _chip(Icons.block, 'Cancelled', cs.errorContainer, cs.onErrorContainer),
-      if (block.isExam)
-        _chip(Icons.assignment_outlined, 'Exam', cs.errorContainer, cs.onErrorContainer),
+      if (block.isCancelled) _chip(Icons.block, 'Cancelled', cBg, cFg),
+      if (block.isExam) _chip(Icons.assignment_outlined, 'Exam', eBg, eFg),
       if (!block.isCancelled && block.isIrregular)
-        _chip(Icons.swap_horiz, 'Substitution', cs.tertiaryContainer, cs.onTertiaryContainer),
+        _chip(Icons.swap_horiz, 'Substitution', iBg, iFg),
     ];
     if (chips.isEmpty) return const SizedBox.shrink();
     return Padding(
@@ -226,16 +292,22 @@ class _StatusChips extends StatelessWidget {
   }
 
   Widget _chip(IconData icon, String label, Color bg, Color fg) => Chip(
-        avatar: Icon(icon, size: 18, color: fg),
-        label: Text(label, style: TextStyle(color: fg)),
-        backgroundColor: bg,
-        side: BorderSide.none,
-        visualDensity: VisualDensity.compact,
-      );
+    avatar: Icon(icon, size: 18, color: fg),
+    label: Text(label, style: TextStyle(color: fg)),
+    backgroundColor: bg,
+    side: BorderSide.none,
+    visualDensity: VisualDensity.compact,
+  );
 }
 
 class _ElementSection extends StatelessWidget {
-  const _ElementSection(this.title, this.type, this.period, this.names, this.onOpen);
+  const _ElementSection(
+    this.title,
+    this.type,
+    this.period,
+    this.names,
+    this.onOpen,
+  );
 
   final String title;
   final ElementType type;
@@ -258,7 +330,8 @@ class _ElementSection extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final r in refs) ElementChip(element: r, names: names, onOpen: onOpen),
+              for (final r in refs)
+                ElementChip(element: r, names: names, onOpen: onOpen),
             ],
           ),
         ],
@@ -286,15 +359,19 @@ class ElementChip extends StatelessWidget {
     final r = element;
     const struck = TextStyle(decoration: TextDecoration.lineThrough);
     final InlineSpan label = switch (r.change) {
-      ElementChange.regular || ElementChange.added =>
-        TextSpan(text: names.longName(r)),
-      ElementChange.substituted => TextSpan(children: [
+      ElementChange.regular ||
+      ElementChange.added => TextSpan(text: names.longName(r)),
+      ElementChange.substituted => TextSpan(
+        children: [
           TextSpan(text: names.longName(r, original: true), style: struck),
           const TextSpan(text: ' → '),
           TextSpan(text: names.longName(r)),
-        ]),
-      ElementChange.removed =>
-        TextSpan(text: names.longName(r, original: true), style: struck),
+        ],
+      ),
+      ElementChange.removed => TextSpan(
+        text: names.longName(r, original: true),
+        style: struck,
+      ),
     };
     final id = r.id != 0 ? r.id : r.orgId;
     return ActionChip(
@@ -305,7 +382,10 @@ class ElementChip extends StatelessWidget {
         _ => Icons.label_outline,
       }, size: 18),
       label: Text.rich(label),
-      onPressed: onOpen == null || id <= 0 // <0: name-only (REST) element, no timetable
+      onPressed:
+          onOpen == null ||
+              id <=
+                  0 // <0: name-only (REST) element, no timetable
           ? null
           : () => onOpen!(TimetableTarget(r.type, id)),
     );

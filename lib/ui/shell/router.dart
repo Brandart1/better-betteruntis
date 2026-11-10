@@ -8,6 +8,7 @@ import '../accounts/manage_accounts_screen.dart';
 import '../login/login_form_screen.dart';
 import '../login/login_screen.dart';
 import '../login/qr_scan_screen.dart';
+import '../settings/timetable_settings_screen.dart';
 import '../timetable/timetable_screen.dart';
 import 'app_drawer.dart';
 import 'debug_screen.dart';
@@ -19,6 +20,7 @@ import 'element_picker_screen.dart';
 ///   /browse                pick a class / teacher / room / subject
 ///   /login, /login/add, /login/form (extra: School?), /login/qr
 ///   /accounts              manage accounts
+///   /settings              timetable look (colors, text, cancelled)
 ///   /debug                 raw API responses
 final routerProvider = Provider<GoRouter>((ref) {
   // null = still loading, otherwise whether any account exists.
@@ -66,7 +68,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, s) => LoginFormScreen(school: s.extra as School?),
       ),
       GoRoute(path: '/login/qr', builder: (_, _) => const QrScanScreen()),
-      GoRoute(path: '/accounts', builder: (_, _) => const ManageAccountsScreen()),
+      GoRoute(
+        path: '/accounts',
+        builder: (_, _) => const ManageAccountsScreen(),
+      ),
+      GoRoute(
+        path: '/settings',
+        builder: (_, _) => const TimetableSettingsScreen(),
+      ),
       GoRoute(path: '/debug', builder: (_, _) => const DebugScreen()),
     ],
   );

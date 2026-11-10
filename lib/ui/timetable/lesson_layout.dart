@@ -30,7 +30,8 @@ class LessonBlock {
   bool get isExam => periods.any((p) => p.isExam);
   bool get isIrregular => periods.any((p) => p.isIrregular);
 
-  bool overlaps(LessonBlock o) => start.isBefore(o.end) && o.start.isBefore(end);
+  bool overlaps(LessonBlock o) =>
+      start.isBefore(o.end) && o.start.isBefore(end);
 }
 
 String _elementsKey(Period p) {
@@ -111,8 +112,10 @@ List<LessonBlock> layoutDay(Iterable<Period> periods) {
 /// Blocks overlapping [tapped] (including itself), in column order — the
 /// pages of the details sheet.
 List<LessonBlock> overlappingBlocks(List<LessonBlock> day, LessonBlock tapped) {
-  final res = [for (final b in day) if (b == tapped || b.overlaps(tapped)) b]
-    ..sort((a, b) => a.column.compareTo(b.column));
+  final res = [
+    for (final b in day)
+      if (b == tapped || b.overlaps(tapped)) b,
+  ]..sort((a, b) => a.column.compareTo(b.column));
   return res;
 }
 
@@ -145,7 +148,10 @@ class TimeScale {
     }
     for (final p in periods) {
       start = math.min(start, minuteOfDay(p.start));
-      end = math.max(end, sameDay(p.start, p.end) ? minuteOfDay(p.end) : 24 * 60);
+      end = math.max(
+        end,
+        sameDay(p.start, p.end) ? minuteOfDay(p.end) : 24 * 60,
+      );
     }
     if (end <= start) return (8 * 60, 16 * 60);
     return (start, end);

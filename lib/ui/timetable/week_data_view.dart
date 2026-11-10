@@ -154,7 +154,11 @@ class _ErrorBanner extends StatelessWidget {
 
 /// Full-page error with a retry button (no cached data available).
 class TimetableErrorState extends StatelessWidget {
-  const TimetableErrorState({super.key, required this.error, required this.onRetry});
+  const TimetableErrorState({
+    super.key,
+    required this.error,
+    required this.onRetry,
+  });
 
   final Object error;
   final VoidCallback onRetry;
@@ -162,15 +166,19 @@ class TimetableErrorState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final network = error is UntisException && (error as UntisException).isNetwork;
+    final network =
+        error is UntisException && (error as UntisException).isNetwork;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(network ? Icons.cloud_off : Icons.error_outline,
-                size: 48, color: theme.colorScheme.error),
+            Icon(
+              network ? Icons.cloud_off : Icons.error_outline,
+              size: 48,
+              color: theme.colorScheme.error,
+            ),
             const SizedBox(height: 16),
             Text(
               network ? 'No connection' : 'Could not load the timetable',
@@ -179,7 +187,9 @@ class TimetableErrorState extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              network ? 'Check your internet connection and try again.' : describeError(error),
+              network
+                  ? 'Check your internet connection and try again.'
+                  : describeError(error),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium,
             ),

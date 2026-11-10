@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
+import '../../core/settings.dart';
 import 'lesson_layout.dart';
 import 'lesson_style.dart';
 import 'timetable_utils.dart';
 
 /// A rounded lesson card. All text is one [Text.rich] (one paragraph per
 /// card) so the grid stays cheap to lay out; overflowing text is clipped.
-class LessonCard extends StatelessWidget {
+///
+/// Watches [timetableSettingsProvider] itself, so a settings change rebuilds
+/// just the cards (no relayout of the grid, no refetch).
+class LessonCard extends ConsumerWidget {
   const LessonCard({
     super.key,
     required this.block,
@@ -25,26 +30,33 @@ class LessonCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(timetableSettingsProvider);
     final cs = Theme.of(context).colorScheme;
-    final style = LessonStyle.of(cs, block);
+    final style = LessonStyle.of(cs, block, settings);
     final radius = BorderRadius.circular(detailed ? 10 : 6);
     final fg = style.foreground;
+    final centered = settings.centerText;
 
     Widget content = Padding(
       padding: EdgeInsets.symmetric(
         horizontal: detailed ? 10 : 3,
         vertical: detailed ? 6 : 2,
       ),
-      child: Text.rich(
-        TextSpan(children: _spans(fg, style)),
-        style: TextStyle(
-          color: fg,
-          fontSize: detailed ? 14 : 11,
-          height: 1.2,
+      child: Align(
+        alignment: centered ? Alignment.center : AlignmentDirectional.topStart,
+        child: Text.rich(
+          TextSpan(children: _spans(fg, style, settings)),
+          style: TextStyle(
+            color: fg,
+            fontSize: settings.detailFontSize,
+            height: 1.2,
+          ),
+          textAlign: centered ? TextAlign.center : TextAlign.start,
+          overflow: TextOverflow.clip,
+          textScaler: MediaQuery.textScalerOf(context)
+              .clamp(maxScaleFactor: 1.3),
         ),
-        overflow: TextOverflow.clip,
-        textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.3),
       ),
     );
     if (style.cancelled) {
@@ -63,11 +75,18 @@ class LessonCard extends StatelessWidget {
             : BorderSide(color: style.border!, width: 2),
       ),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(onTap: onTap, child: SizedBox.expand(child: content)),
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox.expand(child: content),
+      ),
     );
   }
 
-  List<InlineSpan> _spans(Color fg, LessonStyle style) {
+  List<InlineSpan> _spans(
+    Color fg,
+    LessonStyle style,
+    TimetableSettings settings,
+  ) {
     final p = block.first;
     final subjects = p.ofType(ElementType.subject).toList();
     final teachers = p.ofType(ElementType.teacher).toList();
@@ -80,7 +99,11 @@ class LessonCard extends StatelessWidget {
           alignment: PlaceholderAlignment.middle,
           child: Padding(
             padding: const EdgeInsets.only(right: 2),
-            child: Icon(Icons.assignment_outlined, size: detailed ? 16 : 11, color: fg),
+            child: Icon(
+              Icons.assignment_outlined,
+              size: settings.subjectFontSize,
+              color: fg,
+            ),
           ),
         ),
       if (subjects.isEmpty)
@@ -93,7 +116,8 @@ class LessonCard extends StatelessWidget {
       TextSpan(
         children: title,
         style: TextStyle(
-          fontWeight: FontWeight.bold,
+          fontSize: settings.subjectFontSize,
+          fontWeight: settings.boldSubject ? FontWeight.bold : FontWeight.w500,
           decoration: style.cancelled ? TextDecoration.lineThrough : null,
         ),
       ),
@@ -105,27 +129,39 @@ class LessonCard extends StatelessWidget {
     }
 
     if (detailed) {
-      spans.add(TextSpan(
-        text: '  ${hhmm(minuteOfDay(block.start))}–${hhmm(minuteOfDay(block.end))}',
-        style: TextStyle(color: fg.withValues(alpha: 0.75)),
-      ));
+      spans.add(
+        TextSpan(
+          text:
+              '  ${hhmm(minuteOfDay(block.start))}–${hhmm(minuteOfDay(block.end))}',
+          style: TextStyle(color: fg.withValues(alpha: 0.75)),
+        ),
+      );
     }
     // Teachers first: they must never be clipped away (BetterUntis bug).
     line(elementSpans(names, teachers, long: detailed, oldStyle: oldStyle));
     line(elementSpans(names, rooms, long: detailed, oldStyle: oldStyle));
     if (detailed) {
       final classes = p.ofType(ElementType.klasse);
-      line(elementSpans(names, classes, oldStyle: oldStyle),
-          st: TextStyle(color: fg.withValues(alpha: 0.75)));
+      line(
+        elementSpans(names, classes, oldStyle: oldStyle),
+        st: TextStyle(color: fg.withValues(alpha: 0.75)),
+      );
       final texts = {
-        for (final q in block.periods) ...[q.substitutionText, q.lessonText, q.infoText],
+        for (final q in block.periods) ...[
+          q.substitutionText,
+          q.lessonText,
+          q.infoText,
+        ],
       }.where((t) => t.trim().isNotEmpty);
       for (final t in texts) {
-        line([TextSpan(text: t)], st: const TextStyle(fontStyle: FontStyle.italic));
+        line([
+          TextSpan(text: t),
+        ], st: const TextStyle(fontStyle: FontStyle.italic));
       }
     } else if (p.substitutionText.isNotEmpty) {
-      line([TextSpan(text: p.substitutionText)],
-          st: const TextStyle(fontStyle: FontStyle.italic));
+      line([
+        TextSpan(text: p.substitutionText),
+      ], st: const TextStyle(fontStyle: FontStyle.italic));
     }
     return spans;
   }
@@ -143,7 +179,11 @@ class CancelledHatchPainter extends CustomPainter {
       ..strokeWidth = 1;
     const step = 8.0;
     for (var x = -size.height; x < size.width; x += step) {
-      canvas.drawLine(Offset(x, size.height), Offset(x + size.height, 0), paint);
+      canvas.drawLine(
+        Offset(x, size.height),
+        Offset(x + size.height, 0),
+        paint,
+      );
     }
   }
 

@@ -44,7 +44,12 @@ class GridBackgroundPainter extends CustomPainter {
     }
     if (todayColumn >= 0) {
       canvas.drawRect(
-        Rect.fromLTWH(left + columnWidth * todayColumn, 0, columnWidth, size.height),
+        Rect.fromLTWH(
+          left + columnWidth * todayColumn,
+          0,
+          columnWidth,
+          size.height,
+        ),
         Paint()..color = todayTint,
       );
     }

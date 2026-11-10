@@ -180,4 +180,15 @@ abstract interface class TimetableRepository {
   Stream<NameResolver> watchNames(Account account);
 
   DateTime? lastRefreshed(Account account, TimetableTarget target, DateTime weekStart);
+
+  /// Loads every class timetable of that week (cache-first, a few requests at
+  /// a time) only to find teachers that the school shares by name. Found
+  /// teachers are added to the account's master data, so [watchNames] emits
+  /// them. [onProgress] reports classes done / total. Throws
+  /// [UntisException] only when no class could be loaded.
+  Future<void> discoverTeachers(
+    Account account,
+    DateTime weekStart, {
+    void Function(int done, int total)? onProgress,
+  });
 }

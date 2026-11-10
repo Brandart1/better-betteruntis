@@ -37,6 +37,11 @@ class AppDrawer extends StatelessWidget {
           title: const Text('Manage accounts'),
           onTap: () => go('/accounts'),
         ),
+        ListTile(
+          leading: const Icon(Icons.settings_outlined),
+          title: const Text('Settings'),
+          onTap: () => go('/settings'),
+        ),
         const Divider(indent: 28, endIndent: 28),
         ListTile(
           leading: const Icon(Icons.bug_report_outlined),

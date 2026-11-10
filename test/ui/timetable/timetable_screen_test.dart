@@ -2,7 +2,6 @@ import 'package:better_betteruntis/core/interfaces.dart';
 import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/core/providers.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
-import 'package:better_betteruntis/ui/timetable/day_screen.dart';
 import 'package:better_betteruntis/ui/timetable/lesson_card.dart';
 import 'package:better_betteruntis/ui/timetable/timetable_screen.dart';
 import 'package:better_betteruntis/ui/timetable/timetable_utils.dart';
@@ -125,29 +124,98 @@ void main() {
     expect(a.width, closeTo(b.width, 0.01));
   });
 
-  testWidgets('tapping a day header opens the day view', (tester) async {
+  Finder dayLabel() => find.byKey(const ValueKey('day-label'));
+  Finder weekLabel() => find.byKey(const ValueKey('week-label'));
+
+  testWidgets('tapping a day header zooms into day mode, swipe moves days', (
+    tester,
+  ) async {
     await pumpScreen(tester);
     await tester.tap(find.byKey(const ValueKey('day-header-1')));
     await tester.pumpAndSettle();
-    expect(find.byType(DayScreen), findsOneWidget);
+    expect(dayLabel(), findsOneWidget);
+    expect(weekLabel(), findsNothing);
+    expect(find.byType(BackButton), findsNothing, reason: 'no back arrow');
     expect(
       rich('Anna Müller'),
       findsWidgets,
       reason: 'long teacher names in day view',
     );
     expect(rich('Mathematik'), findsWidgets);
+    final ctx = tester.element(find.byType(TimetableScreen));
+    expect(
+      tester.widget<Text>(dayLabel()).data,
+      dateFormat(ctx, 'EEE, d MMM').format(weekStart),
+    );
 
     // Swipe to Tuesday.
-    final before = tester
-        .widget<Text>(find.byKey(const ValueKey('day-label')))
-        .data;
     await tester.drag(find.byType(PageView).last, const Offset(-700, 0));
     await tester.pumpAndSettle();
-    final after = tester
-        .widget<Text>(find.byKey(const ValueKey('day-label')))
-        .data;
-    expect(after, isNot(before));
+    expect(
+      tester.widget<Text>(dayLabel()).data,
+      dateFormat(ctx, 'EEE, d MMM').format(addDays(weekStart, 1)),
+    );
     expect(rich('Maria Becker'), findsWidgets);
+  });
+
+  testWidgets('tapping the date title returns to the week overview', (
+    tester,
+  ) async {
+    await pumpScreen(tester);
+    await tester.tap(find.byKey(const ValueKey('day-header-2')));
+    await tester.pumpAndSettle();
+    expect(dayLabel(), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('day-title')));
+    await tester.pumpAndSettle();
+    expect(dayLabel(), findsNothing);
+    expect(weekLabel(), findsOneWidget);
+    expect(find.byKey(const ValueKey('day-header-1')), findsOneWidget);
+
+    // The day view's own header also zooms out.
+    await tester.tap(find.byKey(const ValueKey('day-header-3')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('day-view-header')));
+    await tester.pumpAndSettle();
+    expect(weekLabel(), findsOneWidget);
+  });
+
+  testWidgets('system back in day mode returns to week mode', (tester) async {
+    await pumpScreen(tester);
+    await tester.tap(find.byKey(const ValueKey('day-header-1')));
+    await tester.pumpAndSettle();
+    expect(dayLabel(), findsOneWidget);
+
+    final popped = await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(popped, isTrue, reason: 'PopScope consumed the back press');
+    expect(weekLabel(), findsOneWidget);
+    expect(find.byType(TimetableScreen), findsOneWidget);
+  });
+
+  testWidgets('leaving day mode lands on the week of the current day', (
+    tester,
+  ) async {
+    await pumpScreen(tester);
+    final ctx = tester.element(find.byType(TimetableScreen));
+    String label(DateTime ws) => formatWeekRange(ctx, ws, addDays(ws, 4));
+
+    await tester.tap(find.byKey(const ValueKey('day-header-5')));
+    await tester.pumpAndSettle();
+    // Friday -> next Monday.
+    await tester.drag(find.byType(PageView).last, const Offset(-700, 0));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Text>(dayLabel()).data,
+      dateFormat(ctx, 'EEE, d MMM').format(addDays(weekStart, 7)),
+    );
+    await tester.tap(find.byKey(const ValueKey('day-title')));
+    await tester.pumpAndSettle();
+    expect(find.text(label(addDays(weekStart, 7))), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Today'));
+    await tester.pumpAndSettle();
+    expect(find.text(label(weekStart)), findsOneWidget);
   });
 
   testWidgets('tapping a lesson opens the sheet with teacher chips', (
@@ -246,5 +314,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(rich('Nina Neumann'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('day-title')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
   });
 }

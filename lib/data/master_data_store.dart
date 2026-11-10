@@ -88,6 +88,51 @@ class MasterDataStore {
         });
       });
 
+  /// Adds teachers known only by name (negative synthetic ids) to the master
+  /// elements of [accountId]. Does not touch the master-data timestamp; delta
+  /// upserts never delete, so these survive until a full [replaceAll].
+  /// Existing entries are only rewritten when they gain a long name. Returns
+  /// the number of rows written.
+  Future<int> upsertDiscoveredTeachers(
+    String accountId,
+    Iterable<MasterElement> teachers,
+  ) async {
+    final list = [
+      for (final t in teachers)
+        if (t.type == ElementType.teacher && t.id < 0) t,
+    ];
+    if (list.isEmpty) return 0;
+    final existing =
+        await (db.select(db.masterElements)..where(
+              (t) =>
+                  t.accountId.equals(accountId) &
+                  t.type.equals(ElementType.teacher.apiName) &
+                  t.id.isSmallerThanValue(0),
+            ))
+            .get();
+    final known = {for (final r in existing) r.id: r};
+    final changed = list.where((t) {
+      final r = known[t.id];
+      return r == null || (r.longName == r.name && t.longName != t.name);
+    }).toList();
+    if (changed.isEmpty) return 0;
+    await db.batch((b) {
+      b.insertAllOnConflictUpdate(db.masterElements, [
+        for (final t in changed)
+          MasterElementsCompanion.insert(
+            accountId: accountId,
+            type: t.type.apiName,
+            id: t.id,
+            name: t.name,
+            longName: t.longName,
+            active: true,
+            displayAllowed: true,
+          ),
+      ]);
+    });
+    return changed.length;
+  }
+
   Future<NameResolverImpl> loadResolver(String accountId) async {
     final elements = await (db.select(
       db.masterElements,

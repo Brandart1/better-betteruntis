@@ -69,12 +69,19 @@ class TimetableCanvas extends StatelessWidget {
     );
   }
 
-  Widget _stack(BuildContext context, TimeScale scale, double width, double height) {
+  Widget _stack(
+    BuildContext context,
+    TimeScale scale,
+    double width,
+    double height,
+  ) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final colW = (width - timeColumnWidth) / math.max(1, days.length);
     final today = dateOnly(DateTime.now());
-    final units = days.isEmpty ? const <TimeUnit>[] : unitsFor(names.timeGrid, days.first.date.weekday);
+    final units = days.isEmpty
+        ? const <TimeUnit>[]
+        : unitsFor(names.timeGrid, days.first.date.weekday);
     final todayCol = days.indexWhere((d) => sameDay(d.date, today));
     final pastCols = days.where((d) => d.date.isBefore(today)).length;
     const gap = 1.5;
@@ -110,44 +117,50 @@ class TimetableCanvas extends StatelessWidget {
       final day = days[i];
       final x = timeColumnWidth + i * colW;
       if (day.holiday != null) {
-        children.add(Positioned(
-          left: x + gap,
-          width: colW - 2 * gap,
-          top: gap,
-          height: height - 2 * gap,
-          child: HolidayBlock(holiday: day.holiday!),
-        ));
+        children.add(
+          Positioned(
+            left: x + gap,
+            width: colW - 2 * gap,
+            top: gap,
+            height: height - 2 * gap,
+            child: HolidayBlock(holiday: day.holiday!),
+          ),
+        );
       }
       for (final b in day.blocks) {
         final subW = colW / b.columns;
         final top = scale.yOf(b.start);
         final bottom = sameDay(b.start, b.end) ? scale.yOf(b.end) : height;
-        children.add(Positioned(
-          key: ValueKey('lesson-${b.first.id}'),
-          left: x + b.column * subW + gap,
-          width: math.max(0, subW - 2 * gap),
-          top: top + gap,
-          height: math.max(4, bottom - top - 2 * gap),
-          child: LessonCard(
-            block: b,
-            names: names,
-            detailed: detailed,
-            onTap: onLessonTap == null
-                ? null
-                : () {
-                    final pages = overlappingBlocks(day.blocks, b);
-                    onLessonTap!(pages, pages.indexOf(b));
-                  },
+        children.add(
+          Positioned(
+            key: ValueKey('lesson-${b.first.id}'),
+            left: x + b.column * subW + gap,
+            width: math.max(0, subW - 2 * gap),
+            top: top + gap,
+            height: math.max(4, bottom - top - 2 * gap),
+            child: LessonCard(
+              block: b,
+              names: names,
+              detailed: detailed,
+              onTap: onLessonTap == null
+                  ? null
+                  : () {
+                      final pages = overlappingBlocks(day.blocks, b);
+                      onLessonTap!(pages, pages.indexOf(b));
+                    },
+            ),
           ),
-        ));
+        );
       }
     }
     if (todayCol >= 0) {
-      children.add(NowIndicator(
-        scale: scale,
-        left: timeColumnWidth + todayCol * colW,
-        width: colW,
-      ));
+      children.add(
+        NowIndicator(
+          scale: scale,
+          left: timeColumnWidth + todayCol * colW,
+          width: colW,
+        ),
+      );
     }
     return Stack(clipBehavior: Clip.hardEdge, children: children);
   }
@@ -164,25 +177,30 @@ class _UnitLabel extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 2),
       child: Text.rich(
-        TextSpan(children: [
-          TextSpan(
-            text: unit.label,
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: large ? 14 : 12,
-              color: cs.onSurface,
-            ),
-          ),
-          TextSpan(
-            text: '\n${hhmm(unit.start)}',
-            style: TextStyle(fontSize: large ? 11 : 9, color: cs.onSurfaceVariant),
-          ),
-          if (large)
+        TextSpan(
+          children: [
             TextSpan(
-              text: '\n${hhmm(unit.end)}',
-              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+              text: unit.label,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: large ? 14 : 12,
+                color: cs.onSurface,
+              ),
             ),
-        ]),
+            TextSpan(
+              text: '\n${hhmm(unit.start)}',
+              style: TextStyle(
+                fontSize: large ? 11 : 9,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            if (large)
+              TextSpan(
+                text: '\n${hhmm(unit.end)}',
+                style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+              ),
+          ],
+        ),
         textAlign: TextAlign.center,
         overflow: TextOverflow.clip,
         textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.2),

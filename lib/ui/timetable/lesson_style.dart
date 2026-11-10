@@ -2,9 +2,17 @@ import 'package:flutter/material.dart';
 
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
+import '../../core/settings.dart';
 import 'lesson_layout.dart';
 
-/// Visual style of a lesson card derived from its state and the theme.
+/// Readable text color on an arbitrary [background], chosen by luminance.
+Color onColorFor(Color background) =>
+    ThemeData.estimateBrightnessForColor(background) == Brightness.dark
+    ? Colors.white
+    : Colors.black87;
+
+/// Visual style of a lesson card derived from its state, the theme and the
+/// user's [TimetableSettings].
 class LessonStyle {
   const LessonStyle({
     required this.background,
@@ -20,9 +28,25 @@ class LessonStyle {
   final bool cancelled;
   final bool exam;
 
-  factory LessonStyle.of(ColorScheme cs, LessonBlock block) {
+  /// A custom state color: background, readable foreground and a border that
+  /// is a stronger shade of the same color.
+  static (Color, Color, Color) _custom(int argb) {
+    final bg = Color(argb);
+    final fg = onColorFor(bg);
+    return (bg, fg, Color.lerp(bg, fg, 0.45)!);
+  }
+
+  factory LessonStyle.of(
+    ColorScheme cs,
+    LessonBlock block, [
+    TimetableSettings settings = const TimetableSettings(),
+  ]) {
     final p = block.first;
     if (block.isCancelled) {
+      if (settings.cancelledColor case final c?) {
+        final (bg, fg, _) = _custom(c);
+        return LessonStyle(background: bg, foreground: fg, cancelled: true);
+      }
       return LessonStyle(
         background: cs.surfaceContainerHighest,
         foreground: cs.onSurfaceVariant,
@@ -30,6 +54,15 @@ class LessonStyle {
       );
     }
     if (block.isExam) {
+      if (settings.examColor case final c?) {
+        final (bg, fg, border) = _custom(c);
+        return LessonStyle(
+          background: bg,
+          foreground: fg,
+          border: border,
+          exam: true,
+        );
+      }
       return LessonStyle(
         background: cs.errorContainer,
         foreground: cs.onErrorContainer,
@@ -38,24 +71,32 @@ class LessonStyle {
       );
     }
     final irregular = block.isIrregular;
-    if (p.backColor != null) {
+    if (settings.useSchoolColors && p.backColor != null) {
       final bg = Color(p.backColor!);
-      final fg =
-          ThemeData.estimateBrightnessForColor(bg) == Brightness.dark
-              ? Colors.white
-              : Colors.black87;
       return LessonStyle(
         background: bg,
-        foreground: fg,
-        border: irregular ? cs.tertiary : null,
+        foreground: onColorFor(bg),
+        border: irregular
+            ? (settings.irregularColor != null
+                  ? Color(settings.irregularColor!)
+                  : cs.tertiary)
+            : null,
       );
     }
     if (irregular) {
+      if (settings.irregularColor case final c?) {
+        final (bg, fg, border) = _custom(c);
+        return LessonStyle(background: bg, foreground: fg, border: border);
+      }
       return LessonStyle(
         background: cs.tertiaryContainer,
         foreground: cs.onTertiaryContainer,
         border: cs.tertiary,
       );
+    }
+    if (settings.regularColor case final c?) {
+      final (bg, fg, _) = _custom(c);
+      return LessonStyle(background: bg, foreground: fg);
     }
     return LessonStyle(
       background: cs.primaryContainer,
