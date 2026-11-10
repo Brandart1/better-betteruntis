@@ -1,0 +1,16 @@
+name: bbu_server
+description: Self-hosted web server for BetterBetterUntis (static files + WebUntis proxy).
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  crypto: ^3.0.7
+  http: ^1.6.0
+  shelf: ^1.4.2
+
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.31.0

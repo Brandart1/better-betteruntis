@@ -14,18 +14,24 @@ import 'parsers.dart';
 import 'rest_teachers.dart';
 
 class UntisApiImpl implements FullUntisApi {
-  UntisApiImpl({Dio? dio, DateTime Function()? now, bool isIos = false})
-    : this._(
-        dio ??
-            Dio(
-              BaseOptions(
-                connectTimeout: const Duration(seconds: 15),
-                receiveTimeout: const Duration(seconds: 30),
-              ),
-            ),
-        now,
-        isIos,
-      );
+  /// [interceptors] are added to the default client (e.g. the web proxy
+  /// rewrite); ignored when [dio] is given.
+  UntisApiImpl({
+    Dio? dio,
+    DateTime Function()? now,
+    bool isIos = false,
+    List<Interceptor> interceptors = const [],
+  }) : this._(
+         dio ??
+             (Dio(
+               BaseOptions(
+                 connectTimeout: const Duration(seconds: 15),
+                 receiveTimeout: const Duration(seconds: 30),
+               ),
+             )..interceptors.addAll(interceptors)),
+         now,
+         isIos,
+       );
 
   UntisApiImpl._(Dio dio, DateTime Function()? now, this.isIos)
     : _dio = dio,

@@ -1,0 +1,32 @@
+# Example deployment of the BetterBetterUntis web version. See docs/WEB.md.
+# Put an HTTPS reverse proxy (Caddy, Traefik, nginx) in front of it.
+services:
+  better-betteruntis:
+    build: .
+    image: better-betteruntis-web:latest
+    container_name: better-betteruntis
+    restart: unless-stopped
+    ports:
+      # Bind to localhost only when a reverse proxy runs on the same host.
+      - "127.0.0.1:8080:8080"
+    environment:
+      # Port the server listens on inside the container.
+      # PORT: "8080"
+
+      # Upstream hosts the proxy may contact (exact hosts and *.suffix).
+      # BBU_ALLOWED_HOSTS: "webuntis.com,*.webuntis.com"
+
+      # Protect the whole site with HTTP basic auth (recommended unless it is
+      # only reachable via VPN). /healthz stays open.
+      # BBU_BASIC_AUTH: "user:a-long-random-password"
+
+      # Cross-Origin-Embedder-Policy value; set to "" to omit the header.
+      # BBU_COEP: "credentialless"
+
+      # Directory with the Flutter web build (already set in the image).
+      # BBU_WEB_ROOT: "/app/web"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

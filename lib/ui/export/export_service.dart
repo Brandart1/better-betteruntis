@@ -76,8 +76,9 @@ Future<void> shareWithSystem(
 
 final exportShareProvider = Provider<ShareExportedFile>((_) => shareWithSystem);
 
-/// Directory the export is written to before sharing.
-final exportDirectoryProvider = Provider<Future<Directory> Function()>(
+/// Directory the export is written to before sharing. Resolves to null where
+/// there is no file system (web): the file is then only kept in memory.
+final exportDirectoryProvider = Provider<Future<Directory?> Function()>(
   (_) => () async {
     final tmp = await getTemporaryDirectory();
     return Directory('${tmp.path}/exports').create(recursive: true);
@@ -224,7 +225,7 @@ Future<Uint8List> generateExport(
 };
 
 Future<ExportedFile> writeExport(
-  Directory dir,
+  Directory? dir,
   ExportTimetable t,
   ExportOptions options,
   Uint8List bytes,
@@ -235,6 +236,7 @@ Future<ExportedFile> writeExport(
     options.weekStart,
     options.format,
   );
+  if (dir == null) return ExportedFile('', name, options.format.mimeType, bytes);
   final file = File('${dir.path}/$name');
   await file.writeAsBytes(bytes, flush: true);
   return ExportedFile(file.path, name, options.format.mimeType, bytes);

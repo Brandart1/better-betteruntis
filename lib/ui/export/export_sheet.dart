@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -151,7 +152,7 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
       final file = await writeExport(dir, t, options, bytes);
       if (!mounted) return;
       final origin = _origin();
-      setState(() => _progress = 'Sharing…');
+      setState(() => _progress = kIsWeb ? 'Downloading…' : 'Sharing…');
       await ref.read(exportShareProvider)(
         file,
         origin: origin,

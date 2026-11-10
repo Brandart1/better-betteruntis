@@ -156,7 +156,17 @@ class AppDatabase extends _$AppDatabase {
 
   /// Opens the app's on-device database.
   factory AppDatabase.open({String name = 'better_betteruntis'}) =>
-      AppDatabase(driftDatabase(name: name));
+      AppDatabase(
+        driftDatabase(
+          name: name,
+          // Web: files in web/ (sqlite3.wasm from sqlite3.dart, drift_worker.js
+          // from drift releases; keep their versions in sync with pubspec.lock).
+          web: DriftWebOptions(
+            sqlite3Wasm: Uri.parse('sqlite3.wasm'),
+            driftWorker: Uri.parse('drift_worker.js'),
+          ),
+        ),
+      );
 
   /// v1: initial schema. v2: [InfoCache], [AbsenceLookupEntries].
   @override

@@ -1,0 +1,36 @@
+# Build outputs and caches
+build/
+**/build/
+.dart_tool/
+**/.dart_tool/
+.flutter-plugins-dependencies
+debug/
+coverage/
+
+# Not needed for the web build
+android/
+ios/
+linux/
+macos/
+windows/
+.git/
+.github/
+.idea/
+.vscode/
+*.iml
+
+# Secrets / signing material
+keys/
+**/keys/
+*.jks
+*.keystore
+**/key.properties
+*.pem
+*.p12
+.env
+.env.*
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose.yml

@@ -4,8 +4,9 @@
 library;
 
 import 'dart:convert';
-import 'dart:io' show ZLibCodec;
 import 'dart:typed_data';
+
+import 'package:archive/archive.dart' show Deflate, Inflate;
 
 /// Returns a copy of [zip] in which every entry whose name satisfies
 /// [select] is replaced by `patch(text)`. Unchanged entries are copied
@@ -38,7 +39,6 @@ Uint8List _patch(
   if (eocd < 0) return zip;
   final count = bd.getUint16(eocd + 10, Endian.little);
   var cd = bd.getUint32(eocd + 16, Endian.little);
-  final raw = ZLibCodec(raw: true);
 
   final out = BytesBuilder(copy: false);
   final central = BytesBuilder(copy: false);
@@ -65,13 +65,13 @@ Uint8List _patch(
 
     if (select(name)) {
       final plain = method == 8
-          ? raw.decode(data)
+          ? Inflate(data).getBytes()
           : method == 0
           ? data
           : null;
       if (plain != null) {
         final patched = utf8.encode(patch(name, utf8.decode(plain)));
-        data = Uint8List.fromList(raw.encode(patched));
+        data = Uint8List.fromList(Deflate(patched).getBytes());
         method = 8;
         crc = crc32(patched);
         compSize = data.length;
