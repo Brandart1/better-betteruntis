@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/absence_details.dart';
+import '../../core/info.dart';
+import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 
@@ -27,29 +30,73 @@ class _DebugScreenState extends ConsumerState<DebugScreen> {
     }
   }
 
-  Future<void> _probe() async {
+  static DateTime _monday() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day - (now.weekday - 1));
+  }
+
+  /// Runs [action] for the active account; failures show in a snack bar
+  /// (the raw response is in the log anyway).
+  Future<void> _run(
+    String what,
+    Future<void> Function(Account account, UntisCredentials creds) action,
+  ) async {
     final account = ref.read(activeAccountProvider).value;
     if (account == null) return;
     setState(() => _probing = true);
     try {
       final creds = await ref.read(accountRepositoryProvider).credentials(account.id);
-      final now = DateTime.now();
-      final monday = DateTime(now.year, now.month, now.day - (now.weekday - 1));
-      await ref.read(untisApiProvider).probeTeacherSources(
-        host: account.host,
-        school: account.school.loginName,
-        auth: creds,
-        target: TimetableTarget(account.elementType, account.elementId),
-        weekStart: monday,
-      );
+      await action(account, creds);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Probe failed: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$what failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _probing = false);
     }
   }
+
+  Future<void> _probe() => _run('Probe', (account, creds) async {
+    final target = account.personalTarget;
+    if (target == null) throw StateError('this account has no own timetable');
+    await ref.read(untisApiProvider).probeTeacherSources(
+      host: account.host,
+      school: account.school.loginName,
+      auth: creds,
+      target: target,
+      weekStart: _monday(),
+    );
+  });
+
+  /// One getUserData2017 call (the login request), recorded in the log.
+  Future<void> _fetchUserData() => _run('Loading user data', (account, creds) async {
+    final Object api = ref.read(untisApiProvider);
+    if (api is! AbsenceDetailsApi) throw StateError('not supported');
+    await api.absenceLookups(
+      host: account.host,
+      school: account.school.loginName,
+      auth: creds,
+    );
+  });
+
+  /// getOfficeHours2017 for the account's class (if any) and for -1.
+  Future<void> _fetchOfficeHours() => _run('Loading office hours', (account, creds) async {
+    final Object api = ref.read(untisApiProvider);
+    if (api is! InfoCenterApi) throw StateError('not supported');
+    for (final k in {account.personalKlasseId ?? -1, -1}) {
+      try {
+        await api.officeHours(
+          host: account.host,
+          school: account.school.loginName,
+          auth: creds,
+          klasseId: k,
+          start: _monday(),
+        );
+      } catch (_) {
+        // Recorded in the log; try the next variant.
+      }
+    }
+  });
 
   void _copy(String text, String what) {
     Clipboard.setData(ClipboardData(text: text));
@@ -80,6 +127,24 @@ class _DebugScreenState extends ConsumerState<DebugScreen> {
             icon: const Icon(Icons.refresh),
             onPressed: () => setState(() {}),
           ),
+          PopupMenuButton<void Function()>(
+            key: const ValueKey('debug-menu'),
+            tooltip: 'Fetch',
+            enabled: !_probing,
+            onSelected: (f) => f(),
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                key: const ValueKey('debug-fetch-userdata'),
+                value: _fetchUserData,
+                child: const Text('Fetch user data (getUserData2017)'),
+              ),
+              PopupMenuItem(
+                key: const ValueKey('debug-fetch-officehours'),
+                value: _fetchOfficeHours,
+                child: const Text('Fetch office hours (getOfficeHours2017)'),
+              ),
+            ],
+          ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -90,7 +155,16 @@ class _DebugScreenState extends ConsumerState<DebugScreen> {
         label: const Text('Probe teacher sources'),
       ),
       body: log.isEmpty
-          ? const Center(child: Text('No requests yet. Load a timetable first.'))
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'No requests yet. Load a timetable first, or fetch user '
+                  'data / office hours from the menu.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )
           : ListView.builder(
               padding: const EdgeInsets.only(bottom: 96),
               itemCount: log.length,

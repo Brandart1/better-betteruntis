@@ -187,20 +187,59 @@ List<RawAbsence> parseRawAbsences(Object? raw) {
 // Office hours (getOfficeHours2017)
 // ---------------------------------------------------------------------------
 
+/// Office hours. Nothing here is confirmed by a real response yet (see
+/// docs/API.md), so this accepts the plausible variants:
+/// * a top-level list, or a list under `officeHours`/`officeHourList`/`items`;
+/// * start/end as `startDateTime`/`endDateTime` (ISO string or epoch ms), or
+///   `date`/`startDate` (yyyyMMdd int or ISO string) plus `startTime`/
+///   `endTime` (hhmm int, "1345", "13:45" or "T13:45");
+/// * the teacher as `displayNameTeacher`/`teacherName`/`teacher` (string or
+///   `{displayName|longName|name}`);
+/// * rooms as `displayNameRooms`/`rooms`/`roomName` (string, list of strings
+///   or list of `{displayName|name}`).
 List<OfficeHourItem> parseOfficeHourItems(Object? raw) {
+  final m = _map(raw);
+  final list = raw is List
+      ? raw
+      : (m['officeHours'] ?? m['officeHourList'] ?? m['items']);
   final items = <OfficeHourItem>[];
-  for (final o in _maps(_map(raw)['officeHours'])) {
-    final start = _dateTimeOf(o, 'start');
+  for (final o in _maps(list)) {
+    final day =
+        _ohDate(o['date']) ?? _ohDate(o['startDate']) ?? _ohDate(o['day']);
+    final start = _ohDateTime(o['startDateTime']) ??
+        _ohDateTime(o['start']) ??
+        _ohDateTime(o['startDate']) ??
+        _ohAt(day, o['startTime']) ??
+        day;
     if (start == null) continue;
-    final end = _dateTimeOf(o, 'end') ?? start;
+    final endDay = _ohDate(o['endDate']) ??
+        day ??
+        DateTime(start.year, start.month, start.day);
+    final end = _ohDateTime(o['endDateTime']) ??
+        _ohDateTime(o['end']) ??
+        _ohDateTime(o['endDate']) ??
+        _ohAt(endDay, o['endTime']) ??
+        start;
     items.add(
       OfficeHourItem(
         id: _int(o['id']),
         start: start,
         end: end.isBefore(start) ? start : end,
-        teacherName:
-            _firstStr(o, const ['displayNameTeacher', 'teacherName']) ?? '',
-        rooms: _firstStr(o, const ['displayNameRooms', 'rooms']) ?? '',
+        teacherName: _ohName(o, const [
+              'displayNameTeacher',
+              'teacherName',
+              'teacher',
+              'teacherLongName',
+            ]) ??
+            '',
+        rooms: _ohName(o, const [
+              'displayNameRooms',
+              'rooms',
+              'roomName',
+              'room',
+              'displayNameRoom',
+            ]) ??
+            '',
         email: _str(o['email']).trim(),
         phone: _str(o['phone']).trim(),
         registrationPossible: _bool(o['registrationPossible']),
@@ -212,6 +251,55 @@ List<OfficeHourItem> parseOfficeHourItems(Object? raw) {
   return items;
 }
 
+/// yyyyMMdd (int or string) or an ISO date/date-time -> local midnight.
+DateTime? _ohDate(Object? v) {
+  final d = parseDate(v) ?? parseDateTime(v);
+  return d == null ? null : DateTime(d.year, d.month, d.day);
+}
+
+/// ISO date-time string or epoch milliseconds. A bare date doesn't count.
+DateTime? _ohDateTime(Object? v) {
+  if (v is int && v > 100000000000) {
+    return DateTime.fromMillisecondsSinceEpoch(v);
+  }
+  if (v is String && v.contains(RegExp(r'[T ]\d{1,2}:\d{2}'))) {
+    return parseDateTime(v);
+  }
+  return null;
+}
+
+/// [day] at a time given as hhmm int, "1345", "13:45" or "T13:45".
+DateTime? _ohAt(DateTime? day, Object? time) {
+  if (day == null || time == null) return null;
+  final digits = time is String ? RegExp(r'^\d{3,4}$').firstMatch(time.trim()) : null;
+  final t = digits != null ? parseTime(int.parse(digits[0]!)) : parseTime(time);
+  if (t == null || t < 0 || t >= 24 * 60) return null;
+  return DateTime(day.year, day.month, day.day, t ~/ 60, t % 60);
+}
+
+/// A name from a string, a `{displayName|longName|name}` map, or a list of
+/// either (joined with ", "). First of [keys] that yields one wins.
+String? _ohName(Map<String, Object?> o, List<String> keys) {
+  String? one(Object? v) {
+    if (v is Map) {
+      final m = _map(v);
+      final full = '${_str(m['firstName']).trim()} ${_str(m['lastName']).trim()}'
+          .trim();
+      return _firstStr(m, const ['displayName', 'longName', 'name']) ??
+          (full.isEmpty ? null : full);
+    }
+    return v is num ? null : _nonBlank(v);
+  }
+
+  for (final k in keys) {
+    final v = o[k];
+    final s = v is List
+        ? v.map(one).whereType<String>().join(', ')
+        : one(v);
+    if (s != null && s.isNotEmpty) return s;
+  }
+  return null;
+}
 // ---------------------------------------------------------------------------
 // REST inbox (/api/rest/view/v1/messages)
 // ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The schema shipped as version 1 (dumped from sqlite_master).
-const _v1 = [
+const v1Schema = [
   '''CREATE TABLE "accounts" ("id" TEXT NOT NULL, "position" INTEGER NOT NULL, "school_id" INTEGER NOT NULL, "school_login_name" TEXT NOT NULL, "school_display_name" TEXT NOT NULL, "school_address" TEXT NOT NULL, "school_host" TEXT NOT NULL, "username" TEXT NOT NULL, "anonymous" INTEGER NOT NULL CHECK ("anonymous" IN (0, 1)), "display_name" TEXT NOT NULL, "profile_name" TEXT NULL, "element_type" TEXT NOT NULL, "element_id" INTEGER NOT NULL, "klassen_ids_json" TEXT NOT NULL DEFAULT '[]', "rights_json" TEXT NOT NULL DEFAULT '[]', "master_data_timestamp" INTEGER NOT NULL DEFAULT 0, "host_override" TEXT NULL, PRIMARY KEY ("id"))''',
   '''CREATE TABLE "master_elements" ("account_id" TEXT NOT NULL, "type" TEXT NOT NULL, "id" INTEGER NOT NULL, "name" TEXT NOT NULL, "long_name" TEXT NOT NULL, "fore_color" INTEGER NULL, "back_color" INTEGER NULL, "active" INTEGER NOT NULL CHECK ("active" IN (0, 1)), "display_allowed" INTEGER NOT NULL CHECK ("display_allowed" IN (0, 1)), PRIMARY KEY ("account_id", "type", "id"))''',
   '''CREATE TABLE "holidays" ("account_id" TEXT NOT NULL, "id" INTEGER NOT NULL, "name" TEXT NOT NULL, "long_name" TEXT NOT NULL, "start_date" TEXT NOT NULL, "end_date" TEXT NOT NULL, PRIMARY KEY ("account_id", "id"))''',
@@ -17,11 +17,11 @@ const _v1 = [
 ];
 
 void main() {
-  test('a v1 database upgrades to v2 without losing data', () async {
+  test('a v1 database upgrades to the current version without losing data', () async {
     final db = AppDatabase(
       NativeDatabase.memory(
         setup: (raw) {
-          for (final s in _v1) {
+          for (final s in v1Schema) {
             raw.execute(s);
           }
           raw.execute(

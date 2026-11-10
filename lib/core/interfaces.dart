@@ -59,6 +59,7 @@ class LoginResult {
     required this.klassenIds,
     required this.rights,
     required this.masterData,
+    this.children = const [],
   });
 
   final String secret;
@@ -68,6 +69,9 @@ class LoginResult {
   final List<int> klassenIds;
   final Set<String> rights;
   final MasterData masterData;
+
+  /// Parent accounts: `userData.children`.
+  final List<AccountChild> children;
 }
 
 class TimetableResponse {

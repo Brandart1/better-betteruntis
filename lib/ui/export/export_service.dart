@@ -31,6 +31,7 @@ class ExportOptions {
     this.colors = true,
     this.landscape = true,
     this.separator = ',',
+    this.text,
   });
 
   final ExportKind kind;
@@ -41,6 +42,9 @@ class ExportOptions {
   final bool colors;
   final bool landscape;
   final String separator;
+
+  /// Lesson text styling for XLSX and PDF; null = the formats' own look.
+  final ExportTextStyle? text;
 }
 
 class ExportedFile {
@@ -213,12 +217,13 @@ Future<Uint8List> generateExport(
   Future<PdfFonts?> Function()? fonts,
 }) async => switch (options.format) {
   ExportFormat.csv => buildCsv(t, separator: options.separator),
-  ExportFormat.xlsx => buildXlsx(t, colors: options.colors),
+  ExportFormat.xlsx => buildXlsx(t, colors: options.colors, text: options.text),
   ExportFormat.pdf => buildPdf(
     t,
     options: PdfExportOptions(
       colors: options.colors,
       landscape: options.landscape,
+      text: options.text,
     ),
     fonts: await (fonts ?? loadPdfFonts)(),
   ),
@@ -236,7 +241,9 @@ Future<ExportedFile> writeExport(
     options.weekStart,
     options.format,
   );
-  if (dir == null) return ExportedFile('', name, options.format.mimeType, bytes);
+  if (dir == null) {
+    return ExportedFile('', name, options.format.mimeType, bytes);
+  }
   final file = File('${dir.path}/$name');
   await file.writeAsBytes(bytes, flush: true);
   return ExportedFile(file.path, name, options.format.mimeType, bytes);

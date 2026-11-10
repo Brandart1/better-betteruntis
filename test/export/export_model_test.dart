@@ -1,4 +1,5 @@
 import 'package:better_betteruntis/core/models.dart';
+import 'package:better_betteruntis/core/settings.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
 import 'package:better_betteruntis/export/export_model.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -107,5 +108,32 @@ void main() {
       exportWeekRange(DateTime(2025, 12, 29), DateTime(2026, 1, 2)),
       '29 Dec 2025 – 2 Jan 2026',
     );
+  });
+
+  test('text style from the timetable settings, scales clamped', () {
+    expect(
+      ExportTextStyle.fromSettings(const TimetableSettings()),
+      const ExportTextStyle(),
+    );
+    const d = ExportTextStyle();
+    expect(d.subjectScale, 1);
+    expect(d.detailScale, 1);
+
+    final s = ExportTextStyle.fromSettings(
+      const TimetableSettings(
+        centerText: false,
+        subjectFontSize: 22,
+        detailFontSize: 9,
+        boldSubject: false,
+      ),
+    );
+    expect(s.centered, isFalse);
+    expect(s.boldSubject, isFalse);
+    expect(s.subjectScale, closeTo(22 / 15, 1e-9));
+    expect(s.detailScale, 0.75);
+
+    expect(const ExportTextStyle(subjectSize: 100).subjectScale, 1.5);
+    expect(const ExportTextStyle(detailSize: 1).detailScale, 0.7);
+    expect(const ExportTextStyle(detailSize: double.nan).detailScale, 1);
   });
 }

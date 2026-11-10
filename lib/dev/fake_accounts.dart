@@ -23,6 +23,8 @@ import '../core/models.dart';
 /// * username `2fa` without token `123456` -> [UntisException.twoFactorRequired]
 /// * anonymous login at a school whose loginName contains `private` ->
 ///   [UntisException.noPublicAccess]
+/// * username `parent` -> a parent account (no own timetable) with the two
+///   [demoChildren]; `parent-nochild` -> a parent account without children
 /// * anything else (e.g. `demo`/`demo`) succeeds.
 ///
 /// Search rules: queries shorter than 3 chars or matching more than
@@ -183,6 +185,19 @@ class FakeUntisApi implements FullUntisApi {
           );
       }
     }
+    final parent = !anonymous && username.toLowerCase().startsWith('parent');
+    if (parent) {
+      return LoginResult(
+        secret: 'FAKESECRET${username.toUpperCase()}',
+        displayName: 'Demo Parent',
+        elementType: ElementType.unknown,
+        elementId: 2001,
+        klassenIds: const [],
+        rights: const {},
+        masterData: demoMasterData,
+        children: username.toLowerCase() == 'parent' ? demoChildren : const [],
+      );
+    }
     return LoginResult(
       secret: anonymous ? '' : 'FAKESECRET${username.toUpperCase()}',
       displayName: anonymous ? 'Public timetable' : _displayName(username),
@@ -193,6 +208,12 @@ class FakeUntisApi implements FullUntisApi {
       masterData: demoMasterData,
     );
   }
+
+  /// Children of the demo `parent` login (made-up names).
+  static const demoChildren = [
+    AccountChild(id: 1001, displayName: 'Demo Child One', klasseId: 1),
+    AccountChild(id: 1002, displayName: 'Demo Child Two', klasseId: 1),
+  ];
 
   static String _displayName(String username) {
     if (username.toLowerCase() == 'demo') return 'Demo Student';
@@ -475,6 +496,7 @@ class FakeUntisApi implements FullUntisApi {
     required UntisCredentials auth,
     required DateTime start,
     required DateTime end,
+    int? studentId,
   }) async {
     await _delay();
     final items = <RawAbsence>[];
@@ -516,6 +538,7 @@ class FakeUntisApi implements FullUntisApi {
     required UntisCredentials auth,
     required DateTime start,
     required DateTime end,
+    int? studentId,
   }) async => [
     for (final a in await rawAbsences(
       host: host,
@@ -523,6 +546,7 @@ class FakeUntisApi implements FullUntisApi {
       auth: auth,
       start: start,
       end: end,
+      studentId: studentId,
     ))
       a.resolve(demoLookups),
   ];

@@ -183,12 +183,15 @@ abstract interface class InfoCenterApi {
     required DateTime end,
   });
 
+  /// [studentId]: parent accounts pass the child; null = the user's own
+  /// absences (the request then looks exactly as before).
   Future<List<AbsenceItem>> absences({
     required String host,
     required String school,
     required UntisCredentials auth,
     required DateTime start,
     required DateTime end,
+    int? studentId,
   });
 
   Future<List<OfficeHourItem>> officeHours({

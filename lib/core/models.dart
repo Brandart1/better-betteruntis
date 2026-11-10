@@ -299,6 +299,68 @@ class School {
   final String host;
 }
 
+/// A pupil linked to a parent (legal guardian) account, from
+/// `userData.children` of getUserData2017. Their timetable is requested as
+/// [type] (STUDENT unless the server says otherwise) with [id].
+class AccountChild {
+  const AccountChild({
+    required this.id,
+    required this.displayName,
+    this.klasseId,
+    this.type = ElementType.student,
+  });
+
+  final int id;
+  final String displayName;
+
+  /// The child's class, when the server tells us (used for office hours).
+  final int? klasseId;
+  final ElementType type;
+
+  TimetableTarget get target => TimetableTarget(type, id);
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'displayName': displayName,
+    if (klasseId != null) 'klasseId': klasseId,
+    'type': type.apiName,
+  };
+
+  /// Inverse of [toJson]; null when [j] has no usable id.
+  static AccountChild? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final id = j['id'];
+    if (id is! int || id <= 0) return null;
+    final k = j['klasseId'];
+    final type = ElementType.parse(j['type']);
+    return AccountChild(
+      id: id,
+      displayName: j['displayName'] is String ? j['displayName'] as String : '',
+      klasseId: k is int && k > 0 ? k : null,
+      type: type == ElementType.unknown ? ElementType.student : type,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is AccountChild &&
+      other.id == id &&
+      other.displayName == displayName &&
+      other.klasseId == klasseId &&
+      other.type == type;
+  @override
+  int get hashCode => Object.hash(id, displayName, klasseId, type);
+}
+
+/// Element types that have a timetable (getTimetable2017 `type`).
+const timetableElementTypes = {
+  ElementType.klasse,
+  ElementType.teacher,
+  ElementType.subject,
+  ElementType.room,
+  ElementType.student,
+};
+
 /// A logged-in profile. Multiple accounts (also across schools) are allowed.
 /// The shared secret is NOT stored here — it lives in secure storage, keyed by
 /// [id].
@@ -316,6 +378,8 @@ class Account {
     this.rights = const {},
     this.masterDataTimestamp = 0,
     this.hostOverride,
+    this.children = const [],
+    this.selectedChildId,
   });
 
   /// Local identifier (not an Untis id).
@@ -330,7 +394,8 @@ class Account {
   /// Optional user-chosen label, e.g. "Little sister".
   final String? profileName;
 
-  /// The account's own timetable element.
+  /// The account's own element as sent by the server. For parent accounts
+  /// this is not a timetable element; use [personalTarget].
   final ElementType elementType;
   final int elementId;
   final List<int> klassenIds;
@@ -338,9 +403,40 @@ class Account {
   final int masterDataTimestamp;
   final String? hostOverride;
 
+  /// Parent accounts: the linked pupils (empty for everyone else).
+  final List<AccountChild> children;
+
+  /// Which of [children] is "My timetable"; null or unknown = the first.
+  final int? selectedChildId;
+
   String get label =>
       (profileName?.trim().isNotEmpty ?? false) ? profileName! : displayName;
   String get host => hostOverride ?? school.host;
+
+  /// Whether [elementType]/[elementId] is a timetable of its own (students,
+  /// teachers, anonymous class logins). False for parent accounts.
+  bool get hasOwnTimetable =>
+      elementId > 0 && timetableElementTypes.contains(elementType);
+
+  /// The child shown as "My timetable", or null when the account has its own
+  /// timetable or no children.
+  AccountChild? get activeChild {
+    if (hasOwnTimetable || children.isEmpty) return null;
+    return children.firstWhereOrNull((c) => c.id == selectedChildId) ??
+        children.first;
+  }
+
+  /// "My timetable": the own element, else the selected child, else null
+  /// (nothing to show; the UI points to Browse instead).
+  TimetableTarget? get personalTarget {
+    if (hasOwnTimetable) return TimetableTarget(elementType, elementId);
+    return activeChild?.target;
+  }
+
+  /// Class used for office hours: the own first class, else the active
+  /// child's class, else null (the caller asks for all classes).
+  int? get personalKlasseId =>
+      klassenIds.firstWhereOrNull((k) => k > 0) ?? activeChild?.klasseId;
 
   Account copyWith({
     String? profileName,
@@ -348,6 +444,8 @@ class Account {
     String? displayName,
     ElementType? elementType,
     int? elementId,
+    List<AccountChild>? children,
+    int? selectedChildId,
   }) => Account(
     id: id,
     school: school,
@@ -361,6 +459,8 @@ class Account {
     rights: rights,
     masterDataTimestamp: masterDataTimestamp ?? this.masterDataTimestamp,
     hostOverride: hostOverride,
+    children: children ?? this.children,
+    selectedChildId: selectedChildId ?? this.selectedChildId,
   );
 }
 

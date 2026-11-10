@@ -252,6 +252,69 @@ class ExportPalette {
 }
 
 // ---------------------------------------------------------------------------
+// Text
+
+/// Lesson text styling for the XLSX and PDF grids, from the user's
+/// [TimetableSettings]. Font sizes are kept as on-screen sizes; generators
+/// apply them relative to the app defaults ([subjectScale], [detailScale]) to
+/// their own base sizes, so the export keeps the proportions of the app
+/// without copying its absolute pixel sizes onto paper.
+///
+/// Generators take `ExportTextStyle?`: null means their built-in look.
+class ExportTextStyle {
+  const ExportTextStyle({
+    this.centered = true,
+    this.subjectSize = defaultSubjectSize,
+    this.detailSize = defaultDetailSize,
+    this.boldSubject = true,
+  });
+
+  factory ExportTextStyle.fromSettings(TimetableSettings s) => ExportTextStyle(
+    centered: s.centerText,
+    subjectSize: s.subjectFontSize,
+    detailSize: s.detailFontSize,
+    boldSubject: s.boldSubject,
+  );
+
+  static const defaultSubjectSize = 15.0;
+  static const defaultDetailSize = 12.0;
+
+  /// Bounds of [subjectScale] / [detailScale] (the settings sliders allow
+  /// about 0.73–1.5); keeps text readable and cells from overflowing badly.
+  static const minScale = 0.7;
+  static const maxScale = 1.5;
+
+  final bool centered;
+  final double subjectSize;
+  final double detailSize;
+  final bool boldSubject;
+
+  static double _scale(double size, double def) {
+    final s = size / def;
+    if (s.isNaN) return 1;
+    return s.clamp(minScale, maxScale).toDouble();
+  }
+
+  /// Subject size relative to the app default, clamped.
+  double get subjectScale => _scale(subjectSize, defaultSubjectSize);
+
+  /// Detail (teacher, room, …) size relative to the app default, clamped.
+  double get detailScale => _scale(detailSize, defaultDetailSize);
+
+  @override
+  bool operator ==(Object other) =>
+      other is ExportTextStyle &&
+      other.centered == centered &&
+      other.subjectSize == subjectSize &&
+      other.detailSize == detailSize &&
+      other.boldSubject == boldSubject;
+
+  @override
+  int get hashCode =>
+      Object.hash(centered, subjectSize, detailSize, boldSubject);
+}
+
+// ---------------------------------------------------------------------------
 // Periods → lessons
 
 /// A name the server didn't really resolve ('?', '#12', '---', empty).

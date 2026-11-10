@@ -165,6 +165,124 @@ void main() {
       }
     });
 
+    group('text style', () {
+      String gridXml(Uint8List bytes) =>
+          readZipText(bytes, worksheetPath(bytes, kGridSheet)!)!;
+      String stylesXml(Uint8List bytes) => readZipText(bytes, 'xl/styles.xml')!;
+      String? cellXml(String xml, String ref) => RegExp(
+        '<c r="$ref"[^>]*?(/>|>.*?</c>)',
+        dotAll: true,
+      ).firstMatch(xml)?[0];
+
+      /// The cell format (`<xf>…</xf>`) and font (`<font>…</font>`) of [ref]
+      /// in the grid sheet.
+      (String, String) styleOf(Uint8List bytes, String ref) {
+        final styles = stylesXml(bytes);
+        final s = int.parse(
+          RegExp(r'\bs="([0-9]+)"')
+              .firstMatch(cellXml(gridXml(bytes), ref)!)![1]!,
+        );
+        String nth(String list, String tag, int n) =>
+            RegExp('<$tag\\b[^>]*?(/>|>.*?</$tag>)')
+                .allMatches(
+                  RegExp('<$list\\b.*?</$list>').firstMatch(styles)![0]!,
+                )
+                .elementAt(n)[0]!;
+        final xf = nth('cellXfs', 'xf', s);
+        final font = int.parse(
+          RegExp(r'fontId="([0-9]+)"').firstMatch(xf)![1]!,
+        );
+        return (xf, nth('fonts', 'font', font));
+      }
+
+      test('built-in look without a text style', () {
+        final bytes = buildXlsx(demoExport());
+        final xml = gridXml(bytes);
+        expect(xml, isNot(contains('inlineStr')));
+        final (xf, font) = styleOf(bytes, 'B2');
+        expect(xf, isNot(contains('horizontal=')));
+        expect(xf, contains('vertical="top"'));
+        expect(font, isNot(contains('<sz')));
+      });
+
+      test('centered, sized and bold subject runs', () {
+        final t = demoExport();
+        final bytes = buildXlsx(
+          t,
+          text: const ExportTextStyle(
+            centered: true,
+            subjectSize: 22,
+            detailSize: 18,
+          ),
+        );
+        expect(worksheetPath(bytes, kGridSheet), 'xl/worksheets/sheet1.xml');
+        final xml = gridXml(bytes);
+        final b2 = cellXml(xml, 'B2')!;
+        expect(b2, contains('t="inlineStr"'));
+        expect(b2, isNot(contains('t="s"')));
+        // Subject: 12 pt × 22/15 → 17.5 pt, bold; details 10 × 1.5 = 15 pt.
+        expect(
+          b2,
+          contains(
+            '<b/><color rgb="FF000000"/><sz val="17.5"/></rPr>'
+            '<t xml:space="preserve">M</t>',
+          ),
+        );
+        expect(
+          b2,
+          contains(
+            '<sz val="15"/></rPr><t xml:space="preserve">\nMUE\nR101</t>',
+          ),
+        );
+        // Header and time cells stay shared strings.
+        expect(cellXml(xml, 'A2'), contains('t="s"'));
+        // Cell font size and centered alignment end up in styles.xml.
+        final (xf, font) = styleOf(bytes, 'B2');
+        expect(xf, contains('horizontal="center"'));
+        expect(xf, contains('vertical="center"'));
+        expect(font, contains('<sz val="15"/>'));
+        // Larger text: wider day columns, taller rows.
+        expect(xml, contains('<col min="2" max="2" width="36.00"'));
+        final plain = gridXml(buildXlsx(t));
+        double rowHeight(String x) => double.parse(
+          RegExp(r'<row r="2" ht="([0-9.]+)"').firstMatch(x)![1]!,
+        );
+        expect(rowHeight(xml), greaterThan(rowHeight(plain)));
+        // Still a valid workbook; the frozen pane is still added.
+        expect(() => Excel.decodeBytes(bytes), returnsNormally);
+        expect(xml, contains('state="frozen"'));
+      });
+
+      test('left aligned, regular weight, small text', () {
+        final bytes = buildXlsx(
+          demoExport(),
+          text: const ExportTextStyle(
+            centered: false,
+            subjectSize: 11,
+            detailSize: 9,
+            boldSubject: false,
+          ),
+        );
+        final b2 = cellXml(gridXml(bytes), 'B2')!;
+        expect(b2, isNot(contains('<b/>')));
+        // 12 × 11/15 = 8.8 → 9; 10 × 0.75 = 7.5.
+        expect(b2, contains('<sz val="9"/>'));
+        expect(b2, contains('<sz val="7.5"/>'));
+        final (xf, _) = styleOf(bytes, 'B2');
+        expect(xf, isNot(contains('horizontal=')));
+        expect(xf, contains('vertical="top"'));
+      });
+
+      test('cancelled lessons keep italics in rich runs', () {
+        final t = demoExport();
+        final bytes = buildXlsx(t, text: const ExportTextStyle());
+        // C6: Tuesday unit 5, cancelled chemistry (see round trip test).
+        final c6 = cellXml(gridXml(bytes), 'C6')!;
+        expect(c6, contains('<i/>'));
+        expect(c6, contains('Cancelled'));
+      });
+    });
+
     test('holiday column', () {
       final t = demoExport(
         periods: buildDemoWeek(mon, holidayFriday: true),
@@ -219,6 +337,34 @@ void main() {
         t,
         options: const PdfExportOptions(colors: false, landscape: false),
         fonts: testFonts(),
+      );
+      expect(isPdf(bytes), isTrue);
+    });
+
+    test('text style: large, centered and small sizes', () async {
+      for (final text in const [
+        ExportTextStyle(subjectSize: 22, detailSize: 18),
+        ExportTextStyle(centered: false, boldSubject: false),
+        ExportTextStyle(subjectSize: 1, detailSize: 1000),
+        ExportTextStyle(subjectSize: double.nan, detailSize: 0),
+      ]) {
+        final bytes = await buildPdf(
+          demoExport(),
+          options: PdfExportOptions(text: text),
+          fonts: testFonts(),
+        );
+        expect(isPdf(bytes), isTrue);
+        final pages = RegExp(r'/Type\s*/Page\b')
+            .allMatches(latin1.decode(bytes));
+        expect(pages, hasLength(1));
+      }
+      // Dense portrait page with the largest sizes, Latin-1 fallback.
+      final bytes = await buildPdf(
+        demoExport(kind: ExportKind.regular),
+        options: const PdfExportOptions(
+          landscape: false,
+          text: ExportTextStyle(subjectSize: 22, detailSize: 18),
+        ),
       );
       expect(isPdf(bytes), isTrue);
     });

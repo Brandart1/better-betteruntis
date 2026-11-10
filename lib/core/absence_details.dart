@@ -103,6 +103,7 @@ abstract interface class AbsenceDetailsApi {
     required UntisCredentials auth,
     required DateTime start,
     required DateTime end,
+    int? studentId,
   });
 
   /// Absence reasons + excuse statuses from the full master data.

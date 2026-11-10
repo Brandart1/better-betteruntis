@@ -18,11 +18,15 @@ class PdfExportOptions {
     this.colors = true,
     this.landscape = true,
     this.pageFormat = PdfPageFormat.a4,
+    this.text,
   });
 
   final bool colors;
   final bool landscape;
   final PdfPageFormat pageFormat;
+
+  /// Lesson text styling; null = left-aligned, bold subject, automatic sizes.
+  final ExportTextStyle? text;
 }
 
 /// Text for the built-in Helvetica (WinAnsi/Latin-1 only).
@@ -156,11 +160,26 @@ Future<Uint8List> buildPdf(
     }
   }
   final colW = dayW / maxCols;
-  final subjectSize = math
+  final autoSubject = math
       .min(unitH * 0.32, math.min(9.5, colW / 5))
       .clamp(4.5, 9.5)
       .toDouble();
-  final detailSize = math.max(4.0, subjectSize * 0.82);
+  final text = options.text;
+  // The user's sizes scale the automatic ones (1.0 = app defaults), capped by
+  // the unit height and column width so boxes don't overflow badly.
+  final capSubject = math.max(
+    4.5,
+    math.min(14.0, math.min(unitH * 0.5, colW / 3.5)),
+  );
+  final capDetail = math.max(4.0, capSubject * 0.9);
+  final subjectSize = text == null
+      ? autoSubject
+      : (autoSubject * text.subjectScale).clamp(4.5, capSubject).toDouble();
+  final detailSize = text == null
+      ? math.max(4.0, autoSubject * 0.82)
+      : (autoSubject * 0.82 * text.detailScale)
+            .clamp(4.0, capDetail)
+            .toDouble();
 
   final grey = PdfColor.fromInt(0xFF9E9E9E);
   final lightGrey = PdfColor.fromInt(0xFFE0E0E0);
@@ -326,6 +345,8 @@ Future<Uint8List> buildPdf(
             detailSize,
             t.showClasses,
             tx,
+            centered: text?.centered ?? false,
+            boldSubject: text?.boldSubject ?? true,
           ),
         ),
       );
@@ -402,8 +423,10 @@ pw.Widget _lessonBox(
   double subjectSize,
   double detailSize,
   bool showClasses,
-  String Function(String) tx,
-) {
+  String Function(String) tx, {
+  required bool centered,
+  required bool boldSubject,
+}) {
   final cancelled = l.status == LessonStatus.cancelled;
   final exam = l.status == LessonStatus.exam;
   final subst = l.status == LessonStatus.substitution;
@@ -441,8 +464,10 @@ pw.Widget _lessonBox(
     color: fgMuted,
     decoration: strike,
   );
+  final align = centered ? pw.TextAlign.center : pw.TextAlign.left;
   pw.Widget names(List<String> current, List<String> struck) => pw.RichText(
     maxLines: 1,
+    textAlign: align,
     overflow: pw.TextOverflow.clip,
     text: pw.TextSpan(
       style: detail,
@@ -465,13 +490,16 @@ pw.Widget _lessonBox(
     pw.RichText(
       maxLines: 1,
       overflow: pw.TextOverflow.clip,
+      textAlign: align,
       text: pw.TextSpan(
         children: [
           pw.TextSpan(
             text: tx(l.subjectLabel),
             style: pw.TextStyle(
               fontSize: subjectSize,
-              fontWeight: pw.FontWeight.bold,
+              fontWeight: boldSubject
+                  ? pw.FontWeight.bold
+                  : pw.FontWeight.normal,
               color: fg,
               decoration: strike,
             ),
@@ -521,14 +549,23 @@ pw.Widget _lessonBox(
                 canvas.strokePath();
               },
             ),
-          pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(
-              horizontal: 2,
-              vertical: 1.5,
-            ),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: lines,
+          pw.SizedBox(
+            width: w,
+            height: h,
+            child: pw.Padding(
+              padding: const pw.EdgeInsets.symmetric(
+                horizontal: 2,
+                vertical: 1.5,
+              ),
+              child: pw.Column(
+                mainAxisAlignment: centered
+                    ? pw.MainAxisAlignment.center
+                    : pw.MainAxisAlignment.start,
+                crossAxisAlignment: centered
+                    ? pw.CrossAxisAlignment.center
+                    : pw.CrossAxisAlignment.start,
+                children: lines,
+              ),
             ),
           ),
         ],

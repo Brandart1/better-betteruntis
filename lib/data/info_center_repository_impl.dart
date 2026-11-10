@@ -24,6 +24,7 @@ import '../core/models.dart';
 import 'db/database.dart';
 import 'info_codec.dart';
 import 'master_data_store.dart';
+import 'period_codec.dart';
 
 class InfoCenterRepositoryImpl implements InfoCenterRepository {
   /// [api] must implement [InfoCenterApi] (see [FullUntisApi]).
@@ -124,8 +125,8 @@ class InfoCenterRepositoryImpl implements InfoCenterRepository {
   static String _range(DateTime s, DateTime e) =>
       '${dateKey(s)}..${dateKey(e)}';
 
-  static TimetableTarget _own(Account a) =>
-      TimetableTarget(a.elementType, a.elementId);
+  /// klasseId that getOfficeHours2017 is believed to read as "all classes".
+  static const allClasses = -1;
 
   // ---- Sections ------------------------------------------------------------
 
@@ -199,8 +200,8 @@ class InfoCenterRepositoryImpl implements InfoCenterRepository {
     DateTime end, {
     bool force = false,
   }) {
-    if (a.anonymous) return _empty();
-    final t = _own(a);
+    final t = a.personalTarget;
+    if (a.anonymous || t == null) return _empty();
     return _section(
       a,
       'homework|${t.type.apiName}#${t.id}|${_range(start, end)}',
@@ -224,7 +225,8 @@ class InfoCenterRepositoryImpl implements InfoCenterRepository {
     DateTime end, {
     bool force = false,
   }) {
-    final t = _own(a);
+    final t = a.personalTarget;
+    if (t == null) return _empty();
     return _section(
       a,
       'exams|${t.type.apiName}#${t.id}|${_range(start, end)}',
@@ -249,11 +251,15 @@ class InfoCenterRepositoryImpl implements InfoCenterRepository {
     bool force = false,
   }) {
     if (a.anonymous) return _empty();
+    // Parents: the selected child's absences. Students keep the old key.
+    final child = a.activeChild;
     return _section(
       a,
-      'absences|${_range(start, end)}',
+      child == null
+          ? 'absences|${_range(start, end)}'
+          : 'absences|child#${child.id}|${_range(start, end)}',
       absencesCodec,
-      (auth) => _fetchAbsences(a, auth, start, end),
+      (auth) => _fetchAbsences(a, auth, start, end, child?.id),
       force: force,
     );
   }
@@ -263,6 +269,7 @@ class InfoCenterRepositoryImpl implements InfoCenterRepository {
     UntisCredentials auth,
     DateTime start,
     DateTime end,
+    int? studentId,
   ) async {
     final Object details = api;
     if (details is! AbsenceDetailsApi) {
@@ -272,6 +279,7 @@ class InfoCenterRepositoryImpl implements InfoCenterRepository {
         auth: auth,
         start: start,
         end: end,
+        studentId: studentId,
       );
     }
     final raw = await details.rawAbsences(
@@ -280,6 +288,7 @@ class InfoCenterRepositoryImpl implements InfoCenterRepository {
       auth: auth,
       start: start,
       end: end,
+      studentId: studentId,
     );
     var lookups = await _master.loadLookups(a.id);
     if (raw.any((r) => r.needsLookup(lookups)) && _lookupsLoaded.add(a.id)) {
@@ -298,27 +307,69 @@ class InfoCenterRepositoryImpl implements InfoCenterRepository {
     return [for (final r in raw) r.resolve(lookups)];
   }
 
+  /// Office hours are always requested (even without a known class): for
+  /// [Account.personalKlasseId] (own class, else the parent's selected
+  /// child's class), else the class most common in the cached "My timetable"
+  /// periods, else [allClasses]. A class-specific request that comes back
+  /// empty is repeated once with [allClasses].
   @override
   Stream<Cached<List<OfficeHourItem>>> officeHours(
     Account a,
     DateTime start, {
     bool force = false,
-  }) {
-    if (a.klassenIds.isEmpty) return _empty();
-    final klasse = a.klassenIds.first;
-    return _section(
+  }) async* {
+    final klasse =
+        a.personalKlasseId ?? await _klasseFromTimetable(a) ?? allClasses;
+    Future<List<OfficeHourItem>> load(UntisCredentials auth, int k) =>
+        _info.officeHours(
+          host: a.host,
+          school: a.school.loginName,
+          auth: auth,
+          klasseId: k,
+          start: start,
+        );
+    yield* _section(
       a,
       'officeHours|$klasse|${dateKey(start)}',
       officeHoursCodec,
-      (auth) => _info.officeHours(
-        host: a.host,
-        school: a.school.loginName,
-        auth: auth,
-        klasseId: klasse,
-        start: start,
-      ),
+      (auth) async {
+        final items = await load(auth, klasse);
+        if (items.isNotEmpty || klasse == allClasses) return items;
+        return load(auth, allClasses);
+      },
       force: force,
     );
+  }
+
+  /// The class of the account's own timetable: the target itself for a
+  /// class, else the CLASS element that occurs most often in the most
+  /// recently cached weeks of that timetable. Null when nothing is cached.
+  Future<int?> _klasseFromTimetable(Account a) async {
+    final t = a.personalTarget;
+    if (t == null) return null;
+    if (t.type == ElementType.klasse) return t.id;
+    final rows =
+        await (db.select(db.cachedWeeks)
+              ..where(
+                (w) =>
+                    w.accountId.equals(a.id) &
+                    w.targetType.equals(t.type.apiName) &
+                    w.targetId.equals(t.id),
+              )
+              ..orderBy([(w) => OrderingTerm.desc(w.fetchedAt)])
+              ..limit(4))
+            .get();
+    final counts = <int, int>{};
+    for (final r in rows) {
+      for (final p in PeriodCodec.decodeList(r.periodsJson)) {
+        for (final e in p.ofType(ElementType.klasse)) {
+          final id = e.id > 0 ? e.id : e.orgId;
+          if (id > 0) counts[id] = (counts[id] ?? 0) + 1;
+        }
+      }
+    }
+    if (counts.isEmpty) return null;
+    return counts.entries.reduce((x, y) => y.value > x.value ? y : x).key;
   }
 
   /// Removes all cached info of [accountId] (also done by account deletion).

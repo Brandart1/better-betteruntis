@@ -120,6 +120,7 @@ class UntisApiImpl implements FullUntisApi {
     required DateTime end,
     required int masterDataTimestamp,
   }) async {
+    checkTarget(target);
     final result = await _rpc.call(rpcUrl(host, school), 'getTimetable2017', {
       'id': target.id,
       'type': target.type.apiName,
@@ -154,6 +155,20 @@ class UntisApiImpl implements FullUntisApi {
     } catch (_) {
       // Teachers are a bonus here; the timetable itself must still load.
       return res;
+    }
+  }
+
+  /// Untis answers an unknown `type` with "request.type is null" (seen for
+  /// parent accounts, whose own element isn't a timetable). Such a request
+  /// is never sent; this throws a clear error instead.
+  static void checkTarget(TimetableTarget target) {
+    if (!timetableElementTypes.contains(target.type) || target.id <= 0) {
+      throw UntisException(
+        -1,
+        'No timetable for this element '
+        '(${target.type.apiName}#${target.id}). Open a class, teacher or '
+        'room via "Browse timetables" instead.',
+      );
     }
   }
 
@@ -351,13 +366,16 @@ class UntisApiImpl implements FullUntisApi {
     DateTime start,
     DateTime end,
     UntisCredentials auth,
-  ) => {
-    'id': target.id,
-    'type': target.type.apiName,
-    'startDate': formatDate(start),
-    'endDate': formatDate(end),
-    'auth': _rpc.auth(auth),
-  };
+  ) {
+    checkTarget(target);
+    return {
+      'id': target.id,
+      'type': target.type.apiName,
+      'startDate': formatDate(start),
+      'endDate': formatDate(end),
+      'auth': _rpc.auth(auth),
+    };
+  }
 
   @override
   Future<List<HomeworkItem>> homework({
@@ -391,6 +409,9 @@ class UntisApiImpl implements FullUntisApi {
     ),
   );
 
+  /// [studentId] (parent accounts) is sent as `studentId`. That parameter is
+  /// a guess (docs/API.md): if the server rejects the call with it, the call
+  /// is repeated once without it.
   @override
   Future<List<RawAbsence>> rawAbsences({
     required String host,
@@ -398,15 +419,25 @@ class UntisApiImpl implements FullUntisApi {
     required UntisCredentials auth,
     required DateTime start,
     required DateTime end,
-  }) async => parseRawAbsences(
-    await _rpc.call(rpcUrl(host, school), 'getStudentAbsences2017', {
-      'startDate': formatDate(start),
-      'endDate': formatDate(end),
-      'includeExcused': true,
-      'includeUnExcused': true,
-      'auth': _rpc.auth(auth),
-    }),
-  );
+    int? studentId,
+  }) async {
+    Future<Object?> call({required bool withStudent}) =>
+        _rpc.call(rpcUrl(host, school), 'getStudentAbsences2017', {
+          'startDate': formatDate(start),
+          'endDate': formatDate(end),
+          'includeExcused': true,
+          'includeUnExcused': true,
+          if (withStudent) 'studentId': studentId,
+          'auth': _rpc.auth(auth),
+        });
+    if (studentId == null) return parseRawAbsences(await call(withStudent: false));
+    try {
+      return parseRawAbsences(await call(withStudent: true));
+    } on UntisException catch (e) {
+      if (e.isNetwork || e.isTimeout) rethrow;
+      return parseRawAbsences(await call(withStudent: false));
+    }
+  }
 
   /// One getUserData2017 call (the only known source of the full master data).
   @override
@@ -438,6 +469,7 @@ class UntisApiImpl implements FullUntisApi {
     required UntisCredentials auth,
     required DateTime start,
     required DateTime end,
+    int? studentId,
   }) async {
     final raw = await rawAbsences(
       host: host,
@@ -445,6 +477,7 @@ class UntisApiImpl implements FullUntisApi {
       auth: auth,
       start: start,
       end: end,
+      studentId: studentId,
     );
     final key = '$host|$school';
     if (!_lookups.containsKey(key) &&

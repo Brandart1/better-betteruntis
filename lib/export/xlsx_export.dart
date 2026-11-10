@@ -15,6 +15,16 @@ import 'zip_patch.dart';
 const kGridSheet = 'Timetable';
 const kLessonsSheet = 'Lessons';
 
+/// Workbook font (what the excel package writes as the default font).
+const kXlsxFontName = 'Arial';
+
+/// Grid font sizes (pt) at the app's default text sizes.
+const kXlsxDetailPt = 10.0;
+const kXlsxSubjectPt = 12.0;
+
+/// Rounds to half points (Excel's font size steps).
+double _halfPt(double v) => (v * 2).round() / 2;
+
 ExcelColor _argb(int argb) => ExcelColor.fromHexString(
   (0xFF000000 | (argb & 0xFFFFFF))
       .toRadixString(16)
@@ -38,7 +48,28 @@ bool isDarkColor(int argb) {
   return l < 0.4;
 }
 
-Uint8List buildXlsx(ExportTimetable t, {bool colors = true}) {
+/// One formatted piece of a grid cell (subject line or detail lines).
+class _Run {
+  const _Run(this.text, {required this.subject});
+  final String text;
+  final bool subject;
+}
+
+class _RichCell {
+  const _RichCell(this.runs, {required this.fill, required this.italic});
+  final List<_Run> runs;
+  final int? fill;
+  final bool italic;
+}
+
+/// [text] null keeps the built-in look (left/top aligned, one font size).
+/// Otherwise lesson cells follow it: alignment, detail size as the cell font,
+/// and the subject line as a rich-text run (own size, bold).
+Uint8List buildXlsx(
+  ExportTimetable t, {
+  bool colors = true,
+  ExportTextStyle? text,
+}) {
   final excel = Excel.createExcel();
   final defaultName = excel.getDefaultSheet() ?? 'Sheet1';
   final grid = excel[kGridSheet];
@@ -63,14 +94,24 @@ Uint8List buildXlsx(ExportTimetable t, {bool colors = true}) {
     topBorder: thin,
     bottomBorder: thin,
   );
+  final centered = text?.centered ?? false;
+  final detailPt = text == null
+      ? kXlsxDetailPt
+      : _halfPt(kXlsxDetailPt * text.detailScale);
+  final subjectPt = text == null
+      ? kXlsxDetailPt
+      : _halfPt(kXlsxSubjectPt * text.subjectScale);
   CellStyle cellStyle({int? fill, bool strike = false, bool italic = false}) =>
       CellStyle(
         backgroundColorHex: fill == null ? ExcelColor.none : _argb(fill),
         fontColorHex: fill != null && isDarkColor(fill)
             ? ExcelColor.white
             : ExcelColor.black,
-        verticalAlign: VerticalAlign.Top,
-        horizontalAlign: HorizontalAlign.Left,
+        fontSize: text == null ? null : detailPt.round(),
+        verticalAlign: centered ? VerticalAlign.Center : VerticalAlign.Top,
+        horizontalAlign: centered
+            ? HorizontalAlign.Center
+            : HorizontalAlign.Left,
         textWrapping: TextWrapping.WrapText,
         italic: italic,
         leftBorder: thin,
@@ -101,7 +142,9 @@ Uint8List buildXlsx(ExportTimetable t, {bool colors = true}) {
     grid.updateCell(at(0, r + 1), TextCellValue(label), cellStyle: headerStyle);
   }
 
-  final rowLines = List<int>.filled(rows.length, 1);
+  // Needed height (pt) per grid row; a text line takes 1.5 × its font size.
+  final rowHeights = List<double>.filled(rows.length, 0);
+  final rich = <String, _RichCell>{};
   for (var c = 0; c < t.weekdays.length; c++) {
     final d = t.weekdays[c];
     final col = c + 1;
@@ -143,40 +186,68 @@ Uint8List buildXlsx(ExportTimetable t, {bool colors = true}) {
           _sameLessons(perRow[end + 1], here)) {
         end++;
       }
-      final text = [
-        for (final l in here)
-          cellLines(l, showClasses: t.showClasses).join('\n'),
-      ].join('\n\n');
-      final lines = text.isEmpty ? 1 : '\n'.allMatches(text).length + 1;
+      final runs = <_Run>[];
+      var needed = 0.0;
+      for (final l in here) {
+        final lines = cellLines(l, showClasses: t.showClasses);
+        if (runs.isNotEmpty) {
+          runs.add(const _Run('\n\n', subject: false));
+          needed += detailPt * 1.5; // the blank line
+        }
+        runs.add(_Run(lines.first, subject: true));
+        needed += subjectPt * 1.5;
+        if (lines.length > 1) {
+          runs.add(_Run('\n${lines.skip(1).join('\n')}', subject: false));
+          needed += (lines.length - 1) * detailPt * 1.5;
+        }
+      }
+      final value = runs.map((r) => r.text).join();
       final first = here.isEmpty ? null : here.first;
-      final style = cellStyle(
-        fill: colors ? first?.color : null,
-        italic: first != null && first.status == LessonStatus.cancelled,
-      );
+      final fill = colors ? first?.color : null;
+      final italic = first != null && first.status == LessonStatus.cancelled;
+      final style = cellStyle(fill: fill, italic: italic);
       grid.updateCell(
         at(col, r + 1),
-        here.isEmpty ? null : TextCellValue(text),
+        here.isEmpty ? null : TextCellValue(value),
         cellStyle: style,
       );
+      if (text != null && here.isNotEmpty) {
+        rich[at(col, r + 1).cellId] = _RichCell(
+          runs,
+          fill: fill,
+          italic: italic,
+        );
+      }
       for (var k = r + 1; k <= end; k++) {
         grid.updateCell(at(col, k + 1), null, cellStyle: style);
       }
       if (end > r) grid.merge(at(col, r + 1), at(col, end + 1));
       // Spread the needed height over the merged rows.
-      final perRowLines = (lines / (end - r + 1)).ceil();
+      final share = needed / (end - r + 1);
       for (var k = r; k <= end; k++) {
-        rowLines[k] = math.max(rowLines[k], perRowLines);
+        rowHeights[k] = math.max(rowHeights[k], share);
       }
       r = end + 1;
     }
   }
+  // Wider columns for larger text, so lines wrap about as often as usual.
+  final widen = text == null
+      ? 1.0
+      : math.max(
+          1.0,
+          math.max(subjectPt / kXlsxSubjectPt, detailPt / kXlsxDetailPt),
+        );
   grid.setColumnWidth(0, 14);
   for (var c = 0; c < t.weekdays.length; c++) {
-    grid.setColumnWidth(c + 1, 24);
+    grid.setColumnWidth(c + 1, (24 * widen).roundToDouble());
   }
   grid.setRowHeight(0, 32);
   for (var r = 0; r < rows.length; r++) {
-    grid.setRowHeight(r + 1, math.max(30, rowLines[r] * 15.0));
+    // Ceil to whole legacy lines (15 pt) to keep the old row heights.
+    grid.setRowHeight(
+      r + 1,
+      math.max(30, (rowHeights[r] / 15 - 1e-9).ceil() * 15.0),
+    );
   }
 
   // ---- Lessons sheet
@@ -200,8 +271,92 @@ Uint8List buildXlsx(ExportTimetable t, {bool colors = true}) {
     (c, w) => lessons.setColumnWidth(c, (w + 2).clamp(6, 50).toDouble()),
   );
 
-  final bytes = Uint8List.fromList(excel.encode()!);
+  var bytes = Uint8List.fromList(excel.encode()!);
+  if (rich.isNotEmpty) {
+    bytes = _richGridCells(
+      bytes,
+      rich,
+      subjectPt: subjectPt,
+      detailPt: detailPt,
+      boldSubject: text!.boldSubject,
+    );
+  }
   return freezeFirstRowAndColumn(bytes);
+}
+
+String _xmlEscape(String s) => s
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+
+String _ptVal(double pt) =>
+    pt == pt.roundToDouble() ? pt.toInt().toString() : pt.toString();
+
+/// Path of the worksheet XML of [sheet] (via workbook.xml and its rels).
+String? worksheetPath(Uint8List xlsx, String sheet) {
+  final wb = readZipText(xlsx, 'xl/workbook.xml');
+  final rels = readZipText(xlsx, 'xl/_rels/workbook.xml.rels');
+  if (wb == null || rels == null) return null;
+  String? attr(String tag, String name) =>
+      RegExp('\\b$name="([^"]*)"').firstMatch(tag)?.group(1);
+  String? rid;
+  for (final m in RegExp(r'<sheet\b[^>]*>').allMatches(wb)) {
+    if (attr(m[0]!, 'name') == _xmlEscape(sheet)) rid = attr(m[0]!, 'r:id');
+  }
+  if (rid == null) return null;
+  for (final m in RegExp(r'<Relationship\b[^>]*>').allMatches(rels)) {
+    if (attr(m[0]!, 'Id') != rid) continue;
+    final target = attr(m[0]!, 'Target');
+    if (target == null) return null;
+    return target.startsWith('/') ? target.substring(1) : 'xl/$target';
+  }
+  return null;
+}
+
+/// Replaces the shared-string lesson cells of the grid sheet with inline
+/// rich text (the excel package can't write rich text): the subject run gets
+/// its own size and weight. Font color and italics are repeated per run,
+/// since run properties replace the cell font.
+Uint8List _richGridCells(
+  Uint8List xlsx,
+  Map<String, _RichCell> cells, {
+  required double subjectPt,
+  required double detailPt,
+  required bool boldSubject,
+}) {
+  final path = worksheetPath(xlsx, kGridSheet);
+  if (path == null) return xlsx;
+  String runs(_RichCell cell) {
+    final color = cell.fill != null && isDarkColor(cell.fill!)
+        ? 'FFFFFFFF'
+        : 'FF000000';
+    final b = StringBuffer();
+    for (final r in cell.runs) {
+      if (r.text.isEmpty) continue;
+      b
+        ..write('<r><rPr><rFont val="$kXlsxFontName"/>')
+        ..write(r.subject && boldSubject ? '<b/>' : '')
+        ..write(cell.italic ? '<i/>' : '')
+        ..write('<color rgb="$color"/>')
+        ..write('<sz val="${_ptVal(r.subject ? subjectPt : detailPt)}"/>')
+        ..write('</rPr><t xml:space="preserve">${_xmlEscape(r.text)}</t></r>');
+    }
+    return b.toString();
+  }
+
+  final cellRe = RegExp(
+    r'<c r="([A-Z]+[0-9]+)"([^>]*?)(/>|>.*?</c>)',
+    dotAll: true,
+  );
+  return patchZipText(xlsx, (n) => n == path, (_, xml) {
+    return xml.replaceAllMapped(cellRe, (m) {
+      final cell = cells[m[1]];
+      if (cell == null) return m[0]!;
+      final attrs = m[2]!.replaceAll(RegExp(r'\s+t="[^"]*"'), '');
+      return '<c r="${m[1]}"$attrs t="inlineStr"><is>${runs(cell)}</is></c>';
+    });
+  });
 }
 
 bool _sameLessons(List<ExportLesson> a, List<ExportLesson> b) =>

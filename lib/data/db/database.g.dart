@@ -200,6 +200,29 @@ class $AccountsTable extends Accounts
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _childrenJsonMeta = const VerificationMeta(
+    'childrenJson',
+  );
+  @override
+  late final GeneratedColumn<String> childrenJson = GeneratedColumn<String>(
+    'children_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('[]'),
+  );
+  static const VerificationMeta _selectedChildIdMeta = const VerificationMeta(
+    'selectedChildId',
+  );
+  @override
+  late final GeneratedColumn<int> selectedChildId = GeneratedColumn<int>(
+    'selected_child_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -219,6 +242,8 @@ class $AccountsTable extends Accounts
     rightsJson,
     masterDataTimestamp,
     hostOverride,
+    childrenJson,
+    selectedChildId,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -382,6 +407,24 @@ class $AccountsTable extends Accounts
         ),
       );
     }
+    if (data.containsKey('children_json')) {
+      context.handle(
+        _childrenJsonMeta,
+        childrenJson.isAcceptableOrUnknown(
+          data['children_json']!,
+          _childrenJsonMeta,
+        ),
+      );
+    }
+    if (data.containsKey('selected_child_id')) {
+      context.handle(
+        _selectedChildIdMeta,
+        selectedChildId.isAcceptableOrUnknown(
+          data['selected_child_id']!,
+          _selectedChildIdMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -459,6 +502,14 @@ class $AccountsTable extends Accounts
         DriftSqlType.string,
         data['${effectivePrefix}host_override'],
       ),
+      childrenJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}children_json'],
+      )!,
+      selectedChildId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}selected_child_id'],
+      ),
     );
   }
 
@@ -486,6 +537,12 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
   final String rightsJson;
   final int masterDataTimestamp;
   final String? hostOverride;
+
+  /// Parent accounts: `[{id, displayName, klasseId?, type}]`. Added in v3.
+  final String childrenJson;
+
+  /// The child shown as "My timetable" (null = the first). Added in v3.
+  final int? selectedChildId;
   const AccountRow({
     required this.id,
     required this.position,
@@ -504,6 +561,8 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
     required this.rightsJson,
     required this.masterDataTimestamp,
     this.hostOverride,
+    required this.childrenJson,
+    this.selectedChildId,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -528,6 +587,10 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
     map['master_data_timestamp'] = Variable<int>(masterDataTimestamp);
     if (!nullToAbsent || hostOverride != null) {
       map['host_override'] = Variable<String>(hostOverride);
+    }
+    map['children_json'] = Variable<String>(childrenJson);
+    if (!nullToAbsent || selectedChildId != null) {
+      map['selected_child_id'] = Variable<int>(selectedChildId);
     }
     return map;
   }
@@ -555,6 +618,10 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
       hostOverride: hostOverride == null && nullToAbsent
           ? const Value.absent()
           : Value(hostOverride),
+      childrenJson: Value(childrenJson),
+      selectedChildId: selectedChildId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(selectedChildId),
     );
   }
 
@@ -583,6 +650,8 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
         json['masterDataTimestamp'],
       ),
       hostOverride: serializer.fromJson<String?>(json['hostOverride']),
+      childrenJson: serializer.fromJson<String>(json['childrenJson']),
+      selectedChildId: serializer.fromJson<int?>(json['selectedChildId']),
     );
   }
   @override
@@ -606,6 +675,8 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
       'rightsJson': serializer.toJson<String>(rightsJson),
       'masterDataTimestamp': serializer.toJson<int>(masterDataTimestamp),
       'hostOverride': serializer.toJson<String?>(hostOverride),
+      'childrenJson': serializer.toJson<String>(childrenJson),
+      'selectedChildId': serializer.toJson<int?>(selectedChildId),
     };
   }
 
@@ -627,6 +698,8 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
     String? rightsJson,
     int? masterDataTimestamp,
     Value<String?> hostOverride = const Value.absent(),
+    String? childrenJson,
+    Value<int?> selectedChildId = const Value.absent(),
   }) => AccountRow(
     id: id ?? this.id,
     position: position ?? this.position,
@@ -645,6 +718,10 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
     rightsJson: rightsJson ?? this.rightsJson,
     masterDataTimestamp: masterDataTimestamp ?? this.masterDataTimestamp,
     hostOverride: hostOverride.present ? hostOverride.value : this.hostOverride,
+    childrenJson: childrenJson ?? this.childrenJson,
+    selectedChildId: selectedChildId.present
+        ? selectedChildId.value
+        : this.selectedChildId,
   );
   AccountRow copyWithCompanion(AccountsCompanion data) {
     return AccountRow(
@@ -687,6 +764,12 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
       hostOverride: data.hostOverride.present
           ? data.hostOverride.value
           : this.hostOverride,
+      childrenJson: data.childrenJson.present
+          ? data.childrenJson.value
+          : this.childrenJson,
+      selectedChildId: data.selectedChildId.present
+          ? data.selectedChildId.value
+          : this.selectedChildId,
     );
   }
 
@@ -709,7 +792,9 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
           ..write('klassenIdsJson: $klassenIdsJson, ')
           ..write('rightsJson: $rightsJson, ')
           ..write('masterDataTimestamp: $masterDataTimestamp, ')
-          ..write('hostOverride: $hostOverride')
+          ..write('hostOverride: $hostOverride, ')
+          ..write('childrenJson: $childrenJson, ')
+          ..write('selectedChildId: $selectedChildId')
           ..write(')'))
         .toString();
   }
@@ -733,6 +818,8 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
     rightsJson,
     masterDataTimestamp,
     hostOverride,
+    childrenJson,
+    selectedChildId,
   );
   @override
   bool operator ==(Object other) =>
@@ -754,7 +841,9 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
           other.klassenIdsJson == this.klassenIdsJson &&
           other.rightsJson == this.rightsJson &&
           other.masterDataTimestamp == this.masterDataTimestamp &&
-          other.hostOverride == this.hostOverride);
+          other.hostOverride == this.hostOverride &&
+          other.childrenJson == this.childrenJson &&
+          other.selectedChildId == this.selectedChildId);
 }
 
 class AccountsCompanion extends UpdateCompanion<AccountRow> {
@@ -775,6 +864,8 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
   final Value<String> rightsJson;
   final Value<int> masterDataTimestamp;
   final Value<String?> hostOverride;
+  final Value<String> childrenJson;
+  final Value<int?> selectedChildId;
   final Value<int> rowid;
   const AccountsCompanion({
     this.id = const Value.absent(),
@@ -794,6 +885,8 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
     this.rightsJson = const Value.absent(),
     this.masterDataTimestamp = const Value.absent(),
     this.hostOverride = const Value.absent(),
+    this.childrenJson = const Value.absent(),
+    this.selectedChildId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   AccountsCompanion.insert({
@@ -814,6 +907,8 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
     this.rightsJson = const Value.absent(),
     this.masterDataTimestamp = const Value.absent(),
     this.hostOverride = const Value.absent(),
+    this.childrenJson = const Value.absent(),
+    this.selectedChildId = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        position = Value(position),
@@ -845,6 +940,8 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
     Expression<String>? rightsJson,
     Expression<int>? masterDataTimestamp,
     Expression<String>? hostOverride,
+    Expression<String>? childrenJson,
+    Expression<int>? selectedChildId,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -866,6 +963,8 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
       if (masterDataTimestamp != null)
         'master_data_timestamp': masterDataTimestamp,
       if (hostOverride != null) 'host_override': hostOverride,
+      if (childrenJson != null) 'children_json': childrenJson,
+      if (selectedChildId != null) 'selected_child_id': selectedChildId,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -888,6 +987,8 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
     Value<String>? rightsJson,
     Value<int>? masterDataTimestamp,
     Value<String?>? hostOverride,
+    Value<String>? childrenJson,
+    Value<int?>? selectedChildId,
     Value<int>? rowid,
   }) {
     return AccountsCompanion(
@@ -908,6 +1009,8 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
       rightsJson: rightsJson ?? this.rightsJson,
       masterDataTimestamp: masterDataTimestamp ?? this.masterDataTimestamp,
       hostOverride: hostOverride ?? this.hostOverride,
+      childrenJson: childrenJson ?? this.childrenJson,
+      selectedChildId: selectedChildId ?? this.selectedChildId,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -966,6 +1069,12 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
     if (hostOverride.present) {
       map['host_override'] = Variable<String>(hostOverride.value);
     }
+    if (childrenJson.present) {
+      map['children_json'] = Variable<String>(childrenJson.value);
+    }
+    if (selectedChildId.present) {
+      map['selected_child_id'] = Variable<int>(selectedChildId.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -992,6 +1101,8 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
           ..write('rightsJson: $rightsJson, ')
           ..write('masterDataTimestamp: $masterDataTimestamp, ')
           ..write('hostOverride: $hostOverride, ')
+          ..write('childrenJson: $childrenJson, ')
+          ..write('selectedChildId: $selectedChildId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3866,6 +3977,8 @@ typedef $$AccountsTableCreateCompanionBuilder = AccountsCompanion Function({
   Value<String> rightsJson,
   Value<int> masterDataTimestamp,
   Value<String?> hostOverride,
+  Value<String> childrenJson,
+  Value<int?> selectedChildId,
   Value<int> rowid,
 });
 typedef $$AccountsTableUpdateCompanionBuilder = AccountsCompanion Function({
@@ -3886,6 +3999,8 @@ typedef $$AccountsTableUpdateCompanionBuilder = AccountsCompanion Function({
   Value<String> rightsJson,
   Value<int> masterDataTimestamp,
   Value<String?> hostOverride,
+  Value<String> childrenJson,
+  Value<int?> selectedChildId,
   Value<int> rowid,
 });
 
@@ -3980,6 +4095,16 @@ class $$AccountsTableFilterComposer
 
   ColumnFilters<String> get hostOverride => $composableBuilder(
     column: $table.hostOverride,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get childrenJson => $composableBuilder(
+    column: $table.childrenJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get selectedChildId => $composableBuilder(
+    column: $table.selectedChildId,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4077,6 +4202,16 @@ class $$AccountsTableOrderingComposer
     column: $table.hostOverride,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get childrenJson => $composableBuilder(
+    column: $table.childrenJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get selectedChildId => $composableBuilder(
+    column: $table.selectedChildId,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$AccountsTableAnnotationComposer
@@ -4160,6 +4295,16 @@ class $$AccountsTableAnnotationComposer
     column: $table.hostOverride,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get childrenJson => $composableBuilder(
+    column: $table.childrenJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get selectedChildId => $composableBuilder(
+    column: $table.selectedChildId,
+    builder: (column) => column,
+  );
 }
 
 class $$AccountsTableTableManager
@@ -4210,6 +4355,8 @@ class $$AccountsTableTableManager
                 Value<String> rightsJson = const Value.absent(),
                 Value<int> masterDataTimestamp = const Value.absent(),
                 Value<String?> hostOverride = const Value.absent(),
+                Value<String> childrenJson = const Value.absent(),
+                Value<int?> selectedChildId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AccountsCompanion(
                 id: id,
@@ -4229,6 +4376,8 @@ class $$AccountsTableTableManager
                 rightsJson: rightsJson,
                 masterDataTimestamp: masterDataTimestamp,
                 hostOverride: hostOverride,
+                childrenJson: childrenJson,
+                selectedChildId: selectedChildId,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4250,6 +4399,8 @@ class $$AccountsTableTableManager
                 Value<String> rightsJson = const Value.absent(),
                 Value<int> masterDataTimestamp = const Value.absent(),
                 Value<String?> hostOverride = const Value.absent(),
+                Value<String> childrenJson = const Value.absent(),
+                Value<int?> selectedChildId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AccountsCompanion.insert(
                 id: id,
@@ -4269,6 +4420,8 @@ class $$AccountsTableTableManager
                 rightsJson: rightsJson,
                 masterDataTimestamp: masterDataTimestamp,
                 hostOverride: hostOverride,
+                childrenJson: childrenJson,
+                selectedChildId: selectedChildId,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

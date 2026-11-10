@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
@@ -201,9 +202,16 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
         ),
       );
     }
-    final target =
-        widget.target ??
-        TimetableTarget(account.elementType, account.elementId);
+    final target = widget.target ?? account.personalTarget;
+    if (target == null) {
+      return Scaffold(
+        drawer: widget.drawer,
+        appBar: AppBar(title: const Text('Timetable')),
+        body: const NoPersonalTimetable(),
+      );
+    }
+    // Parent accounts: "My timetable" is a child's; say whose.
+    final child = widget.target == null ? account.activeChild : null;
 
     // Keep the neighbouring weeks subscribed so swiping shows data instantly.
     for (final p in [_page - 1, _page + 1]) {
@@ -397,7 +405,13 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
               children: [
                 title,
                 if (element != null)
-                  Text(element.longName, style: theme.textTheme.labelMedium),
+                  Text(element.longName, style: theme.textTheme.labelMedium)
+                else if (child != null)
+                  Text(
+                    child.displayName,
+                    key: const ValueKey('child-label'),
+                    style: theme.textTheme.labelMedium,
+                  ),
               ],
             ),
             actions: [
@@ -422,6 +436,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                       account: account,
                       target: target,
                       initialWeek: day ?? ws,
+                      elementName: child?.displayName,
                     ),
                     child: const ListTile(
                       contentPadding: EdgeInsets.zero,
@@ -469,4 +484,56 @@ class _ColumnRevealClipper extends CustomClipper<Rect> {
       old.column != column ||
       old.columns != columns ||
       old.left != left;
+}
+
+/// Shown instead of "My timetable" when the account has no timetable of its
+/// own and no children to show (e.g. a parent account without linked pupils,
+/// or one added before children were stored).
+class NoPersonalTimetable extends StatelessWidget {
+  const NoPersonalTimetable({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      key: const ValueKey('no-personal-timetable'),
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.event_busy_outlined,
+              size: 48,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No personal timetable',
+              style: theme.textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "This account doesn't have a timetable of its own, and no "
+              'children are linked to it. Parent accounts: if you added this '
+              'account before, remove it and log in again to load your '
+              'children.\n\nYou can still open any class, teacher or room.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.tonalIcon(
+              key: const ValueKey('browse-timetables'),
+              onPressed: () => GoRouter.maybeOf(context)?.push('/browse'),
+              icon: const Icon(Icons.search),
+              label: const Text('Browse timetables'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

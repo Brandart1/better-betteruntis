@@ -6,6 +6,7 @@ import 'package:better_betteruntis/data/account_repository_impl.dart';
 import 'package:better_betteruntis/data/db/database.dart';
 import 'package:better_betteruntis/data/info_center_repository_impl.dart';
 import 'package:better_betteruntis/data/master_data_store.dart';
+import 'package:better_betteruntis/data/period_codec.dart';
 import 'package:better_betteruntis/data/secret_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -173,48 +174,222 @@ void main() {
     verifyZeroInteractions(api);
   });
 
-  test('office hours use the first class; none -> empty', () async {
-    when(
-      () => api.officeHours(
-        host: any(named: 'host'),
-        school: any(named: 'school'),
-        auth: any(named: 'auth'),
-        klasseId: any(named: 'klasseId'),
-        start: any(named: 'start'),
-      ),
-    ).thenAnswer(
-      (_) async => [
-        OfficeHourItem(
-          id: 1,
-          start: DateTime(2026, 11, 11, 10),
-          end: DateTime(2026, 11, 11, 10, 45),
-          teacherName: 'Erika Beispiel',
-          registered: true,
-        ),
-      ],
-    );
+  When<Future<List<OfficeHourItem>>> whenOfficeHours() => when(
+    () => api.officeHours(
+      host: any(named: 'host'),
+      school: any(named: 'school'),
+      auth: any(named: 'auth'),
+      klasseId: any(named: 'klasseId'),
+      start: any(named: 'start'),
+    ),
+  );
+
+  List<int> officeHourKlassen() => verify(
+    () => api.officeHours(
+      host: any(named: 'host'),
+      school: any(named: 'school'),
+      auth: any(named: 'auth'),
+      klasseId: captureAny(named: 'klasseId'),
+      start: start,
+    ),
+  ).captured.cast<int>();
+
+  final oneOfficeHour = [
+    OfficeHourItem(
+      id: 1,
+      start: DateTime(2026, 11, 11, 10),
+      end: DateTime(2026, 11, 11, 10, 45),
+      teacherName: 'Erika Beispiel',
+      registered: true,
+    ),
+  ];
+
+  test('office hours use the first class', () async {
+    whenOfficeHours().thenAnswer((_) async => oneOfficeHour);
     final events = await repo.officeHours(acc, start).toList();
     expect(events.last.data!.single.teacherName, 'Erika Beispiel');
     expect(events.last.data!.single.registered, isTrue);
-    verify(
-      () => api.officeHours(
-        host: any(named: 'host'),
-        school: any(named: 'school'),
-        auth: any(named: 'auth'),
-        klasseId: 1,
-        start: start,
-      ),
-    ).called(1);
+    expect(officeHourKlassen(), [1]);
+  });
 
-    final noClass = Account(
-      id: 'a',
-      school: acc.school,
-      username: acc.username,
-      anonymous: false,
-      displayName: 'x',
+  test('empty for the class -> retried once with -1', () async {
+    whenOfficeHours().thenAnswer(
+      (i) async => i.namedArguments[#klasseId] == -1 ? oneOfficeHour : [],
     );
-    final empty = await repo.officeHours(noClass, start).toList();
-    expect(empty.single.data, isEmpty);
+    final events = await repo.officeHours(acc, start).toList();
+    expect(events.last.data, hasLength(1));
+    expect(officeHourKlassen(), [1, -1]);
+  });
+
+  test('student without klassenIds still requests office hours', () async {
+    whenOfficeHours().thenAnswer((_) async => oneOfficeHour);
+    final noClass = await accounts.add(
+      Account(
+        id: 'nc',
+        school: acc.school,
+        username: 'u',
+        anonymous: false,
+        displayName: 'x',
+        elementType: ElementType.student,
+        elementId: 7,
+      ),
+      's',
+      masterData(),
+    );
+    final events = await repo.officeHours(noClass, start).toList();
+    expect(events.last.data, hasLength(1));
+    expect(officeHourKlassen(), [-1], reason: 'nothing cached: all classes');
+  });
+
+  test('student without klassenIds: class from the cached timetable', () async {
+    whenOfficeHours().thenAnswer((_) async => oneOfficeHour);
+    final noClass = await accounts.add(
+      Account(
+        id: 'nc',
+        school: acc.school,
+        username: 'u',
+        anonymous: false,
+        displayName: 'x',
+        elementType: ElementType.student,
+        elementId: 7,
+      ),
+      's',
+      masterData(),
+    );
+    Period p(int id, int klasse) => Period(
+      id: id,
+      lessonId: id,
+      start: DateTime(2026, 11, 9, 8),
+      end: DateTime(2026, 11, 9, 9),
+      elements: [ElementRef(type: ElementType.klasse, id: klasse, orgId: klasse)],
+      flags: const {PeriodFlag.regular},
+    );
+    await db
+        .into(db.cachedWeeks)
+        .insert(
+          CachedWeeksCompanion.insert(
+            accountId: 'nc',
+            targetType: 'STUDENT',
+            targetId: 7,
+            weekStart: '2026-11-09',
+            periodsJson: PeriodCodec.encodeList([p(1, 5), p(2, 5), p(3, 6)]),
+            fetchedAt: 1,
+          ),
+        );
+    await repo.officeHours(noClass, start).toList();
+    expect(officeHourKlassen(), [5]);
+  });
+
+  group('parent accounts', () {
+    late Account parent;
+    setUp(() async {
+      parent = await accounts.add(
+        Account(
+          id: 'p',
+          school: acc.school,
+          username: 'parent',
+          anonymous: false,
+          displayName: 'Parent',
+          elementType: ElementType.unknown,
+          elementId: 900,
+          children: const [
+            AccountChild(id: 11, displayName: 'Child A', klasseId: 3),
+            AccountChild(id: 12, displayName: 'Child B'),
+          ],
+        ),
+        's',
+        masterData(),
+      );
+    });
+
+    test('homework and exams use the selected child', () async {
+      whenHomework().thenAnswer((_) async => []);
+      when(
+        () => api.exams(
+          host: any(named: 'host'),
+          school: any(named: 'school'),
+          auth: any(named: 'auth'),
+          target: any(named: 'target'),
+          start: any(named: 'start'),
+          end: any(named: 'end'),
+        ),
+      ).thenAnswer((_) async => []);
+      await repo.homework(parent, start, end).toList();
+      await repo.exams(parent.copyWith(selectedChildId: 12), start, end).toList();
+      final hwTarget = verify(
+        () => api.homework(
+          host: any(named: 'host'),
+          school: any(named: 'school'),
+          auth: any(named: 'auth'),
+          target: captureAny(named: 'target'),
+          start: any(named: 'start'),
+          end: any(named: 'end'),
+        ),
+      ).captured.single;
+      expect(hwTarget, const TimetableTarget(ElementType.student, 11));
+      final examTarget = verify(
+        () => api.exams(
+          host: any(named: 'host'),
+          school: any(named: 'school'),
+          auth: any(named: 'auth'),
+          target: captureAny(named: 'target'),
+          start: any(named: 'start'),
+          end: any(named: 'end'),
+        ),
+      ).captured.single;
+      expect(examTarget, const TimetableTarget(ElementType.student, 12));
+    });
+
+    test('absences pass the child id', () async {
+      when(
+        () => api.rawAbsences(
+          host: any(named: 'host'),
+          school: any(named: 'school'),
+          auth: any(named: 'auth'),
+          start: any(named: 'start'),
+          end: any(named: 'end'),
+          studentId: any(named: 'studentId'),
+        ),
+      ).thenAnswer((_) async => []);
+      await repo.absences(parent, start, end).toList();
+      final id = verify(
+        () => api.rawAbsences(
+          host: any(named: 'host'),
+          school: any(named: 'school'),
+          auth: any(named: 'auth'),
+          start: any(named: 'start'),
+          end: any(named: 'end'),
+          studentId: captureAny(named: 'studentId'),
+        ),
+      ).captured.single;
+      expect(id, 11);
+    });
+
+    test("office hours use the child's class, else -1", () async {
+      whenOfficeHours().thenAnswer((_) async => oneOfficeHour);
+      await repo.officeHours(parent, start).toList();
+      expect(officeHourKlassen(), [3]);
+      await repo.officeHours(parent.copyWith(selectedChildId: 12), start).toList();
+      expect(officeHourKlassen(), [-1]);
+    });
+
+    test('no children: homework/exams empty without requests', () async {
+      final none = await accounts.add(
+        Account(
+          id: 'p0',
+          school: acc.school,
+          username: 'parent0',
+          anonymous: false,
+          displayName: 'Parent',
+          elementType: ElementType.unknown,
+        ),
+        's',
+        masterData(),
+      );
+      expect((await repo.homework(none, start, end).toList()).single.data, isEmpty);
+      expect((await repo.exams(none, start, end).toList()).single.data, isEmpty);
+      verifyZeroInteractions(api);
+    });
   });
 
   group('absences', () {

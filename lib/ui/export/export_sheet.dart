@@ -78,6 +78,7 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
   late DateTime _week = _monday(widget.initialWeek);
   ExportFormat _format = ExportFormat.pdf;
   bool _colors = true;
+  bool _textSettings = true;
   bool _landscape = true;
   String? _separator;
   bool _busy = false;
@@ -126,6 +127,7 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
         colors: _colors,
         landscape: _landscape,
         separator: _separator ?? defaultCsvSeparator(_locale),
+        text: _textSettings ? ExportTextStyle.fromSettings(settings) : null,
       );
       final t = await prepareExport(
         repo: ref.read(timetableRepositoryProvider),
@@ -295,6 +297,18 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
                 ),
                 value: _colors,
                 onChanged: (v) => setState(() => _colors = v),
+              ),
+            if (_format != ExportFormat.csv)
+              SwitchListTile(
+                key: const ValueKey('export-text'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Use text settings'),
+                subtitle: const Text(
+                  'Font sizes, bold subject and centering from the timetable '
+                  'settings',
+                ),
+                value: _textSettings,
+                onChanged: (v) => setState(() => _textSettings = v),
               ),
             if (_format == ExportFormat.pdf)
               SwitchListTile(

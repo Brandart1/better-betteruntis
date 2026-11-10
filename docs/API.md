@@ -49,7 +49,7 @@ Every authenticated call puts this inside its params object:
    - Store only the secret, never the password.
 3. `getUserData2017 {elementId:0, deviceOs, deviceOsVersion, auth}` returns:
    - `masterData`: the full set.
-   - `userData`: `elemId`, `elemType`, `displayName`, `schoolName`, `klassenIds`, `children`, `rights`.
+   - `userData`: `elemId`, `elemType`, `displayName`, `schoolName`, `klassenIds`, `children`, `rights`. (`klassenIds` can be empty, also for students. `children`: see "Parent accounts".)
    - `settings`
    - `messengerSettings`
 
@@ -78,9 +78,30 @@ QR code format: `untis://setschool?school=&user=&key=`. Our extras are `anonymou
   - Homework returns `homeWorks` plus `lessonsById`.
   - Exams return `exams[{…subjectId, klasseIds, roomIds, teacherIds…}]`.
 - `getStudentAbsences2017 {startDate, endDate, includeExcused, includeUnExcused, auth}`
-- `getOfficeHours2017 {klasseId, startDate, auth}` returns name strings directly (`displayNameTeacher`, `displayNameRooms`).
+  - Parent accounts additionally send `studentId: <child id>` (**assumed**, see below); if the server rejects that, the call is repeated once without it.
+- `getOfficeHours2017 {klasseId, startDate, auth}` returns name strings directly (`displayNameTeacher`, `displayNameRooms`). See "Office hours" below for what is assumed.
 - `getAuthToken {auth}` returns `{token}`, a JWT used as `Authorization: Bearer` for REST calls, e.g. `GET /view/v1/messages` (the inbox).
 - Room finder: there is no dedicated method. Call `getTimetable2017` with `type:ROOM` for each saved room.
+
+## Parent (legal guardian) accounts
+Confirmed (user report): using a parent's own `userData.elemType`/`elemId` as a timetable makes `getTimetable2017` fail with "request.type is null", i.e. the parent element is not a timetable element. Our client never sends `getTimetable2017` (or homework/exams) with a type outside CLASS/TEACHER/SUBJECT/ROOM/STUDENT or with id ≤ 0; it fails early with a clear message.
+
+Assumed (no real response seen yet):
+- `userData.children` is a list like `[{id, displayName, klasseId?}]`. The parser also accepts `studentId`/`elemId`/`elementId`/`personId` for the id, `longName`/`name`/`firstName`+`lastName` for the name, `klasseId`/`klassenId`/`classId`/`klassenIds[0]`/`klasseIds[0]`/`klasse.id` for the class and an optional `type`.
+- A child's timetable, homework and exams are requested with `type: STUDENT` and the child's id.
+- `getStudentAbsences2017` takes `studentId` to pick the child. Unknown; if it is rejected we retry without it, which may return the parent's (empty) or all children's absences.
+- `userData.elemType` for parents is something like `LEGAL_GUARDIAN` / `PARENT` (anything we don't know maps to `unknown`).
+
+Client behaviour: "My timetable" is the own element when it is a timetable element (students, teachers — unchanged), else the selected child (first by default, switchable in the drawer, persisted per account), else a "no personal timetable" message pointing to Browse.
+
+## Office hours
+Assumed (no real response seen yet): `getOfficeHours2017 {klasseId, startDate, auth}`.
+- `klasseId`: the account's first `klassenIds` entry, else the parent's selected child's class, else the class that occurs most in the cached "My timetable" weeks, else `-1` (**assumed** to mean "all classes"). Some student accounts have empty `klassenIds` — before this the request was never sent at all.
+- A class-specific request that returns nothing is repeated once with `-1`.
+- Response: a list under `officeHours` (also accepted: top-level list, `officeHourList`, `items`). Per item: `startDateTime`/`endDateTime` (ISO or epoch ms) or `date`/`startDate` (yyyyMMdd int/string or ISO) plus `startTime`/`endTime` (hhmm int, `"1345"`, `"13:45"`, `"T13:45"`); teacher `displayNameTeacher`/`teacherName`/`teacher` (string or `{displayName|longName|name}`); rooms `displayNameRooms`/`rooms`/`roomName` (string or list); `email`, `phone`, `registrationPossible`, `registered`.
+
+## Debug log
+Only responses are recorded, never requests (so no passwords, OTPs or secrets). `getAppSharedSecret` and `getAuthToken` results are replaced by their shape (`<redacted string, N chars>`). In `getUserData2017` responses, values of keys that look like credentials (`token`, `secret`, `password`, `otp`, `jwt`) are redacted. The latest `getUserData2017` response, a "userData only (master data left out)" copy of it, and the latest `getOfficeHours2017` response per `klasseId` stay in the log regardless of its 30-entry limit. The Debug screen menu can fetch both on demand.
 
 ## Master data
 - `timeStamp`

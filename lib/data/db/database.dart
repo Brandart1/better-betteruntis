@@ -29,6 +29,12 @@ class Accounts extends Table {
       integer().withDefault(const Constant(0))();
   TextColumn get hostOverride => text().nullable()();
 
+  /// Parent accounts: `[{id, displayName, klasseId?, type}]`. Added in v3.
+  TextColumn get childrenJson => text().withDefault(const Constant('[]'))();
+
+  /// The child shown as "My timetable" (null = the first). Added in v3.
+  IntColumn get selectedChildId => integer().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -169,8 +175,9 @@ class AppDatabase extends _$AppDatabase {
       );
 
   /// v1: initial schema. v2: [InfoCache], [AbsenceLookupEntries].
+  /// v3: `Accounts.childrenJson`, `Accounts.selectedChildId` (parents).
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -179,6 +186,10 @@ class AppDatabase extends _$AppDatabase {
       if (from < 2) {
         await m.createTable(infoCache);
         await m.createTable(absenceLookupEntries);
+      }
+      if (from < 3) {
+        await m.addColumn(accounts, accounts.childrenJson);
+        await m.addColumn(accounts, accounts.selectedChildId);
       }
     },
   );

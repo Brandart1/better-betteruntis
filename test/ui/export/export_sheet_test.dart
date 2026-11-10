@@ -4,8 +4,11 @@ import 'dart:typed_data';
 
 import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/core/providers.dart';
+import 'package:better_betteruntis/core/settings.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
 import 'package:better_betteruntis/export/pdf_fonts.dart';
+import 'package:better_betteruntis/export/xlsx_export.dart';
+import 'package:better_betteruntis/export/zip_patch.dart';
 import 'package:better_betteruntis/ui/export/export_service.dart';
 import 'package:better_betteruntis/ui/export/export_sheet.dart';
 import 'package:flutter/material.dart';
@@ -51,7 +54,10 @@ void main() {
     );
   }
 
-  Future<void> pumpSheet(WidgetTester tester) async {
+  Future<void> pumpSheet(
+    WidgetTester tester, {
+    TimetableSettings? settings,
+  }) async {
     tester.view.physicalSize = const Size(900, 1600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -60,6 +66,12 @@ void main() {
       ProviderScope(
         overrides: [
           timetableRepositoryProvider.overrideWithValue(repo),
+          if (settings != null)
+            settingsStoreProvider.overrideWithValue(
+              MemorySettingsStore({
+                TimetableSettingsNotifier.storeKey: settings.toJson(),
+              }),
+            ),
           activeAccountProvider.overrideWith((ref) => Stream.value(account)),
           exportDirectoryProvider.overrideWithValue(() async => dir),
           exportFontsProvider.overrideWithValue(() async => fonts()),
@@ -140,6 +152,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('export-landscape')), findsNothing);
     expect(find.byKey(const ValueKey('export-colors')), findsNothing);
+    expect(find.byKey(const ValueKey('export-text')), findsNothing);
     expect(find.text('Comma ( , )'), findsOneWidget);
   });
 
@@ -198,6 +211,49 @@ void main() {
     expect(shared.single.name, 'timetable_10a_regular.xlsx');
     // ZIP signature.
     expect(shared.single.bytes.sublist(0, 2), [0x50, 0x4B]);
+  });
+
+  group('text settings', () {
+    const custom = TimetableSettings(
+      centerText: true,
+      subjectFontSize: 22,
+      detailFontSize: 18,
+    );
+    String grid(Uint8List bytes) =>
+        readZipText(bytes, worksheetPath(bytes, kGridSheet)!)!;
+
+    testWidgets('xlsx follows the timetable text settings by default', (
+      tester,
+    ) async {
+      await pumpSheet(tester, settings: custom);
+      await tester.tap(find.byKey(const ValueKey('export-format-xlsx')));
+      await tester.pumpAndSettle();
+      final toggle = find.byKey(const ValueKey('export-text'));
+      expect(toggle, findsOneWidget);
+      expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+      await export(tester);
+      final xml = grid(shared.single.bytes);
+      expect(xml, contains('t="inlineStr"'));
+      expect(xml, contains('<sz val="17.5"/>'));
+    });
+
+    testWidgets('switching it off gives the built-in look', (tester) async {
+      await pumpSheet(tester, settings: custom);
+      await tester.tap(find.byKey(const ValueKey('export-format-xlsx')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('export-text')));
+      await tester.tap(find.byKey(const ValueKey('export-text')));
+      await tester.pumpAndSettle();
+      await export(tester);
+      expect(grid(shared.single.bytes), isNot(contains('inlineStr')));
+    });
+
+    testWidgets('pdf with large text settings', (tester) async {
+      await pumpSheet(tester, settings: custom);
+      expect(find.byKey(const ValueKey('export-text')), findsOneWidget);
+      await export(tester);
+      expect(latin1.decode(shared.single.bytes.sublist(0, 5)), '%PDF-');
+    });
   });
 
   testWidgets('load errors are shown, nothing is shared', (tester) async {

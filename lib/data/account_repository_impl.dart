@@ -172,6 +172,10 @@ class AccountRepositoryImpl implements AccountRepository {
     rights: _decodeList(r.rightsJson).whereType<String>().toSet(),
     masterDataTimestamp: r.masterDataTimestamp,
     hostOverride: r.hostOverride,
+    children: _decodeList(
+      r.childrenJson,
+    ).map(AccountChild.fromJson).whereType<AccountChild>().toList(),
+    selectedChildId: r.selectedChildId,
   );
 
   static List<Object?> _decodeList(String json) {
@@ -202,5 +206,9 @@ class AccountRepositoryImpl implements AccountRepository {
         rightsJson: Value(jsonEncode(a.rights.toList())),
         masterDataTimestamp: Value(a.masterDataTimestamp),
         hostOverride: Value(a.hostOverride),
+        childrenJson: Value(
+          jsonEncode([for (final c in a.children) c.toJson()]),
+        ),
+        selectedChildId: Value(a.selectedChildId),
       );
 }

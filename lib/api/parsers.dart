@@ -423,7 +423,52 @@ LoginResult parseLoginResult(Object? raw, {required String secret}) {
     klassenIds: _ints(user['klassenIds']),
     rights: _list(user['rights']).map(_nonBlank).whereType<String>().toSet(),
     masterData: parseMasterData(j['masterData']),
+    children: parseChildren(user['children']),
   );
+}
+
+/// `userData.children` of a parent (legal guardian) account. Assumed shape
+/// (unconfirmed, see docs/API.md): `[{id, displayName, klasseId?}]`; also
+/// accepts `studentId`/`elemId`/`personId` for the id, `longName`/`name`/
+/// `firstName`+`lastName` for the name, `klassenIds`/`klasseIds`/`klasse` for
+/// the class and an optional `type`. Entries without an id are dropped.
+List<AccountChild> parseChildren(Object? raw) {
+  final out = <AccountChild>[];
+  for (final c in _maps(raw)) {
+    final id = [
+      c['id'],
+      c['studentId'],
+      c['elemId'],
+      c['elementId'],
+      c['personId'],
+    ].map(_intOrNull).firstWhere((i) => i != null && i > 0, orElse: () => null);
+    if (id == null || out.any((o) => o.id == id)) continue;
+    final full = '${_str(c['firstName']).trim()} ${_str(c['lastName']).trim()}'
+        .trim();
+    final klasse = _map(c['klasse']);
+    final klasseId = [
+      c['klasseId'],
+      c['klassenId'],
+      c['classId'],
+      ..._list(c['klassenIds']),
+      ..._list(c['klasseIds']),
+      klasse['id'],
+    ].map(_intOrNull).firstWhere((i) => i != null && i > 0, orElse: () => null);
+    final type = ElementType.parse(
+      c['type'] ?? c['elemType'] ?? c['elementType'],
+    );
+    out.add(
+      AccountChild(
+        id: id,
+        displayName:
+            _firstStr(c, const ['displayName', 'longName', 'name']) ??
+            (full.isNotEmpty ? full : '#$id'),
+        klasseId: klasseId,
+        type: timetableElementTypes.contains(type) ? type : ElementType.student,
+      ),
+    );
+  }
+  return out;
 }
 
 List<Message> parseMessages(Object? raw) => [

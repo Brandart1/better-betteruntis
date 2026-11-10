@@ -126,8 +126,15 @@ class RoutingUntisApi implements FullUntisApi {
     required UntisCredentials auth,
     required DateTime start,
     required DateTime end,
-  }) => _for(host)
-      .absences(host: host, school: school, auth: auth, start: start, end: end);
+    int? studentId,
+  }) => _for(host).absences(
+    host: host,
+    school: school,
+    auth: auth,
+    start: start,
+    end: end,
+    studentId: studentId,
+  );
 
   @override
   Future<List<RawAbsence>> rawAbsences({
@@ -136,9 +143,15 @@ class RoutingUntisApi implements FullUntisApi {
     required UntisCredentials auth,
     required DateTime start,
     required DateTime end,
-  }) => _for(
-    host,
-  ).rawAbsences(host: host, school: school, auth: auth, start: start, end: end);
+    int? studentId,
+  }) => _for(host).rawAbsences(
+    host: host,
+    school: school,
+    auth: auth,
+    start: start,
+    end: end,
+    studentId: studentId,
+  );
 
   @override
   Future<AbsenceLookups> absenceLookups({

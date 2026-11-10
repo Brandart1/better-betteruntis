@@ -6,7 +6,18 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:archive/archive.dart' show Deflate, Inflate;
+import 'package:archive/archive.dart' show Deflate, Inflate, ZipDecoder;
+
+/// UTF-8 text of entry [name] in [zip], or null if missing / unreadable.
+String? readZipText(Uint8List zip, String name) {
+  try {
+    final file = ZipDecoder().decodeBytes(zip).findFile(name);
+    if (file == null) return null;
+    return utf8.decode(file.content as List<int>);
+  } catch (_) {
+    return null;
+  }
+}
 
 /// Returns a copy of [zip] in which every entry whose name satisfies
 /// [select] is replaced by `patch(text)`. Unchanged entries are copied

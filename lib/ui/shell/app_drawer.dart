@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/providers.dart';
 import '../accounts/account_switcher.dart';
+import '../accounts/child_switcher.dart';
 
 class AppDrawer extends StatelessWidget {
   const AppDrawer({super.key});
@@ -19,12 +22,22 @@ class AppDrawer extends StatelessWidget {
           padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: AccountSwitcher(),
         ),
+        ChildSwitcher(onSelected: () => Navigator.of(context).pop()),
         const Divider(indent: 28, endIndent: 28),
-        ListTile(
-          leading: const Icon(Icons.person_outline),
-          title: const Text('My timetable'),
-          selected: true,
-          onTap: () => Navigator.of(context).pop(),
+        Consumer(
+          builder: (context, ref, _) {
+            // Parent accounts: whose timetable "My timetable" is.
+            final child = ref.watch(
+              activeAccountProvider.select((a) => a.value?.activeChild),
+            );
+            return ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('My timetable'),
+              subtitle: child == null ? null : Text(child.displayName),
+              selected: true,
+              onTap: () => Navigator.of(context).pop(),
+            );
+          },
         ),
         ListTile(
           leading: const Icon(Icons.inbox_outlined),

@@ -214,6 +214,7 @@ Future<LoginOutcome> performLogin(
     rights: result.rights,
     masterDataTimestamp: result.masterData.timestamp,
     hostOverride: r.hostOverride,
+    children: result.children,
   );
   try {
     final stored = await repo.add(account, result.secret, result.masterData);

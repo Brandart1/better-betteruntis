@@ -24,6 +24,8 @@ Account withProfileName(Account a, String? profileName) {
     rights: a.rights,
     masterDataTimestamp: a.masterDataTimestamp,
     hostOverride: a.hostOverride,
+    children: a.children,
+    selectedChildId: a.selectedChildId,
   );
 }
 
