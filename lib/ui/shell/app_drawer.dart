@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/app_update.dart';
 import '../../core/build_channel.dart';
 import '../../core/providers.dart';
 import '../accounts/account_switcher.dart';
@@ -70,7 +71,30 @@ class AppDrawer extends StatelessWidget {
             onTap: () => go('/debug'),
           ),
         ],
+        const _VersionFooter(),
       ],
+    );
+  }
+}
+
+/// "Version 0.4.4 (19) · beta" at the bottom of the drawer.
+class _VersionFooter extends ConsumerWidget {
+  const _VersionFooter();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final v = ref.watch(appVersionProvider).value;
+    if (v == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 16, 28, 16),
+      child: Text(
+        'Version $v · $buildChannel',
+        key: const ValueKey('app-version'),
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
     );
   }
 }
