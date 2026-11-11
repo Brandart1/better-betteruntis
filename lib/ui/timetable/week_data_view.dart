@@ -73,7 +73,11 @@ class _WeekDataViewState extends ConsumerState<WeekDataView> {
       if (error != null) {
         return TimetableErrorState(error: error, onRetry: _retry);
       }
-      return const Center(child: CircularProgressIndicator());
+      return _LoadingState(
+        slowFirstLoad:
+            widget.target.type == ElementType.teacher ||
+            widget.target.type == ElementType.room,
+      );
     }
 
     final bannerError = _refreshError ?? periods.error;
@@ -96,6 +100,43 @@ class _WeekDataViewState extends ConsumerState<WeekDataView> {
         ),
         UpdatedLabel(at: updated),
       ],
+    );
+  }
+}
+
+/// Spinner shown while a week has no saved data yet. Teacher and room
+/// timetables may have to be rebuilt from every class timetable, so
+/// [slowFirstLoad] adds a note that this can take a while.
+class _LoadingState extends StatelessWidget {
+  const _LoadingState({required this.slowFirstLoad});
+
+  final bool slowFirstLoad;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            if (slowFirstLoad) ...[
+              const SizedBox(height: 16),
+              Text(
+                'The first load of a teacher or room timetable might take a '
+                'while.',
+                key: const ValueKey('slow-first-load-note'),
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
