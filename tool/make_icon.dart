@@ -34,7 +34,8 @@ img.Color _c(int argb) => img.ColorRgba8(
 );
 
 /// Grid of 3 columns x 4 rows, [scale] = share of the icon width it spans.
-void _drawGrid(img.Image im, double scale) {
+/// [paint] maps each block's ARGB to the colour actually drawn (variants).
+void _drawGrid(img.Image im, double scale, [int Function(int argb)? paint]) {
   final s = size * ss;
   final gridW = s * scale;
   final colGap = gridW * 0.065;
@@ -49,8 +50,25 @@ void _drawGrid(img.Image im, double scale) {
     final x = x0 + col * (colW + colGap);
     final y = y0 + row * (rowH + rowGap);
     final h = span * rowH + (span - 1) * rowGap;
-    _roundedRect(im, x, y, x + colW, y + h, radius, _c(argb));
+    _roundedRect(
+      im,
+      x,
+      y,
+      x + colW,
+      y + h,
+      radius,
+      _c(paint?.call(argb) ?? argb),
+    );
   }
+}
+
+/// Opaque grey of [argb]'s luminance, lifted into 0.62..1 so every block
+/// stays clearly visible once iOS tints it (white blocks stay brightest).
+int _tintedGrey(int argb) {
+  final r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
+  final lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  final v = (255 * (0.62 + 0.38 * lum)).round();
+  return 0xFF000000 | (v << 16) | (v << 8) | v;
 }
 
 /// Opaque rounded rectangle. (image 4.3's `fillRect(radius:)` zeroes the
@@ -104,10 +122,30 @@ void main() {
   final fg = img.Image(width: s, height: s, numChannels: 4);
   _drawGrid(fg, 0.43);
 
+  // Android 13+ themed icon (also Nothing OS): the launcher only uses the
+  // alpha channel and paints it in the theme colour, so draw solid white.
+  final mono = img.Image(width: s, height: s, numChannels: 4);
+  _drawGrid(mono, 0.43, (_) => 0xFFFFFFFF);
+
+  // iOS 18+ dark: same grid on a transparent background; the system draws
+  // its dark backdrop behind it.
+  final dark = img.Image(width: s, height: s, numChannels: 4);
+  _drawGrid(dark, 0.6);
+
+  // iOS 18+ tinted: greyscale on transparent; the system tints by luminance.
+  final tinted = img.Image(width: s, height: s, numChannels: 4);
+  _drawGrid(tinted, 0.6, _tintedGrey);
+
   Directory('assets/icon').createSync(recursive: true);
-  File('assets/icon/icon.png').writeAsBytesSync(img.encodePng(_finish(full)));
-  File(
-    'assets/icon/foreground.png',
-  ).writeAsBytesSync(img.encodePng(_finish(fg)));
-  stdout.writeln('wrote assets/icon/icon.png and assets/icon/foreground.png');
+  final out = {
+    'icon.png': full,
+    'foreground.png': fg,
+    'monochrome.png': mono,
+    'ios_dark.png': dark,
+    'ios_tinted.png': tinted,
+  };
+  for (final MapEntry(:key, :value) in out.entries) {
+    File('assets/icon/$key').writeAsBytesSync(img.encodePng(_finish(value)));
+    stdout.writeln('wrote assets/icon/$key');
+  }
 }
