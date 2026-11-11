@@ -28,7 +28,8 @@ docs/        API.md (protocol notes), FEATURES.md (parity checklist)
 ## Versioning
 `pubspec.yaml` `version: X.Y.Z+N` is the single source of truth: X.Y.Z becomes
 the app's version name and N the Android versionCode / iOS build number.
-- Every local commit bumps only the build number (`N`), so unpushed work doesn't use up version numbers.
-- Every push bumps the patch version (`Z`) by 1. `N` keeps counting up and is never reset.
+- Every commit bumps only the build number (`N`), so unreleased work doesn't use up version numbers.
+- Every release build bumps the patch version (`Z`) by 1 and is tagged. `N` keeps counting up and is never reset.
+- CI only analyzes and tests; the app is built once, by the release workflow, when a tag is pushed.
 - Minor (`Y`) and major (`X`) only change when explicitly decided.
 - Release tags are `vX.Y.Z[-alpha|-beta|-rc]` and must match pubspec (the release workflow checks this).
