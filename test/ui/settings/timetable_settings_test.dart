@@ -339,6 +339,11 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('reset-all')));
       await tester.pumpAndSettle();
       expect(cardColor(tester, 'school'), const Color(0xFF81C784));
+      // The undo snackbar times out on its own.
+      expect(find.text('Settings reset'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(find.text('Settings reset'), findsNothing);
     });
 
     BorderSide cardBorder(WidgetTester tester, String kind) {
@@ -450,6 +455,14 @@ void main() {
       await tester.tap(find.text('Undo'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('subject-LAT')), findsOneWidget);
+
+      // Without Undo, the snackbar times out on its own.
+      await tester.tap(find.byKey(const ValueKey('reset-subject-colors')));
+      await tester.pumpAndSettle();
+      expect(find.text('Subject colors reset'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(find.text('Subject colors reset'), findsNothing);
     });
 
     testWidgets('subject color shows in the preview', (tester) async {

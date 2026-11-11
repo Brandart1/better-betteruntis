@@ -80,6 +80,8 @@ class TimetableSettingsScreen extends ConsumerWidget {
         ..showSnackBar(
           SnackBar(
             content: const Text('Settings reset'),
+            // With an action, SnackBars persist by default; time out instead.
+            persist: false,
             action: SnackBarAction(
               label: 'Undo',
               onPressed: () => notifier.set(before),

@@ -93,6 +93,8 @@ class _SubjectColorsScreenState extends ConsumerState<SubjectColorsScreen> {
         ..showSnackBar(
           SnackBar(
             content: const Text('Subject colors reset'),
+            // With an action, SnackBars persist by default; time out instead.
+            persist: false,
             action: SnackBarAction(
               label: 'Undo',
               onPressed: () =>
