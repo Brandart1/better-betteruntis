@@ -34,6 +34,16 @@ jobs:
           if [ "$V" != "$T" ]; then
             echo "::error::Tag $TAG does not match pubspec version $V"; exit 1
           fi
+      - name: Release notes list the changes
+        # New tags must ship notes with every change since the last release
+        # (written from .github/release-notes/next.md). Manual rebuilds of old
+        # tags fall back to default.md.
+        if: github.event_name == 'push'
+        run: |
+          NOTES=.github/release-notes/${TAG}.md
+          if [ ! -f "$NOTES" ] || ! grep -q '^## New in this release' "$NOTES"; then
+            echo "::error::$NOTES with a '## New in this release' section is required"; exit 1
+          fi
 
   android:
     name: Signed Android APK
@@ -177,6 +187,11 @@ jobs:
           case "$TAG" in *-alpha*) PRE="--prerelease" ;; esac
           NOTES=.github/release-notes/${TAG}.md
           [ -f "$NOTES" ] || NOTES=.github/release-notes/default.md
+          # Append the install instructions unless the notes carry their own.
+          if [ "$NOTES" != .github/release-notes/default.md ] && ! grep -q '^## Install' "$NOTES"; then
+            { cat "$NOTES"; echo; cat .github/release-notes/default.md; } > "$RUNNER_TEMP/notes.md"
+            NOTES="$RUNNER_TEMP/notes.md"
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
           else
