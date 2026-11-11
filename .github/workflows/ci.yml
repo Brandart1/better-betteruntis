@@ -1,7 +1,7 @@
 name: CI
 
-# Analyze and test only. Building the app (APK, IPA, web + server) happens
-# once, in release.yml, when a version tag is pushed — building here as well
+# Analyze and test only. Building the app (APK, IPA, web + server, Docker
+# image) happens once, in release.yml, when a version tag is pushed — building here as well
 # doubled the billed minutes (macOS counts 10x on private repos).
 
 on:

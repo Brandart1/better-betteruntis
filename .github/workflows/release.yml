@@ -141,6 +141,19 @@ jobs:
           name: web
           path: better-betteruntis-*-web-linux-x64.tar.gz
 
+  # Checks that the self-hosting image still builds (not published). Not a
+  # dependency of the release, so a Docker problem doesn't hold back the
+  # app; it still turns the run red.
+  docker:
+    name: Docker image builds
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - run: docker build --build-arg BBU_CHANNEL=${{ env.BBU_CHANNEL }} -t better-betteruntis-web .
+
   release:
     name: GitHub release
     needs: [android, ios, web]
