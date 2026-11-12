@@ -350,6 +350,152 @@ void main() {
       expect(tokens, 2);
     });
 
+    bool isSession(Req r) => r.json?['method'] == 'getUserData2017';
+    Resp session(String id) => (
+      status: 200,
+      body: {'id': '1', 'jsonrpc': '2.0', 'result': {}},
+      headers: {
+        'set-cookie': [
+          'JSESSIONID=$id; Path=/WebUntis; Secure; HttpOnly',
+          'traceId=t1; Path=/',
+        ],
+      },
+    );
+
+    test('report: sends the web session cookie from getUserData2017', () async {
+      handler = (r) {
+        if (isToken(r)) return rpc({'token': 't'});
+        if (isSession(r)) return session('SESSION-SECRET');
+        return ok({
+          'data': {'conflicts': []},
+        });
+      };
+      await api.reportAbsence(
+        host: host,
+        school: schoolName,
+        auth: creds,
+        report: report,
+      );
+      final login = adapter.requests.firstWhere(isSession);
+      expect(login.uri.queryParameters, {
+        'school': schoolName,
+        'm': 'getUserData2017',
+        'v': 'i2.2',
+      });
+      final post = adapter.requests.last;
+      final b64 = base64.encode(utf8.encode(schoolName));
+      expect(
+        post.headers['Cookie'],
+        'schoolname="_$b64"; JSESSIONID=SESSION-SECRET; traceId=t1',
+      );
+      expect(post.headers['Authorization'], 'Bearer t');
+      final log = api.debugLog;
+      expect(log.last.method, contains('(web session)'));
+      final names = log.firstWhere((e) => e.method.contains('cookies'));
+      expect(jsonDecode(names.json), {
+        'names': ['JSESSIONID', 'traceId'],
+      });
+      expect(log.map((e) => e.json).join(), isNot(contains('SESSION-SECRET')));
+    });
+
+    test('CSRF token and tenant id from api/app/config are sent', () async {
+      handler = (r) {
+        if (isToken(r)) return rpc({'token': 't'});
+        if (isSession(r)) return session('S');
+        if (r.uri.path == '/WebUntis/api/app/config') {
+          return ok({
+            'data': {
+              'tenant': {'id': 4711, 'displayName': 'X'},
+              'user': {'name': 'Parent'},
+              'csrfToken': 'CSRF-SECRET',
+            },
+          });
+        }
+        return ok({
+          'data': {'conflicts': []},
+        });
+      };
+      await api.reportAbsence(
+        host: host,
+        school: schoolName,
+        auth: creds,
+        report: report,
+      );
+      final post = adapter.requests.last;
+      expect(post.headers['X-CSRF-TOKEN'], 'CSRF-SECRET');
+      expect(post.headers['Tenant-Id'], '4711');
+      final all = api.debugLog.map((e) => '${e.method} ${e.json}').join();
+      expect(all, isNot(contains('CSRF-SECRET')));
+      expect(all, isNot(contains('Parent')));
+      expect(all, contains('data.csrfToken'));
+      expect(all, contains('data.tenant.id'));
+    });
+
+    test('findSessionValues: loose key matching', () {
+      final v = UntisApiImpl.findSessionValues({
+        'tenantId': '12',
+        'security': {'_csrf': 'abc'},
+      });
+      expect((v.csrf, v.csrfPath), ('abc', 'security._csrf'));
+      expect((v.tenantId, v.tenantPath), ('12', 'tenantId'));
+      final none = UntisApiImpl.findSessionValues('x');
+      expect(none.csrf, isNull);
+      expect(none.tenantId, isNull);
+    });
+
+    test('a cached session that gets redirected is reopened once', () async {
+      var sessions = 0;
+      handler = (r) {
+        if (isToken(r)) return rpc({'token': 't'});
+        if (isSession(r)) return session('S${++sessions}');
+        if (r.headers['Cookie'].toString().contains('JSESSIONID=S2')) {
+          return ok({
+            'data': {'conflicts': []},
+          });
+        }
+        if (r.method == 'GET') return ok({'data': {}});
+        return (
+          status: 302,
+          body: '',
+          headers: {
+            'location': ['https://$host/WebUntis/index.do'],
+          },
+        );
+      };
+      await api.absenceReportOptions(
+        host: host,
+        school: schoolName,
+        auth: creds,
+        studentId: 1001,
+      );
+      expect(sessions, 1);
+      await api.reportAbsence(
+        host: host,
+        school: schoolName,
+        auth: creds,
+        report: report,
+      );
+      expect(sessions, 2);
+    });
+
+    test('no JSESSIONID: falls back to the bearer token alone', () async {
+      handler = (r) {
+        if (isToken(r)) return rpc({'token': 't'});
+        if (isSession(r)) return rpc({});
+        return ok({
+          'data': {'conflicts': []},
+        });
+      };
+      await api.reportAbsence(
+        host: host,
+        school: schoolName,
+        auth: creds,
+        report: report,
+      );
+      expect(adapter.requests.last.headers['Cookie'], isNull);
+      expect(api.debugLog.last.method, isNot(contains('web session')));
+    });
+
     test('options: meta reasons + showCreateAbsence of the child', () async {
       handler = (r) {
         if (isToken(r)) return rpc({'token': 't'});

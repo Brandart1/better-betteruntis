@@ -103,8 +103,17 @@ Seen in public community notes on the WebUntis web client (not yet against a rea
 - `POST /WebUntis/api/classreg/absences/students/self` with JSON `{studentId, startDate, startTime, endDate, endTime, reasonId, text}`. Dates are yyyymmdd numbers, times hhmm numbers, `reasonId` -1 = none. Answer `{data:{result, conflicts:[…]}}`; saved only when `conflicts` is empty. Errors come as `{errors:[{code,title}]}`.
 - The browser sends these with its session cookie plus `X-CSRF-TOKEN` and `Tenant-Id`.
 
+Seen with real parent accounts (2026-11-12, two schools, password and QR login alike):
+- The bearer token alone is **not** accepted: both GETs answer `302` to `/WebUntis/index.do` and the POST answers `403` with an HTML "WebUntis Access Denied" page.
+
+Session (0.4.6+23, to be confirmed):
+- We open a browser session the way the WebUntis JS library's secret login does: `POST jsonrpc_intern.do?school=<s>&m=getUserData2017&v=i2.2` with `{auth:{user, otp, clientTime}}`. Its `Set-Cookie` should carry `JSESSIONID`. All classic calls then send `Cookie: schoolname="_<base64 school>"; JSESSIONID=…` (plus any other cookies) and still the bearer token.
+- Then `GET /WebUntis/api/app/config` with that cookie; the first key matching `csrf` and a `tenantId` / `tenant.id` are sent as `X-CSRF-TOKEN` / `Tenant-Id`. An `XSRF-TOKEN` cookie is echoed as `X-XSRF-TOKEN`.
+- The Debug log shows `web session: …` entries: cookie names received, the config's top-level keys and the key paths where CSRF / tenant were found (never values). A cached session that is redirected or refused is reopened once.
+- Native apps only: on the web the browser hides `Set-Cookie` and our proxy drops cookies.
+- If it still fails, the server answers with a redirect or a login page; our client then reports "The school's server didn't accept the app's sign-in for this function" (code `-8530`, internal).
+
 Assumed (to be confirmed with a real parent account):
-- These endpoints also accept `Authorization: Bearer <getAuthToken JWT>` instead of the browser session. If they don't, the server answers with a redirect or a login page; our client then reports "The school's server didn't accept the app's sign-in for this function" (code `-8530`, internal).
 - For parents, `studentId` is the child's id from `userData.children`, and `.../students/self` is the right path (the web client uses the same absence module for students and parents).
 - The meta field names above; every field is optional in our parser. If the meta call fails, reasons come from the `absences/students` answer, else from master data `absenceReasons` (shown with a notice).
 

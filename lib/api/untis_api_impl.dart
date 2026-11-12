@@ -138,8 +138,9 @@ class UntisApiImpl implements FullUntisApi {
 
     // Some schools leave TEACHER elements out of the JSON-RPC timetable for
     // students, while the REST timetable (used by the official app) has them.
-    final missingTeachers =
-        res.periods.any((p) => p.ofType(ElementType.teacher).isEmpty);
+    final missingTeachers = res.periods.any(
+      (p) => p.ofType(ElementType.teacher).isEmpty,
+    );
     if (!missingTeachers || auth.anonymous) return res;
     try {
       final entries = await _restEntries(
@@ -177,10 +178,15 @@ class UntisApiImpl implements FullUntisApi {
   final _tokens = <String, ({String token, DateTime at})>{};
 
   /// Bearer token for REST calls, cached for a few minutes per account.
-  Future<String> _token(String host, String school, UntisCredentials auth) async {
+  Future<String> _token(
+    String host,
+    String school,
+    UntisCredentials auth,
+  ) async {
     final key = '$host|$school|${auth.username}';
     final cached = _tokens[key];
-    if (cached != null && DateTime.now().difference(cached.at) < const Duration(minutes: 5)) {
+    if (cached != null &&
+        DateTime.now().difference(cached.at) < const Duration(minutes: 5)) {
       return cached.token;
     }
     final r = await _rpc.call(rpcUrl(host, school), 'getAuthToken', {
@@ -219,10 +225,13 @@ class UntisApiImpl implements FullUntisApi {
     required DateTime end,
   }) async {
     final token = await _token(host, school, auth);
-    final type = target.type == ElementType.student ? 'MY_TIMETABLE' : 'STANDARD';
+    final type = target.type == ElementType.student
+        ? 'MY_TIMETABLE'
+        : 'STANDARD';
 
     Future<Response<String>> get(int format) async {
-      final url = 'https://$host/WebUntis/api/rest/view/v1/timetable/entries'
+      final url =
+          'https://$host/WebUntis/api/rest/view/v1/timetable/entries'
           '?start=${formatDate(start)}&end=${formatDate(end)}&format=$format'
           '&resourceType=${target.type.apiName}&resources=${target.id}'
           '&periodTypes=&timetableType=$type';
@@ -231,7 +240,10 @@ class UntisApiImpl implements FullUntisApi {
         options: Options(
           responseType: ResponseType.plain,
           validateStatus: (_) => true,
-          headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
+          headers: {
+            'Accept': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
         ),
       );
       _rpc.record(
@@ -239,7 +251,9 @@ class UntisApiImpl implements FullUntisApi {
         '${formatDate(start)}..${formatDate(end)} format=$format [HTTP ${resp.statusCode}]',
         resp.data ?? '',
       );
-      if (resp.statusCode == 401) _tokens.remove('$host|$school|${auth.username}');
+      if (resp.statusCode == 401) {
+        _tokens.remove('$host|$school|${auth.username}');
+      }
       return resp;
     }
 
@@ -345,7 +359,10 @@ class UntisApiImpl implements FullUntisApi {
         );
         _rpc.record('PROBE $label [HTTP ${resp.statusCode}]', resp.data ?? '');
       } on DioException catch (e) {
-        _rpc.record('PROBE $label [no response]', '{"_requestFailed": "${e.type.name}"}');
+        _rpc.record(
+          'PROBE $label [no response]',
+          '{"_requestFailed": "${e.type.name}"}',
+        );
       }
     }
   }
@@ -432,7 +449,9 @@ class UntisApiImpl implements FullUntisApi {
           if (withStudent) 'studentId': studentId,
           'auth': _rpc.auth(auth),
         });
-    if (studentId == null) return parseRawAbsences(await call(withStudent: false));
+    if (studentId == null) {
+      return parseRawAbsences(await call(withStudent: false));
+    }
     try {
       return parseRawAbsences(await call(withStudent: true));
     } on UntisException catch (e) {
@@ -539,9 +558,12 @@ class UntisApiImpl implements FullUntisApi {
   //
   // The WebUntis web client reports an absence with
   // `POST /WebUntis/api/classreg/absences/students/self` and loads reasons and
-  // defaults from `GET /WebUntis/api/classreg/absences/meta`. The browser
-  // authenticates them with its session cookie; we send the bearer token from
-  // getAuthToken instead (assumed to be accepted, see docs/API.md).
+  // defaults from `GET /WebUntis/api/classreg/absences/meta`. These endpoints
+  // ignore the bearer token (2026-11-12: 302 to index.do / 403 at two
+  // schools); they need a browser session. We open one the way the WebUntis
+  // JS library's secret login does: getUserData2017 on jsonrpc_intern.do with
+  // the OTP answers with a JSESSIONID cookie, sent along with
+  // `schoolname="_<base64 school>"`. See [_webSession].
 
   static String classregUrl(String host, String path) =>
       'https://$host/WebUntis/api/classreg/$path';
@@ -641,9 +663,176 @@ class UntisApiImpl implements FullUntisApi {
     }
   }
 
-  /// Bearer-authenticated request to a classic `/WebUntis/api/...` endpoint.
-  /// Redirects are not followed: a 3xx (or an HTML page) means the server
-  /// wants a browser session and did not accept the token.
+  /// Web session request headers per `host|school|user`, with when the
+  /// session was opened.
+  final _webSessions = <String, ({Map<String, String> headers, DateTime at})>{};
+
+  /// Opens (or reuses, for 10 minutes) a WebUntis browser session for the
+  /// classic `/WebUntis/api/...` endpoints and returns the headers to send:
+  /// `Cookie`, plus `X-CSRF-TOKEN` / `Tenant-Id` when `api/app/config` has
+  /// them (the browser sends both). Null when the server sent no JSESSIONID;
+  /// the caller then falls back to the bearer token alone. Only names are
+  /// logged, never values.
+  Future<Map<String, String>?> _webSession(
+    String host,
+    String school,
+    UntisCredentials auth, {
+    bool refresh = false,
+  }) async {
+    final key = '$host|$school|${auth.username}';
+    final cached = _webSessions[key];
+    if (!refresh &&
+        cached != null &&
+        _now().difference(cached.at) < const Duration(minutes: 10)) {
+      return cached.headers;
+    }
+    _webSessions.remove(key);
+    Headers? loginHeaders;
+    try {
+      await _rpc.call(
+        '${rpcUrl(host, school)}&m=getUserData2017&v=i2.2',
+        'getUserData2017',
+        {'auth': _rpc.auth(auth)},
+        onHeaders: (h) => loginHeaders = h,
+      );
+    } on UntisException catch (e) {
+      _rpc.record(
+        'web session: login failed',
+        jsonEncode({'code': e.code, 'message': e.message}),
+      );
+      return null;
+    }
+    final cookies = parseSetCookies(loginHeaders?['set-cookie'] ?? const []);
+    _rpc.record(
+      'web session: cookies received',
+      jsonEncode({'names': cookies.keys.toList()}),
+    );
+    if (!cookies.containsKey('JSESSIONID')) return null;
+    final headers = <String, String>{
+      'Cookie': sessionCookieHeader(cookies, school),
+      'X-XSRF-TOKEN': ?cookies['XSRF-TOKEN'],
+    };
+    // The web client's own config; best effort, the session works without.
+    try {
+      final resp = await _bearerRequest(
+        host,
+        school,
+        auth,
+        'GET',
+        'https://$host/WebUntis/api/app/config',
+        'web session: api/app/config',
+        followRedirects: false,
+        headers: headers,
+        logBody: false,
+      );
+      Object? config;
+      try {
+        config = jsonDecode(resp.data ?? '');
+      } on FormatException {
+        config = null;
+      }
+      final found = findSessionValues(config);
+      _rpc.record(
+        'web session: api/app/config [HTTP ${resp.statusCode}] values found',
+        jsonEncode({
+          'topLevelKeys': config is Map
+              ? [
+                  ...config.keys.map((k) => '$k'),
+                  if (config['data'] case final Map d)
+                    ...d.keys.map((k) => 'data.$k'),
+                ]
+              : null,
+          'csrfAt': found.csrfPath,
+          'tenantIdAt': found.tenantPath,
+        }),
+      );
+      if (found.csrf != null) headers['X-CSRF-TOKEN'] = found.csrf!;
+      if (found.tenantId != null) headers['Tenant-Id'] = found.tenantId!;
+    } on UntisException {
+      // Logged by _bearerRequest.
+    }
+    _webSessions[key] = (headers: headers, at: _now());
+    return headers;
+  }
+
+  /// First CSRF token and tenant id anywhere in [json] (any depth, keys
+  /// matched loosely), with the key paths they were found at.
+  static ({
+    String? csrf,
+    String? csrfPath,
+    String? tenantId,
+    String? tenantPath,
+  })
+  findSessionValues(Object? json) {
+    String? csrf, csrfPath, tenant, tenantPath;
+    void walk(Object? v, String path) {
+      if (v is Map) {
+        for (final e in v.entries) {
+          final k = '${e.key}';
+          final p = path.isEmpty ? k : '$path.$k';
+          final val = e.value;
+          final scalar = val is String || val is num;
+          if (csrf == null &&
+              scalar &&
+              RegExp('csrf', caseSensitive: false).hasMatch(k)) {
+            csrf = '$val';
+            csrfPath = p;
+          } else if (tenant == null &&
+              scalar &&
+              RegExp(r'^tenant_?id$', caseSensitive: false).hasMatch(k)) {
+            tenant = '$val';
+            tenantPath = p;
+          } else if (tenant == null &&
+              scalar &&
+              k == 'id' &&
+              path.toLowerCase().endsWith('tenant')) {
+            tenant = '$val';
+            tenantPath = p;
+          }
+          walk(val, p);
+        }
+      } else if (v is List) {
+        for (var i = 0; i < v.length && i < 50; i++) {
+          walk(v[i], '$path[$i]');
+        }
+      }
+    }
+
+    walk(json, '');
+    return (
+      csrf: csrf,
+      csrfPath: csrfPath,
+      tenantId: tenant,
+      tenantPath: tenantPath,
+    );
+  }
+
+  /// `name=value` pairs of `Set-Cookie` headers (attributes dropped).
+  static Map<String, String> parseSetCookies(List<String> setCookies) => {
+    for (final line in setCookies)
+      if (line.split(';').first case final pair when pair.contains('='))
+        pair.substring(0, pair.indexOf('=')).trim(): pair
+            .substring(pair.indexOf('=') + 1)
+            .trim(),
+  };
+
+  /// `Cookie` header for a web session: its cookies plus the
+  /// `schoolname="_<base64>"` cookie the web client sets.
+  static String sessionCookieHeader(
+    Map<String, String> cookies,
+    String school,
+  ) {
+    final all = {
+      'schoolname': '"_${base64.encode(utf8.encode(school))}"',
+      ...cookies,
+    };
+    return all.entries.map((e) => '${e.key}=${e.value}').join('; ');
+  }
+
+  /// Request to a classic `/WebUntis/api/...` endpoint with the web session
+  /// cookie (when one could be opened) and the bearer token. Redirects are
+  /// not followed: a 3xx (or an HTML page) means the server wants a browser
+  /// login. A cached session that gets one is reopened once.
   Future<Object?> _classic(
     String host,
     String school,
@@ -653,16 +842,28 @@ class UntisApiImpl implements FullUntisApi {
     String label, {
     Object? body,
   }) async {
-    final resp = await _bearerRequest(
-      host,
-      school,
-      auth,
-      method,
-      url,
-      label,
-      body: body,
-      followRedirects: false,
-    );
+    final key = '$host|$school|${auth.username}';
+    final wasCached = _webSessions.containsKey(key);
+    var session = await _webSession(host, school, auth);
+    late Response<String> resp;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      resp = await _bearerRequest(
+        host,
+        school,
+        auth,
+        method,
+        url,
+        session == null ? label : '$label (web session)',
+        body: body,
+        followRedirects: false,
+        headers: session ?? const {},
+      );
+      final s = resp.statusCode ?? 0;
+      final rejected = (s >= 300 && s < 400) || s == 403;
+      if (!rejected || session == null || !wasCached || attempt > 0) break;
+      session = await _webSession(host, school, auth, refresh: true);
+      if (session == null) break;
+    }
     final status = resp.statusCode ?? 0;
     final text = resp.data ?? '';
     final looksHtml = text.trimLeft().startsWith('<');
@@ -717,6 +918,8 @@ class UntisApiImpl implements FullUntisApi {
     String label, {
     Object? body,
     bool followRedirects = true,
+    Map<String, String> headers = const {},
+    bool logBody = true,
   }) async {
     final tokenKey = '$host|$school|${auth.username}';
     late Response<String> resp;
@@ -736,6 +939,7 @@ class UntisApiImpl implements FullUntisApi {
             headers: {
               'Accept': 'application/json',
               'Authorization': 'Bearer $token',
+              ...headers,
             },
           ),
         );
@@ -749,11 +953,16 @@ class UntisApiImpl implements FullUntisApi {
         final msg = timedOut
             ? 'Timeout (${e.type.name})'
             : 'Network error: ${e.message ?? e.type.name}';
-        _rpc.record('$label [no response]', jsonEncode({'_requestFailed': msg}));
+        _rpc.record(
+          '$label [no response]',
+          jsonEncode({'_requestFailed': msg}),
+        );
         throw UntisException(timedOut ? UntisException.timeout : 0, msg);
       }
       final location = resp.headers.value('location');
-      final data = resp.data ?? '';
+      final raw = resp.data ?? '';
+      // logBody false: the body may hold session values (a CSRF token).
+      final data = logBody ? raw : '<not logged, ${raw.length} chars>';
       _rpc.record(
         '$label [HTTP ${resp.statusCode}]',
         location == null

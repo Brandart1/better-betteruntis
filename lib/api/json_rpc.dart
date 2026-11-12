@@ -53,11 +53,15 @@ class JsonRpcClient {
   }
 
   /// Calls [method] with a single params object and returns `result`.
+  ///
+  /// [onHeaders] receives the HTTP response headers (e.g. to read the
+  /// session cookie); they are never logged.
   Future<Object?> call(
     String url,
     String method,
-    Map<String, Object?> params,
-  ) async {
+    Map<String, Object?> params, {
+    void Function(Headers headers)? onHeaders,
+  }) async {
     final body = jsonEncode({
       'id': 'bbu-${++_nextId}',
       'jsonrpc': '2.0',
@@ -77,6 +81,7 @@ class JsonRpcClient {
         ),
       );
       raw = resp.data ?? '';
+      onHeaders?.call(resp.headers);
       _recordResponse(
         method,
         params['klasseId'] == null ? method : '$method|${params['klasseId']}',
@@ -97,7 +102,10 @@ class JsonRpcClient {
       final msg = timedOut
           ? 'Timeout (${e.type.name})'
           : 'Network error: ${e.message ?? e.type.name}';
-      _record(_label(method, params, null), jsonEncode({'_requestFailed': msg}));
+      _record(
+        _label(method, params, null),
+        jsonEncode({'_requestFailed': msg}),
+      );
       throw UntisException(timedOut ? UntisException.timeout : 0, msg);
     }
 
@@ -136,7 +144,9 @@ class JsonRpcClient {
   /// to tell entries apart, without credentials.
   static String _label(String method, Map<String, Object?> p, int? status) {
     final parts = <String>[method];
-    if (p['type'] != null || p['id'] != null) parts.add('${p['type']}#${p['id']}');
+    if (p['type'] != null || p['id'] != null) {
+      parts.add('${p['type']}#${p['id']}');
+    }
     if (p['klasseId'] != null) parts.add('klasseId=${p['klasseId']}');
     if (p['studentId'] != null) parts.add('studentId=${p['studentId']}');
     if (p['startDate'] != null) {
