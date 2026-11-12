@@ -37,7 +37,7 @@ Legend: `[ ]` todo · `[~]` partial · `[x]` done · **P** = polish / beyond par
 - [ ] Pager across overlapping lessons; time, title + state suffix
 - [ ] Chips for teachers/classes/rooms → open their timetable
 - [ ] Lesson info text, online note, links, homework with due date, topic
-- [ ] Teacher-only: edit topic, absence check — **P** (lower priority, student-first)
+- [~] Teacher-only: edit topic, absence check (branch `teacher`, 0.5.0 alphas; server calls unconfirmed) — see docs/TEACHER_FEATURES.md
 
 ## Info center
 - [ ] Messages of the day + inbox, attachments, clickable links

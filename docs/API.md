@@ -123,6 +123,18 @@ Assumed (to be confirmed with a real parent account):
 
 Client behaviour: the Absences tab of parent accounts with children shows "Report absence". The form asks for the child (the selected one is the default), from/until (default: today, the whole school day from the time grid, else the server's default times, else 08:00 to 16:00), the reason and an optional note. If `showCreateAbsence` is false, the form says so and sending is disabled. HTTP 403 means no right. After a successful report every cached absence list of the account is dropped and reloaded.
 
+## Class register (teachers)
+Teacher accounts (`userData.elemType` TEACHER) get "Absences & lesson topic" for lessons of their own timetable, and "Open lessons" (past lessons without attendance check or topic). Built on branch `teacher` (0.5.0 alphas).
+
+**All assumed** — no real teacher response seen yet. Method names and params follow how other Untis Mobile clients call the teacher API. The timetable period `id` is the `ttId`.
+- `getPeriodData2017 {ttIds:[…], auth}` → `{dataByTTId:{"<ttId>":{ttId, absenceChecked, studentIds:[…], absences:[{id, studentId, startDateTime, endDateTime, absenceReasonId?, text?, excused?}], topic:{text}|"<text>", text, homeWorks, …}}, referencedStudents:[{id, firstName, lastName, klasseId?}]}`. The parser also accepts `lessonTopic`, `absencesChecked`, `students`, `displayName`/`name` for students.
+- `submitLessonTopic {lessonTopic, ttId, auth}`
+- `createImmediateAbsence2017 {periodId:<ttId>, studentId, startTime:"T08:00", endTime:"T08:45", auth}` — the whole lesson.
+- `deleteAbsence2017 {absenceId, auth}`
+- `submitAbsencesChecked2017 {ttIds:[…], auth}` — "attendance check done".
+
+Client behaviour: saving a lesson block (a double lesson = several ttIds) creates/deletes absences per period, then confirms the check for all, then sends the topic (only if changed) for each period. Request bodies of these writes (no credentials) are in the Debug log as `<method> request body`. "Open lessons" loads the teacher's own weeks (fresh, else cached), keeps past, not cancelled lessons (no break supervisions / office hours) and asks getPeriodData2017 in chunks of 40.
+
 ## Office hours
 Assumed (no real response seen yet): `getOfficeHours2017 {klasseId, startDate, auth}`.
 - `klasseId`: the account's first `klassenIds` entry, else the parent's selected child's class, else the class that occurs most in the cached "My timetable" weeks, else `-1` (**assumed** to mean "all classes"). Some student accounts have empty `klassenIds` — before this the request was never sent at all.

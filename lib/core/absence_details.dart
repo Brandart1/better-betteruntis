@@ -8,6 +8,7 @@
 /// models.dart unchanged.
 library;
 
+import 'class_register.dart';
 import 'info.dart';
 import 'interfaces.dart';
 import 'models.dart';
@@ -152,4 +153,9 @@ abstract interface class AbsenceReportApi {
 
 /// Everything the app's API object provides.
 abstract interface class FullUntisApi
-    implements UntisApi, InfoCenterApi, AbsenceDetailsApi, AbsenceReportApi {}
+    implements
+        UntisApi,
+        InfoCenterApi,
+        AbsenceDetailsApi,
+        AbsenceReportApi,
+        ClassRegisterApi {}

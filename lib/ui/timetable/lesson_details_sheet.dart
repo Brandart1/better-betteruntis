@@ -18,6 +18,7 @@ Future<void> showLessonDetails(
   required int index,
   required NameResolver names,
   ValueChanged<TimetableTarget>? onOpenElement,
+  ValueChanged<LessonBlock>? onOpenClassRegister,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -34,6 +35,12 @@ Future<void> showLessonDetails(
               Navigator.of(sheetContext).pop();
               onOpenElement(t);
             },
+      onOpenClassRegister: onOpenClassRegister == null
+          ? null
+          : (b) {
+              Navigator.of(sheetContext).pop();
+              onOpenClassRegister(b);
+            },
     ),
   );
 }
@@ -46,12 +53,16 @@ class LessonDetailsSheet extends StatefulWidget {
     required this.names,
     this.initialIndex = 0,
     this.onOpenElement,
+    this.onOpenClassRegister,
   });
 
   final List<LessonBlock> blocks;
   final NameResolver names;
   final int initialIndex;
   final ValueChanged<TimetableTarget>? onOpenElement;
+
+  /// Teachers' own timetable: opens the class register of a block.
+  final ValueChanged<LessonBlock>? onOpenClassRegister;
 
   @override
   State<LessonDetailsSheet> createState() => _LessonDetailsSheetState();
@@ -76,6 +87,7 @@ class _LessonDetailsSheetState extends State<LessonDetailsSheet> {
           block: b,
           names: widget.names,
           onOpenElement: widget.onOpenElement,
+          onOpenClassRegister: widget.onOpenClassRegister,
         ),
     ];
     if (pages.length == 1) {
@@ -112,11 +124,13 @@ class LessonDetailsPage extends ConsumerWidget {
     required this.block,
     required this.names,
     this.onOpenElement,
+    this.onOpenClassRegister,
   });
 
   final LessonBlock block;
   final NameResolver names;
   final ValueChanged<TimetableTarget>? onOpenElement;
+  final ValueChanged<LessonBlock>? onOpenClassRegister;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -189,6 +203,16 @@ class LessonDetailsPage extends ConsumerWidget {
           ),
         ),
         _StatusChips(block: block, settings: settings),
+        if (onOpenClassRegister != null && !block.isCancelled)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: FilledButton.tonalIcon(
+              key: const ValueKey('details-classreg'),
+              onPressed: () => onOpenClassRegister!(block),
+              icon: const Icon(Icons.fact_check_outlined),
+              label: const Text('Absences & lesson topic'),
+            ),
+          ),
         _ElementSection(
           'Teachers',
           ElementType.teacher,

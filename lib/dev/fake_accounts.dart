@@ -9,6 +9,7 @@ library;
 import 'dart:async';
 
 import '../core/absence_details.dart';
+import '../core/class_register.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
@@ -27,6 +28,8 @@ import '../core/models.dart';
 ///   [demoChildren]; `parent-nochild` -> a parent account without children;
 ///   `parent-noreport` -> like `parent`, but the school doesn't allow
 ///   reporting absences
+/// * username `teacher` -> a teacher account (teacher 11, "Anna Müller" in
+///   the demo master data) with a demo class register
 /// * anything else (e.g. `demo`/`demo`) succeeds.
 ///
 /// Search rules: queries shorter than 3 chars or matching more than
@@ -202,6 +205,17 @@ class FakeUntisApi implements FullUntisApi {
             : demoChildren,
       );
     }
+    if (!anonymous && username.toLowerCase() == 'teacher') {
+      return LoginResult(
+        secret: 'FAKESECRETTEACHER',
+        displayName: 'Demo Teacher',
+        elementType: ElementType.teacher,
+        elementId: demoTeacherId,
+        klassenIds: const [],
+        rights: const {'R_MY_TIMETABLE'},
+        masterData: demoMasterData,
+      );
+    }
     return LoginResult(
       secret: anonymous ? '' : 'FAKESECRET${username.toUpperCase()}',
       displayName: anonymous ? 'Public timetable' : _displayName(username),
@@ -212,6 +226,13 @@ class FakeUntisApi implements FullUntisApi {
       masterData: demoMasterData,
     );
   }
+
+  /// The teacher of the demo `teacher` login.
+  static const demoTeacherId = 11;
+
+  /// Timetable id of the demo lesson in [unit] (0-based) on [day].
+  static int demoPeriodId(DateTime day, int unit) =>
+      (day.year * 10000 + day.month * 100 + day.day) * 10 + unit;
 
   /// Children of the demo `parent` login (made-up names).
   static const demoChildren = [
@@ -335,7 +356,6 @@ class FakeUntisApi implements FullUntisApi {
       (23, 13, 32),
     ];
     final periods = <Period>[];
-    var id = 1;
     for (
       var day = DateTime(start.year, start.month, start.day);
       !day.isAfter(end);
@@ -346,9 +366,15 @@ class FakeUntisApi implements FullUntisApi {
         final p = plan[(unit + day.weekday) % plan.length];
         final s = day.add(Duration(minutes: 8 * 60 + unit * 50));
         final substituted = day.weekday == 3 && unit == 1;
+        // Teachers only see their own lessons.
+        if (target.type == ElementType.teacher &&
+            target.id != (substituted ? 12 : p.$2)) {
+          continue;
+        }
         periods.add(
           Period(
-            id: id++,
+            // Unique per date and unit, like real timetable ids.
+            id: demoPeriodId(day, unit),
             lessonId: p.$1,
             start: s,
             end: s.add(const Duration(minutes: 45)),
@@ -647,6 +673,123 @@ class FakeUntisApi implements FullUntisApi {
   }) async {
     await _delay();
     reported.removeWhere((r) => ids.contains(r.absence.id));
+  }
+
+  // ---- Class register demo (teacher login) ------------------------------
+
+  /// Made-up pupils of demo class 1.
+  static const demoStudents = [
+    ClassRegStudent(id: 501, firstName: 'Lena', lastName: 'Bauer', klasseId: 1),
+    ClassRegStudent(
+      id: 502,
+      firstName: 'Jonas',
+      lastName: 'Fischer',
+      klasseId: 1,
+    ),
+    ClassRegStudent(
+      id: 503,
+      firstName: 'Mia',
+      lastName: 'Hofmann',
+      klasseId: 1,
+    ),
+    ClassRegStudent(id: 504, firstName: 'Paul', lastName: 'Koch', klasseId: 1),
+    ClassRegStudent(
+      id: 505,
+      firstName: 'Emma',
+      lastName: 'Richter',
+      klasseId: 1,
+    ),
+    ClassRegStudent(id: 506, firstName: 'Ben', lastName: 'Wagner', klasseId: 1),
+  ];
+
+  /// Demo register state by timetable id. Lessons not in [registerTopics] /
+  /// [registerChecked] are open, except every other one, which starts filled
+  /// in so the "open lessons" list is not all of them.
+  final registerTopics = <int, String>{};
+  final registerChecked = <int>{};
+  final registerAbsences = <int, List<ClassRegAbsence>>{};
+  var _nextAbsenceId = 9000;
+
+  bool _seededDone(int ttId) => ttId % 3 == 0;
+
+  @override
+  Future<PeriodRegisterData> periodData({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> ttIds,
+  }) async {
+    await _delay();
+    return PeriodRegisterData(
+      periods: {
+        for (final id in ttIds)
+          id: PeriodRegister(
+            ttId: id,
+            absenceChecked: registerChecked.contains(id) || _seededDone(id),
+            studentIds: [for (final s in demoStudents) s.id],
+            absences: [...?registerAbsences[id]],
+            topic: registerTopics[id] ?? (_seededDone(id) ? 'Revision' : ''),
+          ),
+      },
+      students: {for (final s in demoStudents) s.id: s},
+    );
+  }
+
+  @override
+  Future<void> submitLessonTopic({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required String topic,
+  }) async {
+    await _delay();
+    registerTopics[ttId] = topic;
+  }
+
+  @override
+  Future<void> createAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required int studentId,
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    await _delay();
+    (registerAbsences[ttId] ??= []).add(
+      ClassRegAbsence(
+        id: _nextAbsenceId++,
+        studentId: studentId,
+        start: start,
+        end: end,
+      ),
+    );
+  }
+
+  @override
+  Future<void> deleteAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int absenceId,
+  }) async {
+    await _delay();
+    for (final list in registerAbsences.values) {
+      list.removeWhere((a) => a.id == absenceId);
+    }
+  }
+
+  @override
+  Future<void> submitAbsencesChecked({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> ttIds,
+  }) async {
+    await _delay();
+    registerChecked.addAll(ttIds);
   }
 
   @override

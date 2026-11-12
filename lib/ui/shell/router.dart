@@ -6,6 +6,7 @@ import '../../core/build_channel.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../accounts/manage_accounts_screen.dart';
+import '../classreg/open_lessons_screen.dart';
 import '../infocenter/info_center_screen.dart';
 import '../infocenter/messages_tab.dart';
 import '../login/login_form_screen.dart';
@@ -65,6 +66,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(path: '/browse', builder: (_, _) => const ElementPickerScreen()),
+      GoRoute(
+        path: '/classreg/open',
+        builder: (_, _) => const OpenLessonsScreen(),
+      ),
       GoRoute(
         path: '/info',
         builder: (_, _) => const InfoCenterScreen(),

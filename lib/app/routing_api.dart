@@ -1,4 +1,5 @@
 import '../core/absence_details.dart';
+import '../core/class_register.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
@@ -238,4 +239,68 @@ class RoutingUntisApi implements FullUntisApi {
   }) =>
       _for(host)
           .deleteAbsences(host: host, school: school, auth: auth, ids: ids);
+
+  @override
+  Future<PeriodRegisterData> periodData({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> ttIds,
+  }) =>
+      _for(host)
+          .periodData(host: host, school: school, auth: auth, ttIds: ttIds);
+
+  @override
+  Future<void> submitLessonTopic({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required String topic,
+  }) => _for(host).submitLessonTopic(
+    host: host,
+    school: school,
+    auth: auth,
+    ttId: ttId,
+    topic: topic,
+  );
+
+  @override
+  Future<void> createAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required int studentId,
+    required DateTime start,
+    required DateTime end,
+  }) => _for(host).createAbsence(
+    host: host,
+    school: school,
+    auth: auth,
+    ttId: ttId,
+    studentId: studentId,
+    start: start,
+    end: end,
+  );
+
+  @override
+  Future<void> deleteAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int absenceId,
+  }) => _for(
+    host,
+  ).deleteAbsence(host: host, school: school, auth: auth, absenceId: absenceId);
+
+  @override
+  Future<void> submitAbsencesChecked({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> ttIds,
+  }) => _for(
+    host,
+  ).submitAbsencesChecked(host: host, school: school, auth: auth, ttIds: ttIds);
 }

@@ -6,9 +6,11 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import '../core/absence_details.dart';
+import '../core/class_register.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
+import 'class_register_parsers.dart';
 import 'json_rpc.dart';
 import 'parsers.dart';
 import 'rest_teachers.dart';
@@ -673,7 +675,7 @@ class UntisApiImpl implements FullUntisApi {
         '&endDate=${ymdNumber(end)}&studentId=$studentId&excuseStatusId=-1',
       ),
       'REST classreg absences/students studentId=$studentId '
-      '${ymdNumber(start)}..${ymdNumber(end)}',
+          '${ymdNumber(start)}..${ymdNumber(end)}',
     ),
   );
 
@@ -698,6 +700,101 @@ class UntisApiImpl implements FullUntisApi {
         body: absenceDeletePayload(ids),
       ),
     );
+  }
+
+  // ---- Class register (teachers) -----------------------------------------
+  // Method names and params follow the Untis Mobile teacher API as other
+  // clients use it; not yet confirmed against a real teacher account
+  // (docs/API.md "Class register (teachers)"). Request bodies of the writes
+  // carry no credentials and are logged, so a failure can be compared.
+
+  void _recordRequest(String method, Map<String, Object?> params) =>
+      _rpc.record('$method request body', jsonEncode(params));
+
+  @override
+  Future<PeriodRegisterData> periodData({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> ttIds,
+  }) async {
+    if (ttIds.isEmpty) return const PeriodRegisterData();
+    return parsePeriodData(
+      await _rpc.call(rpcUrl(host, school), 'getPeriodData2017', {
+        'ttIds': ttIds,
+        'auth': _rpc.auth(auth),
+      }),
+    );
+  }
+
+  @override
+  Future<void> submitLessonTopic({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required String topic,
+  }) async {
+    final params = {'lessonTopic': topic, 'ttId': ttId};
+    _recordRequest('submitLessonTopic', params);
+    await _rpc.call(rpcUrl(host, school), 'submitLessonTopic', {
+      ...params,
+      'auth': _rpc.auth(auth),
+    });
+  }
+
+  @override
+  Future<void> createAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required int studentId,
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    final params = {
+      'periodId': ttId,
+      'studentId': studentId,
+      'startTime': formatUntisTime(start),
+      'endTime': formatUntisTime(end),
+    };
+    _recordRequest('createImmediateAbsence2017', params);
+    await _rpc.call(rpcUrl(host, school), 'createImmediateAbsence2017', {
+      ...params,
+      'auth': _rpc.auth(auth),
+    });
+  }
+
+  @override
+  Future<void> deleteAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int absenceId,
+  }) async {
+    final params = {'absenceId': absenceId};
+    _recordRequest('deleteAbsence2017', params);
+    await _rpc.call(rpcUrl(host, school), 'deleteAbsence2017', {
+      ...params,
+      'auth': _rpc.auth(auth),
+    });
+  }
+
+  @override
+  Future<void> submitAbsencesChecked({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> ttIds,
+  }) async {
+    if (ttIds.isEmpty) return;
+    final params = {'ttIds': ttIds};
+    _recordRequest('submitAbsencesChecked2017', params);
+    await _rpc.call(rpcUrl(host, school), 'submitAbsencesChecked2017', {
+      ...params,
+      'auth': _rpc.auth(auth),
+    });
   }
 
   /// Client-side checks before anything is sent.

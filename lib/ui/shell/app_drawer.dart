@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/app_update.dart';
 import '../../core/build_channel.dart';
+import '../../core/class_register.dart';
 import '../../core/providers.dart';
 import '../accounts/account_switcher.dart';
 import '../accounts/child_switcher.dart';
@@ -38,6 +39,22 @@ class AppDrawer extends StatelessWidget {
               subtitle: child == null ? null : Text(child.displayName),
               selected: true,
               onTap: () => Navigator.of(context).pop(),
+            );
+          },
+        ),
+        Consumer(
+          builder: (context, ref, _) {
+            final teacher = ref.watch(
+              activeAccountProvider.select(
+                (a) => a.value != null && hasClassRegister(a.value!),
+              ),
+            );
+            if (!teacher) return const SizedBox.shrink();
+            return ListTile(
+              leading: const Icon(Icons.pending_actions_outlined),
+              title: const Text('Open lessons'),
+              subtitle: const Text('Missing absences or topic'),
+              onTap: () => go('/classreg/open'),
             );
           },
         ),

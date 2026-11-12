@@ -9,3 +9,11 @@
 - Sections under it as needed: `### New`, `### Improved`, `### Fixed`,
   `### Changed`, `### Known issues`, `### Behind the scenes`.
 - The install instructions (`default.md`) are appended automatically.
+
+## Teacher branch (0.5.0)
+- Branch `teacher` builds the 0.5.0 teacher alphas, tagged `v0.5.0-alpha.N`
+  from that branch. Its changes go to `next-teacher.md` (a separate file, so
+  merging `main` into `teacher` doesn't conflict); on an alpha build rename it
+  to `v0.5.0-alpha.N.md` and start a fresh `next-teacher.md`.
+- The `+build` number is shared with `main`: always one above the highest
+  number used on either branch, so Android can update between both builds.

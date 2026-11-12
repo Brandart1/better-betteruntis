@@ -4,10 +4,12 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 
+import '../core/class_register.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/providers.dart';
 import 'account_repository_impl.dart';
+import 'class_register_repository_impl.dart';
 import 'db/database.dart';
 import 'info_center_repository_impl.dart';
 import 'secret_store.dart';
@@ -58,6 +60,14 @@ List<Override> dataOverrides({
       api: api ?? ref.watch(untisApiProvider),
       db: ref.watch(appDatabaseProvider),
       accounts: ref.watch(accountRepositoryProvider),
+      clock: clock,
+    ),
+  ),
+  classRegisterRepositoryProvider.overrideWith(
+    (ref) => ClassRegisterRepositoryImpl(
+      api: api ?? ref.watch(untisApiProvider),
+      accounts: ref.watch(accountRepositoryProvider),
+      timetables: ref.watch(timetableRepositoryProvider),
       clock: clock,
     ),
   ),

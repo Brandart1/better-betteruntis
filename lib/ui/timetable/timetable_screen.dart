@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/class_register.dart';
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/settings.dart';
+import '../classreg/class_register_screen.dart';
+import '../classreg/open_lessons_screen.dart';
 import '../export/export_sheet.dart';
 import 'day_timeline.dart';
 import 'lesson_details_sheet.dart';
@@ -173,14 +176,44 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
   void _openElement(TimetableTarget t) =>
       (widget.onOpenElement ?? defaultOpenElement)(context, t);
 
-  void _showDetails(List<LessonBlock> blocks, int index, NameResolver names) =>
-      showLessonDetails(
-        context,
-        blocks: blocks,
-        index: index,
-        names: names,
-        onOpenElement: _openElement,
-      );
+  void _showDetails(List<LessonBlock> blocks, int index, NameResolver names) {
+    final account = ref.read(activeAccountProvider).value;
+    final target = widget.target ?? account?.personalTarget;
+    // Teachers: class register of lessons in their own timetable.
+    final ownTeacherTimetable =
+        account != null &&
+        hasClassRegister(account) &&
+        target == TimetableTarget(ElementType.teacher, account.elementId);
+    showLessonDetails(
+      context,
+      blocks: blocks,
+      index: index,
+      names: names,
+      onOpenElement: _openElement,
+      onOpenClassRegister: !ownTeacherTimetable
+          ? null
+          : (block) {
+              final periods = block.periods
+                  .where((p) => !p.isCancelled)
+                  .toList();
+              if (periods.isEmpty) return;
+              final p = periods.first;
+              openClassRegister(
+                context,
+                account: account,
+                periods: periods,
+                title: classRegLessonTitle(p, names),
+                subtitle: classRegLessonSubtitle(
+                  context,
+                  periods.first.start,
+                  periods.last.end,
+                  p,
+                  names,
+                ),
+              );
+            },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
