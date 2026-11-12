@@ -190,20 +190,32 @@ void main() {
         ],
       );
       addTearDown(container.dispose);
+      // File I/O timing varies (slow CI runners): poll instead of a fixed
+      // delay, for up to 5 s.
+      Future<void> eventually(Future<bool> Function() ok) async {
+        final until = DateTime.now().add(const Duration(seconds: 5));
+        while (!await ok() && DateTime.now().isBefore(until)) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      }
+
       container.listen(timetableSettingsProvider, (_, _) {});
       expect(container.read(timetableSettingsProvider).showCancelled, isTrue);
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await eventually(
+        () async => !container.read(timetableSettingsProvider).showCancelled,
+      );
       expect(container.read(timetableSettingsProvider).showCancelled, isFalse);
 
       container
           .read(timetableSettingsProvider.notifier)
           .update((s) => s.copyWith(examColor: 0xFF123456));
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      final reread = await FileSettingsStore.open(directory: () async => dir);
-      expect(
-        TimetableSettings.fromJson(reread.peek('timetable')).examColor,
-        0xFF123456,
-      );
+      Future<int?> savedExamColor() async {
+        final reread = await FileSettingsStore.open(directory: () async => dir);
+        return TimetableSettings.fromJson(reread.peek('timetable')).examColor;
+      }
+
+      await eventually(() async => await savedExamColor() == 0xFF123456);
+      expect(await savedExamColor(), 0xFF123456);
     });
   });
 
