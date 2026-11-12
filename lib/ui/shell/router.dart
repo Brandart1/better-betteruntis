@@ -10,6 +10,7 @@ import '../infocenter/info_center_screen.dart';
 import '../infocenter/messages_tab.dart';
 import '../login/login_form_screen.dart';
 import '../login/login_screen.dart';
+import '../login/id_austria_screen.dart';
 import '../login/qr_scan_screen.dart';
 import '../settings/timetable_settings_screen.dart';
 import '../timetable/timetable_screen.dart';
@@ -23,7 +24,8 @@ import 'element_picker_screen.dart';
 ///   /browse                pick a class / teacher / room / subject
 ///   /info                  info center (messages, homework, exams, …)
 ///   /info/message/:id      one inbox message
-///   /login, /login/add, /login/form (extra: School?), /login/qr
+///   /login, /login/add, /login/form (extra: School?), /login/qr,
+///   /login/idaustria       how to log in when the school uses ID Austria
 ///   /accounts              manage accounts
 ///   /settings              timetable look (colors, text, cancelled)
 ///   /debug                 raw API responses
@@ -85,6 +87,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, s) => LoginFormScreen(school: s.extra as School?),
       ),
       GoRoute(path: '/login/qr', builder: (_, _) => const QrScanScreen()),
+      GoRoute(
+        path: '/login/idaustria',
+        builder: (_, _) => const IdAustriaScreen(),
+      ),
       GoRoute(
         path: '/accounts',
         builder: (_, _) => const ManageAccountsScreen(),

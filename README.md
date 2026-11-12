@@ -45,7 +45,7 @@ timetables**.
 - Text size, bold subject and centred text
 
 **Accounts**
-- Log in via school search, a QR code or manually
+- Log in via school search, a QR code or manually (schools that use **ID Austria** for parents: log in on the web and scan the WebUntis QR code; the app shows how)
 - Multiple accounts across different schools, switchable in one tap
 - **Parent accounts:** "My timetable" shows your child; switch between several children in the drawer
 - Credentials stay on your device (Keychain, Android Keystore, or your browser on the web)
@@ -65,7 +65,7 @@ timetables**.
 
 ## 🐞 Known issues
 
-- Parent accounts that log in through **ID Austria** don't work yet.
+- **Reporting absences** (parent accounts) doesn't work yet.
 
 ## 📲 Install
 

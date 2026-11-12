@@ -2,6 +2,7 @@ import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/core/providers.dart';
 import 'package:better_betteruntis/dev/fake_accounts.dart';
 import 'package:better_betteruntis/ui/accounts/manage_accounts_screen.dart';
+import 'package:better_betteruntis/ui/login/id_austria_screen.dart';
 import 'package:better_betteruntis/ui/login/login_form_screen.dart';
 import 'package:better_betteruntis/ui/login/login_screen.dart';
 import 'package:better_betteruntis/ui/login/qr_scan_screen.dart';
@@ -26,6 +27,7 @@ class Harness {
     Widget? home,
     Widget Function(ValueChanged<String> onCode)? qrScanner,
     Size size = const Size(600, 1200),
+    List overrides = const [],
   }) async {
     tester.view.physicalSize = size * 2;
     tester.view.devicePixelRatio = 2;
@@ -54,6 +56,10 @@ class Harness {
               path: 'qr',
               builder: (_, _) => QrScanScreen(scanner: qrScanner),
             ),
+            GoRoute(
+              path: 'idaustria',
+              builder: (_, _) => const IdAustriaScreen(),
+            ),
           ],
         ),
         GoRoute(
@@ -67,6 +73,7 @@ class Harness {
         overrides: [
           untisApiProvider.overrideWithValue(api),
           accountRepositoryProvider.overrideWithValue(repo),
+          ...overrides,
         ],
         child: MaterialApp.router(
           theme: ThemeData(useMaterial3: true),

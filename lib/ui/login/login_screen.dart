@@ -580,9 +580,19 @@ class _SecondaryActions extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 8),
+        TextButton.icon(
+          key: const ValueKey('id-austria-help'),
+          onPressed: () => context.push('/login/idaustria'),
+          icon: const Icon(Icons.badge_outlined),
+          label: const Text(
+            "My school requires parents' accounts to log in with ID Austria",
+            textAlign: TextAlign.center,
+          ),
+        ),
+        const SizedBox(height: 8),
         Text(
-          'Tip: in WebUntis on the web, open your profile → "Data access" '
-          'to show a login QR code.',
+          'Tip: in WebUntis on the web, open your profile → "Freigaben" '
+          '(Sharing) to show a login QR code.',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodySmall
               ?.copyWith(color: scheme.onSurfaceVariant),
