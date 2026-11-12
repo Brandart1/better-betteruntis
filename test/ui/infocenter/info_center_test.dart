@@ -322,6 +322,31 @@ void main() {
     );
   });
 
+  testWidgets('absences: tapping one shows its details', (tester) async {
+    await pump(tester);
+    await openTab(tester, 'Absences');
+    await tester.tap(find.byKey(const ValueKey('absence-2')));
+    await tester.pumpAndSettle();
+    final sheet = find.byKey(const ValueKey('absence-details'));
+    expect(sheet, findsOneWidget);
+    for (final t in ['Krankheit', 'entschuldigt', 'Attest liegt vor', 'Yes']) {
+      expect(
+        find.descendant(of: sheet, matching: find.text(t)),
+        findsOneWidget,
+        reason: t,
+      );
+    }
+  });
+
+  test('absence range reaches the end of the school year', () {
+    final now = DateTime(2026, 11, 12, 17);
+    final (start, end) = const AbsenceFilter(range: AbsenceRange.days7)
+        .dates(now);
+    expect(start, DateTime(2026, 11, 5));
+    expect(end, DateTime(2027, 8, 31));
+    expect(schoolYearEnd(DateTime(2027, 3, 1)), DateTime(2027, 8, 31));
+  });
+
   test('absence summary counts', () {
     final s = absenceSummary([
       AbsenceItem(

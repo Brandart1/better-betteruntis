@@ -25,6 +25,10 @@ enum AbsenceRange {
 DateTime schoolYearStart(DateTime now) =>
     DateTime(now.month >= 9 ? now.year : now.year - 1, 9, 1);
 
+/// Last day of the current school year (Aug 31).
+DateTime schoolYearEnd(DateTime now) =>
+    DateTime(schoolYearStart(now).year + 1, 8, 31);
+
 class AbsenceFilter {
   const AbsenceFilter({
     this.onlyUnexcused = false,
@@ -45,10 +49,15 @@ class AbsenceFilter {
         range: range ?? this.range,
       );
 
+  /// From the range's start up to the end of the school year, so absences
+  /// reported in advance show up too.
   (DateTime, DateTime) dates(DateTime now) {
     final today = dateOnly(now);
     final days = range.days;
-    return (days == null ? schoolYearStart(now) : addDays(today, -days), today);
+    return (
+      days == null ? schoolYearStart(now) : addDays(today, -days),
+      schoolYearEnd(now),
+    );
   }
 
   List<AbsenceItem> apply(List<AbsenceItem> items) {
@@ -222,6 +231,86 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
+/// "Mon, 10 Nov · 07:45–09:20" or "Mon, 10 Nov 07:45 – Tue, 11 Nov 13:05".
+String absenceWhen(BuildContext context, AbsenceItem a, DateTime now) {
+  final dateFmt = dateFormat(
+    context,
+    a.start.year == now.year ? 'EEE, d MMM' : 'EEE, d MMM yyyy',
+  );
+  final time = dateFormat(context, 'HH:mm');
+  return sameDay(a.start, a.end)
+      ? '${dateFmt.format(a.start)} · ${formatTimeRange(context, a.start, a.end)}'
+      : '${dateFmt.format(a.start)} ${time.format(a.start)} – '
+            '${dateFmt.format(a.end)} ${time.format(a.end)}';
+}
+
+Future<void> showAbsenceDetails(
+  BuildContext context,
+  AbsenceItem a,
+  DateTime now,
+) => showModalBottomSheet<void>(
+  context: context,
+  showDragHandle: true,
+  isScrollControlled: true,
+  builder: (_) => AbsenceDetailsSheet(absence: a, now: now),
+);
+
+/// Everything known about one absence.
+class AbsenceDetailsSheet extends StatelessWidget {
+  const AbsenceDetailsSheet({
+    super.key,
+    required this.absence,
+    required this.now,
+  });
+  final AbsenceItem absence;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final a = absence;
+    final theme = Theme.of(context);
+    final minutes = a.end.difference(a.start).inMinutes;
+    Widget row(IconData icon, String label, String value) => ListTile(
+      dense: true,
+      leading: Icon(icon),
+      title: Text(label, style: theme.textTheme.labelMedium),
+      subtitle: Text(value, style: theme.textTheme.bodyLarge),
+    );
+    return SafeArea(
+      child: SingleChildScrollView(
+        key: const ValueKey('absence-details'),
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              child: Text('Absence', style: theme.textTheme.titleLarge),
+            ),
+            row(Icons.event, 'When', absenceWhen(context, a, now)),
+            if (minutes > 0)
+              row(Icons.timelapse, 'Duration', formatHours(minutes / 60)),
+            if (a.start.isAfter(now))
+              row(Icons.upcoming_outlined, 'Status', 'Upcoming'),
+            row(
+              a.excused ? Icons.check_circle_outline : Icons.priority_high,
+              'Excused',
+              a.excused ? 'Yes' : 'No',
+            ),
+            if (a.excuseStatus.trim().isNotEmpty)
+              row(Icons.fact_check_outlined, 'Excuse', a.excuseStatus.trim()),
+            if (a.reason.trim().isNotEmpty)
+              row(Icons.label_outline, 'Reason', a.reason.trim()),
+            if (a.text.trim().isNotEmpty)
+              row(Icons.notes, 'Note', a.text.trim()),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class AbsenceCard extends StatelessWidget {
   const AbsenceCard({super.key, required this.absence, required this.now});
   final AbsenceItem absence;
@@ -233,16 +322,14 @@ class AbsenceCard extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final ok = successColors(context);
-    final singleDay = sameDay(a.start, a.end);
-    final dateFmt = dateFormat(context, a.start.year == now.year ? 'EEE, d MMM' : 'EEE, d MMM yyyy');
-    final time = dateFormat(context, 'HH:mm');
-    final when = singleDay
-        ? '${dateFmt.format(a.start)} · ${formatTimeRange(context, a.start, a.end)}'
-        : '${dateFmt.format(a.start)} ${time.format(a.start)} – ${dateFmt.format(a.end)} ${time.format(a.end)}';
+    final when = absenceWhen(context, a, now);
     return Card.outlined(
       key: ValueKey('absence-${a.id}'),
       margin: const EdgeInsets.symmetric(vertical: 4),
-      child: Padding(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => showAbsenceDetails(context, a, now),
+        child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -281,6 +368,7 @@ class AbsenceCard extends StatelessWidget {
               ),
           ],
         ),
+      ),
       ),
     );
   }
