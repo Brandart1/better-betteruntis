@@ -174,6 +174,34 @@ class FakeInfoCenterRepository implements InfoCenterRepository {
     return reportOptions;
   }
 
+  /// Returned by [absenceRecord] by absence id; [recordError] wins.
+  Map<int, AbsenceRecord> records = {};
+  UntisException? recordError;
+
+  /// When set, [deleteAbsence] throws it.
+  UntisException? deleteError;
+
+  /// Ids passed to a successful [deleteAbsence], in order.
+  final deleted = <int>[];
+
+  @override
+  Future<AbsenceRecord?> absenceRecord(Account a, AbsenceItem item) async {
+    if (latency > Duration.zero) await Future<void>.delayed(latency);
+    if (recordError case final e?) throw e;
+    return records[item.id];
+  }
+
+  @override
+  Future<void> deleteAbsence(Account a, int id) async {
+    if (latency > Duration.zero) await Future<void>.delayed(latency);
+    if (deleteError case final e?) throw e;
+    deleted.add(id);
+    absenceItems = [
+      for (final x in absenceItems)
+        if (x.id != id) x,
+    ];
+  }
+
   @override
   Future<void> reportAbsence(Account a, AbsenceReport report) async {
     if (latency > Duration.zero) await Future<void>.delayed(latency);

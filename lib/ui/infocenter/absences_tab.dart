@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/info.dart';
+import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../timetable/timetable_utils.dart';
 import 'absence_report_screen.dart';
@@ -180,7 +181,7 @@ class AbsencesTab extends ConsumerWidget {
               ),
             )
           else
-            SliverList.list(children: [for (final a in shown) AbsenceCard(absence: a, now: now)]),
+            SliverList.list(children: [for (final a in shown) AbsenceCard(account: account, absence: a, now: now)]),
           // Room for the "Report absence" button of parent accounts.
           if (canReportAbsences(account))
             const SliverToBoxAdapter(child: SizedBox(height: 72)),
@@ -244,31 +245,105 @@ String absenceWhen(BuildContext context, AbsenceItem a, DateTime now) {
             '${dateFmt.format(a.end)} ${time.format(a.end)}';
 }
 
-Future<void> showAbsenceDetails(
+/// Opens the details of [a]. Returns true when the absence was deleted.
+Future<bool> showAbsenceDetails(
   BuildContext context,
+  Account account,
   AbsenceItem a,
   DateTime now,
-) => showModalBottomSheet<void>(
-  context: context,
-  showDragHandle: true,
-  isScrollControlled: true,
-  builder: (_) => AbsenceDetailsSheet(absence: a, now: now),
-);
+) async =>
+    await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) =>
+          AbsenceDetailsSheet(account: account, absence: a, now: now),
+    ) ??
+    false;
 
-/// Everything known about one absence.
-class AbsenceDetailsSheet extends StatelessWidget {
+/// Who `createdUser` / `updatedUser` is: this account, another parent (an
+/// email), or a teacher (a short name like "Fch"). Null when unknown.
+String? describeAbsenceUser(String user, Account account) {
+  final u = user.trim();
+  if (u.isEmpty) return null;
+  if (u.toLowerCase() == account.username.trim().toLowerCase()) return 'You';
+  if (u.contains('@')) return 'Parent ($u)';
+  return 'Teacher ($u)';
+}
+
+/// Everything known about one absence; for parents also who entered it and,
+/// when the school still allows it, a delete button.
+class AbsenceDetailsSheet extends ConsumerStatefulWidget {
   const AbsenceDetailsSheet({
     super.key,
+    required this.account,
     required this.absence,
     required this.now,
   });
+  final Account account;
   final AbsenceItem absence;
   final DateTime now;
 
   @override
+  ConsumerState<AbsenceDetailsSheet> createState() =>
+      _AbsenceDetailsSheetState();
+}
+
+class _AbsenceDetailsSheetState extends ConsumerState<AbsenceDetailsSheet> {
+  late final Future<AbsenceRecord?>? _record = canReportAbsences(widget.account)
+      ? ref
+            .read(infoCenterRepositoryProvider)
+            .absenceRecord(widget.account, widget.absence)
+      : null;
+  bool _deleting = false;
+  String? _deleteError;
+
+  Future<void> _delete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete this absence?'),
+        content: const Text(
+          'It will be removed from WebUntis, so the school no longer sees it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('absence-delete-confirm'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _deleting = true;
+      _deleteError = null;
+    });
+    try {
+      await ref
+          .read(infoCenterRepositoryProvider)
+          .deleteAbsence(widget.account, widget.absence.id);
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _deleting = false;
+        _deleteError = e is UntisException ? e.message : '$e';
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final a = absence;
+    final a = widget.absence;
+    final now = widget.now;
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final minutes = a.end.difference(a.start).inMinutes;
     Widget row(IconData icon, String label, String value) => ListTile(
       dense: true,
@@ -276,6 +351,86 @@ class AbsenceDetailsSheet extends StatelessWidget {
       title: Text(label, style: theme.textTheme.labelMedium),
       subtitle: Text(value, style: theme.textTheme.bodyLarge),
     );
+    Widget note(String text, {Color? color}) => Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+      child: Text(
+        text,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: color ?? cs.onSurfaceVariant,
+        ),
+      ),
+    );
+
+    final record = _record == null
+        ? const <Widget>[]
+        : [
+            FutureBuilder<AbsenceRecord?>(
+              future: _record,
+              builder: (context, snap) {
+                if (snap.connectionState != ConnectionState.done) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    child: LinearProgressIndicator(),
+                  );
+                }
+                if (snap.hasError) {
+                  return note("Couldn't load who entered this absence.");
+                }
+                final r = snap.data;
+                if (r == null) return const SizedBox.shrink();
+                final by = describeAbsenceUser(r.createdUser, widget.account);
+                final changed = r.updatedUser.trim() == r.createdUser.trim()
+                    ? null
+                    : describeAbsenceUser(r.updatedUser, widget.account);
+                final stamp = dateFormat(context, 'd MMM yyyy, HH:mm');
+                return Column(
+                  key: const ValueKey('absence-record'),
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (by != null)
+                      row(
+                        Icons.person_outline,
+                        'Entered by',
+                        r.created == null
+                            ? by
+                            : '$by · ${stamp.format(r.created!)}',
+                      ),
+                    if (changed != null)
+                      row(Icons.edit_outlined, 'Last changed by', changed),
+                    if (r.canEdit) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+                        child: OutlinedButton.icon(
+                          key: const ValueKey('absence-delete'),
+                          onPressed: _deleting ? null : _delete,
+                          icon: _deleting
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.delete_outline),
+                          label: const Text('Delete absence'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: cs.error,
+                            minimumSize: const Size.fromHeight(44),
+                          ),
+                        ),
+                      ),
+                      if (_deleteError case final err?)
+                        note("Couldn't delete: $err", color: cs.error),
+                    ] else
+                      note(
+                        "The school doesn't let you change this absence "
+                        'anymore.',
+                      ),
+                  ],
+                );
+              },
+            ),
+          ];
+
     return SafeArea(
       child: SingleChildScrollView(
         key: const ValueKey('absence-details'),
@@ -304,6 +459,7 @@ class AbsenceDetailsSheet extends StatelessWidget {
               row(Icons.label_outline, 'Reason', a.reason.trim()),
             if (a.text.trim().isNotEmpty)
               row(Icons.notes, 'Note', a.text.trim()),
+            ...record,
           ],
         ),
       ),
@@ -311,13 +467,19 @@ class AbsenceDetailsSheet extends StatelessWidget {
   }
 }
 
-class AbsenceCard extends StatelessWidget {
-  const AbsenceCard({super.key, required this.absence, required this.now});
+class AbsenceCard extends ConsumerWidget {
+  const AbsenceCard({
+    super.key,
+    required this.account,
+    required this.absence,
+    required this.now,
+  });
+  final Account account;
   final AbsenceItem absence;
   final DateTime now;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final a = absence;
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
@@ -328,7 +490,15 @@ class AbsenceCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 4),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: () => showAbsenceDetails(context, a, now),
+        onTap: () async {
+          final messenger = ScaffoldMessenger.of(context);
+          if (await showAbsenceDetails(context, account, a, now)) {
+            ref.invalidate(absencesProvider);
+            messenger.showSnackBar(
+              const SnackBar(content: Text('Absence deleted')),
+            );
+          }
+        },
         child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
         child: Column(

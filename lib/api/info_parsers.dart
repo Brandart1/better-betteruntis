@@ -504,6 +504,65 @@ List<String> _conflictTexts(List<Object?> conflicts) => [
           'overlaps an existing entry',
 ];
 
+/// Entries of `GET /WebUntis/api/classreg/absences/students`:
+/// `{data:{absences:[{id, startDate, startTime, endDate, endTime, createDate,
+/// lastUpdate, createdUser, updatedUser, canEdit, …}]}}`.
+List<AbsenceRecord> parseAbsenceRecords(Object? raw) {
+  DateTime? at(Object? date, Object? time) {
+    final d = parseDate(date);
+    if (d == null) return null;
+    final m = parseTime(time ?? 0) ?? 0;
+    return DateTime(d.year, d.month, d.day, m ~/ 60, m % 60);
+  }
+
+  DateTime? ms(Object? v) {
+    final n = _intOrNull(v);
+    return n == null || n <= 0 ? null : DateTime.fromMillisecondsSinceEpoch(n);
+  }
+
+  return [
+    for (final e in _maps(_classicData(raw)['absences']))
+      if ((
+            _intOrNull(e['id']),
+            at(e['startDate'], e['startTime']),
+            at(e['endDate'], e['endTime']),
+          )
+          case (final id?, final start?, final end?))
+        AbsenceRecord(
+          id: id,
+          start: start,
+          end: end,
+          canEdit: _bool(e['canEdit']),
+          createdUser: _str(e['createdUser']).trim(),
+          updatedUser: _str(e['updatedUser']).trim(),
+          created: ms(e['createDate']),
+          updated: ms(e['lastUpdate']),
+        ),
+  ];
+}
+
+/// Body of `DELETE /WebUntis/api/classreg/absences/students`.
+Map<String, Object?> absenceDeletePayload(List<int> ids) => {'absenceIds': ids};
+
+/// Throws the first of `{errors:[{code,title}]}`, if any.
+void _throwClassicErrors(Object? raw, String fallback) {
+  final errors = _list(_map(raw)['errors']);
+  if (errors.isEmpty) return;
+  final first = _map(errors.first);
+  throw UntisException(
+    -1,
+    _firstStr(first, const ['title', 'message', 'detail', 'code']) ?? fallback,
+  );
+}
+
+/// Checks a 2xx answer of the delete call (`{data:{success:true}}`).
+void checkAbsenceDeleteResult(Object? raw) {
+  _throwClassicErrors(raw, 'The server did not delete the absence.');
+  if (_classicData(raw)['success'] == false) {
+    throw const UntisException(-1, 'The server did not delete the absence.');
+  }
+}
+
 /// Checks a 2xx answer of the report call: `{errors:[{code,title}]}` and a
 /// non-empty `data.conflicts` mean nothing was saved. Returns normally when
 /// the absence was saved.

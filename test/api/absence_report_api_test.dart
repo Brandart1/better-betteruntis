@@ -148,6 +148,71 @@ void main() {
       expect(parseAbsenceListFlags({'data': {}}).allowed, isNull);
     });
 
+    test('records: who entered it, canEdit, times', () {
+      final r = parseAbsenceRecords({
+        'data': {
+          'absences': [
+            {
+              'id': 260061,
+              'startDate': 20260916,
+              'endDate': 20260916,
+              'startTime': 755,
+              'endTime': 1240,
+              'createDate': 1789538474397,
+              'createdUser': 'Fch',
+              'updatedUser': 'Sch',
+              'canEdit': false,
+            },
+            {
+              'id': 264305,
+              'startDate': 20261112,
+              'endDate': 20261113,
+              'startTime': 755,
+              'endTime': 1755,
+              'createdUser': 'parent@example.com',
+              'canEdit': true,
+            },
+            {'id': 'junk'},
+          ],
+        },
+      });
+      expect(r.map((e) => e.id), [260061, 264305]);
+      expect(r.first.start, DateTime(2026, 9, 16, 7, 55));
+      expect(r.first.end, DateTime(2026, 9, 16, 12, 40));
+      expect((r.first.createdUser, r.first.updatedUser), ('Fch', 'Sch'));
+      expect(r.first.created, isNotNull);
+      expect(r.first.canEdit, isFalse);
+      expect(r.last.canEdit, isTrue);
+      expect(r.last.end, DateTime(2026, 11, 13, 17, 55));
+      expect(parseAbsenceRecords('nonsense'), isEmpty);
+    });
+
+    test('delete result: success passes, errors and success:false throw', () {
+      checkAbsenceDeleteResult({
+        'data': {'success': true},
+      });
+      expect(
+        () => checkAbsenceDeleteResult({
+          'data': {'success': false},
+        }),
+        throwsA(isA<UntisException>()),
+      );
+      expect(
+        () => checkAbsenceDeleteResult({
+          'errors': [
+            {'title': 'Not allowed'},
+          ],
+        }),
+        throwsA(
+          isA<UntisException>().having(
+            (e) => e.message,
+            'message',
+            'Not allowed',
+          ),
+        ),
+      );
+    });
+
     test('write result: errors and conflicts throw, data passes', () {
       checkAbsenceWriteResult({
         'data': {'result': {}, 'conflicts': []},
@@ -483,6 +548,78 @@ void main() {
       );
       expect(sessions, 2);
     });
+
+    test(
+      'delete: DELETE absences/students with absenceIds and the session',
+      () async {
+        handler = (r) {
+          if (isToken(r)) return rpc({'token': 't'});
+          if (isSession(r)) return session('S');
+          return ok({
+            'data': {'success': true},
+          });
+        };
+        await api.deleteAbsences(
+          host: host,
+          school: schoolName,
+          auth: creds,
+          ids: [264370],
+        );
+        final del = adapter.requests.last;
+        expect(del.method, 'DELETE');
+        expect(
+          del.uri.toString(),
+          'https://$host/WebUntis/api/classreg/absences/students',
+        );
+        expect(del.json, {
+          'absenceIds': [264370],
+        });
+        expect(del.headers['Cookie'], contains('JSESSIONID=S'));
+        expect(del.headers['Authorization'], isNull);
+      },
+    );
+
+    test(
+      'records: GET absences/students for the days of the absence',
+      () async {
+        handler = (r) {
+          if (isToken(r)) return rpc({'token': 't'});
+          if (isSession(r)) return session('S');
+          if (r.uri.path.endsWith('/absences/students')) {
+            return ok({
+              'data': {
+                'absences': [
+                  {
+                    'id': 7,
+                    'startDate': 20261113,
+                    'endDate': 20261113,
+                    'startTime': 755,
+                    'endTime': 1755,
+                    'canEdit': true,
+                  },
+                ],
+              },
+            });
+          }
+          return ok({'data': {}});
+        };
+        final r = await api.absenceRecords(
+          host: host,
+          school: schoolName,
+          auth: creds,
+          studentId: 1001,
+          start: DateTime(2026, 11, 13, 7, 55),
+          end: DateTime(2026, 11, 13, 17, 55),
+        );
+        expect(r.single.canEdit, isTrue);
+        expect(adapter.requests.last.uri.queryParameters, {
+          'startDate': '20261113',
+          'endDate': '20261113',
+          'studentId': '1001',
+          'excuseStatusId': '-1',
+        });
+      },
+    );
 
     test('no JSESSIONID: falls back to the bearer token alone', () async {
       handler = (r) {

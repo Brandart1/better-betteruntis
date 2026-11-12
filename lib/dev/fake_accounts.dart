@@ -534,6 +534,8 @@ class FakeUntisApi implements FullUntisApi {
     return items.reversed.toList();
   }
 
+  var _reportedIds = 0;
+
   /// Absences reported via [reportAbsence] (demo mode keeps them in memory).
   final reported = <({int studentId, RawAbsence absence})>[];
 
@@ -594,7 +596,7 @@ class FakeUntisApi implements FullUntisApi {
     reported.add((
       studentId: report.studentId,
       absence: RawAbsence(
-        id: 5000 + reported.length,
+        id: 5000 + _reportedIds++,
         start: report.start,
         end: report.end,
         excused: false,
@@ -603,6 +605,48 @@ class FakeUntisApi implements FullUntisApi {
         excuseStatusId: 3,
       ),
     ));
+  }
+
+  /// Demo: absences reported in this session can be deleted; the generated
+  /// ones have no classreg record.
+  @override
+  Future<List<AbsenceRecord>> absenceRecords({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int studentId,
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    await _delay();
+    final to = DateTime(end.year, end.month, end.day + 1);
+    return [
+      for (final r in reported)
+        if (r.studentId == studentId &&
+            r.absence.start.isBefore(to) &&
+            !r.absence.end.isBefore(
+              DateTime(start.year, start.month, start.day),
+            ))
+          AbsenceRecord(
+            id: r.absence.id,
+            start: r.absence.start,
+            end: r.absence.end,
+            canEdit: true,
+            createdUser: auth.username,
+            updatedUser: auth.username,
+          ),
+    ];
+  }
+
+  @override
+  Future<void> deleteAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> ids,
+  }) async {
+    await _delay();
+    reported.removeWhere((r) => ids.contains(r.absence.id));
   }
 
   @override

@@ -193,6 +193,34 @@ class AbsenceReport {
   final String text;
 }
 
+/// Server-side view of one absence from the classreg absence list (parent
+/// accounts): who entered it and whether this account may still delete it.
+class AbsenceRecord {
+  const AbsenceRecord({
+    required this.id,
+    required this.start,
+    required this.end,
+    this.canEdit = false,
+    this.createdUser = '',
+    this.updatedUser = '',
+    this.created,
+    this.updated,
+  });
+
+  final int id;
+  final DateTime start;
+  final DateTime end;
+
+  /// The school's `canEdit`: this account may still delete it.
+  final bool canEdit;
+
+  /// Teacher short name (e.g. "Fch") or a parent's login (an email).
+  final String createdUser;
+  final String updatedUser;
+  final DateTime? created;
+  final DateTime? updated;
+}
+
 /// Office hour from getOfficeHours2017 (carries names directly).
 class OfficeHourItem {
   const OfficeHourItem({
@@ -308,6 +336,16 @@ abstract interface class InfoCenterRepository {
   /// absences of [a] are dropped, so the next subscription loads fresh data.
   /// Throws [UntisException].
   Future<void> reportAbsence(Account a, AbsenceReport report);
+
+  /// The classreg record of [item] (who entered it, whether it may be
+  /// deleted) for the selected child of parent account [a]. Null when the
+  /// account has no child or the school's list doesn't contain it. Throws
+  /// [UntisException].
+  Future<AbsenceRecord?> absenceRecord(Account a, AbsenceItem item);
+
+  /// Deletes absence [id] of the selected child. On success the cached
+  /// absences of [a] are dropped. Throws [UntisException].
+  Future<void> deleteAbsence(Account a, int id);
   /// Office hours of all teachers, or with [onlyMyClass] those of the
   /// account's (or selected child's) class.
   Stream<Cached<List<OfficeHourItem>>> officeHours(

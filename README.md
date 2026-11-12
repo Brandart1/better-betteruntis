@@ -65,7 +65,7 @@ timetables**.
 
 ## 🐞 Known issues
 
-- Absences you reported can't be deleted in the app yet. Delete them on the WebUntis website.
+- None known right now.
 
 ## 📲 Install
 

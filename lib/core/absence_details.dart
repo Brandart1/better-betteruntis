@@ -130,6 +130,24 @@ abstract interface class AbsenceReportApi {
     required UntisCredentials auth,
     required AbsenceReport report,
   });
+
+  /// The classreg absence list of [studentId] from [start] to [end] (days).
+  Future<List<AbsenceRecord>> absenceRecords({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int studentId,
+    required DateTime start,
+    required DateTime end,
+  });
+
+  /// Deletes absences by classreg id.
+  Future<void> deleteAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> ids,
+  });
 }
 
 /// Everything the app's API object provides.

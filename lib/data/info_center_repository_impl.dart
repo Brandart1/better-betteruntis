@@ -381,6 +381,57 @@ class InfoCenterRepositoryImpl implements InfoCenterRepository {
     await invalidateAbsences(a.id);
   }
 
+  @override
+  Future<AbsenceRecord?> absenceRecord(Account a, AbsenceItem item) async {
+    final child = a.activeChild;
+    if (a.anonymous || child == null) return null;
+    final reportApi = _reportApi();
+    final List<AbsenceRecord> records;
+    try {
+      records = await reportApi.absenceRecords(
+        host: a.host,
+        school: a.school.loginName,
+        auth: await accounts.credentials(a.id),
+        studentId: child.id,
+        start: item.start,
+        end: item.end,
+      );
+    } catch (e) {
+      throw _wrap(e);
+    }
+    return matchAbsenceRecord(records, item);
+  }
+
+  /// The record with [item]'s id, else the one with the same start and end
+  /// (in case the two APIs number absences differently).
+  static AbsenceRecord? matchAbsenceRecord(
+    List<AbsenceRecord> records,
+    AbsenceItem item,
+  ) =>
+      records.where((r) => r.id == item.id).firstOrNull ??
+      records
+          .where((r) => r.start == item.start && r.end == item.end)
+          .firstOrNull;
+
+  @override
+  Future<void> deleteAbsence(Account a, int id) async {
+    if (a.anonymous) {
+      throw const UntisException(UntisException.noRight, 'Not signed in.');
+    }
+    final reportApi = _reportApi();
+    try {
+      await reportApi.deleteAbsences(
+        host: a.host,
+        school: a.school.loginName,
+        auth: await accounts.credentials(a.id),
+        ids: [id],
+      );
+    } catch (e) {
+      throw _wrap(e);
+    }
+    await invalidateAbsences(a.id);
+  }
+
   /// Drops every cached absence list of [accountId] (all children and
   /// ranges), so the next subscription asks the server.
   Future<void> invalidateAbsences(String accountId) =>

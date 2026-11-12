@@ -653,6 +653,53 @@ class UntisApiImpl implements FullUntisApi {
     );
   }
 
+  @override
+  Future<List<AbsenceRecord>> absenceRecords({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int studentId,
+    required DateTime start,
+    required DateTime end,
+  }) async => parseAbsenceRecords(
+    await _classic(
+      host,
+      school,
+      auth,
+      'GET',
+      classregUrl(
+        host,
+        'absences/students?startDate=${ymdNumber(start)}'
+        '&endDate=${ymdNumber(end)}&studentId=$studentId&excuseStatusId=-1',
+      ),
+      'REST classreg absences/students studentId=$studentId '
+      '${ymdNumber(start)}..${ymdNumber(end)}',
+    ),
+  );
+
+  /// `DELETE /WebUntis/api/classreg/absences/students` with
+  /// `{absenceIds:[…]}`, as the web client sends it (seen 2026-11-12).
+  @override
+  Future<void> deleteAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> ids,
+  }) async {
+    if (ids.isEmpty) return;
+    checkAbsenceDeleteResult(
+      await _classic(
+        host,
+        school,
+        auth,
+        'DELETE',
+        classregUrl(host, 'absences/students'),
+        'REST classreg DELETE absences/students ids=${ids.join(',')}',
+        body: absenceDeletePayload(ids),
+      ),
+    );
+  }
+
   /// Client-side checks before anything is sent.
   static void checkAbsenceReport(AbsenceReport r) {
     if (r.studentId <= 0) {

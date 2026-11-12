@@ -116,6 +116,8 @@ Session (0.4.6+23, to be confirmed):
 - If it still fails, the server answers with a redirect or a login page; our client then reports "The school's server didn't accept the app's sign-in for this function" (code `-8530`, internal).
 
 Assumed (to be confirmed with a real parent account):
+- **Delete** (captured from the browser 2026-11-12): `DELETE /WebUntis/api/classreg/absences/students` with JSON `{absenceIds:[<id>]}` and the same session headers as the POST. Answer `{data:{success:true}}`.
+- The `absences/students` list entries (real answer 2026-11-12): `{id, startDate, endDate, startTime, endTime, createDate, lastUpdate (ms), createdUser, updatedUser, reasonId, reason, text, interruptions, canEdit, studentName, excuseStatus, isExcused, excuse:{id, text, excuseDate, excuseStatus, isExcused, userId, username}}`. `createdUser` is a teacher's short name (e.g. `Fch`) or the parent's login (an email). `canEdit` is true only while the parent may still change/delete it (seen: only their latest report). The ids match getStudentAbsences2017's; we also match by start/end as a fallback.
 - For parents, `studentId` is the child's id from `userData.children`, and `.../students/self` is the right path (the web client uses the same absence module for students and parents).
 - The meta field names above; every field is optional in our parser. If the meta call fails, reasons come from the `absences/students` answer, else from master data `absenceReasons` (shown with a notice).
 
