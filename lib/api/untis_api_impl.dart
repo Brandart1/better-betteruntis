@@ -708,9 +708,14 @@ class UntisApiImpl implements FullUntisApi {
       jsonEncode({'names': cookies.keys.toList()}),
     );
     if (!cookies.containsKey('JSESSIONID')) return null;
+    // What the browser sends (seen 2026-11-12): cookies, X-CSRF-TOKEN,
+    // Tenant-Id, Origin and Referer, and no Authorization header.
     final headers = <String, String>{
       'Cookie': sessionCookieHeader(cookies, school),
+      'Origin': 'https://$host',
+      'Referer': 'https://$host/WebUntis/embedded.do?showSidebar=false',
       'X-XSRF-TOKEN': ?cookies['XSRF-TOKEN'],
+      'Tenant-Id': ?cookies['Tenant-Id'],
     };
     // The web client's own config; best effort, the session works without.
     try {
@@ -724,6 +729,7 @@ class UntisApiImpl implements FullUntisApi {
         followRedirects: false,
         headers: headers,
         logBody: false,
+        sendToken: false,
       );
       Object? config;
       try {
@@ -743,11 +749,14 @@ class UntisApiImpl implements FullUntisApi {
                 ]
               : null,
           'csrfAt': found.csrfPath,
+          'csrfHeader': found.csrfHeader,
           'tenantIdAt': found.tenantPath,
         }),
       );
-      if (found.csrf != null) headers['X-CSRF-TOKEN'] = found.csrf!;
-      if (found.tenantId != null) headers['Tenant-Id'] = found.tenantId!;
+      if (found.csrf case final csrf?) {
+        headers[found.csrfHeader ?? 'X-CSRF-TOKEN'] = csrf;
+      }
+      if (found.tenantId case final t?) headers['Tenant-Id'] = t;
     } on UntisException {
       // Logged by _bearerRequest.
     }
@@ -755,16 +764,23 @@ class UntisApiImpl implements FullUntisApi {
     return headers;
   }
 
-  /// First CSRF token and tenant id anywhere in [json] (any depth, keys
-  /// matched loosely), with the key paths they were found at.
+  /// CSRF token, the header name to send it in, and the tenant id, found
+  /// anywhere in [json] (WebUntis `api/app/config` has `data.csrfToken`,
+  /// `data.csrfHeader` and `data.tenantId`), with the token's and tenant's
+  /// key paths.
   static ({
     String? csrf,
     String? csrfPath,
+    String? csrfHeader,
     String? tenantId,
     String? tenantPath,
   })
   findSessionValues(Object? json) {
-    String? csrf, csrfPath, tenant, tenantPath;
+    String? csrf, csrfPath, header, tenant, tenantPath;
+    final tokenKey = RegExp(r'^_?csrf(_?token)?$', caseSensitive: false);
+    final headerKey = RegExp(r'^csrf_?header(_?name)?$', caseSensitive: false);
+    final headerName = RegExp(r'^[A-Za-z][A-Za-z0-9-]*$');
+    final tenantKey = RegExp(r'^tenant_?id$', caseSensitive: false);
     void walk(Object? v, String path) {
       if (v is Map) {
         for (final e in v.entries) {
@@ -772,14 +788,15 @@ class UntisApiImpl implements FullUntisApi {
           final p = path.isEmpty ? k : '$path.$k';
           final val = e.value;
           final scalar = val is String || val is num;
-          if (csrf == null &&
-              scalar &&
-              RegExp('csrf', caseSensitive: false).hasMatch(k)) {
+          if (csrf == null && scalar && tokenKey.hasMatch(k)) {
             csrf = '$val';
             csrfPath = p;
-          } else if (tenant == null &&
-              scalar &&
-              RegExp(r'^tenant_?id$', caseSensitive: false).hasMatch(k)) {
+          } else if (header == null &&
+              val is String &&
+              headerKey.hasMatch(k) &&
+              headerName.hasMatch(val)) {
+            header = val;
+          } else if (tenant == null && scalar && tenantKey.hasMatch(k)) {
             tenant = '$val';
             tenantPath = p;
           } else if (tenant == null &&
@@ -802,6 +819,7 @@ class UntisApiImpl implements FullUntisApi {
     return (
       csrf: csrf,
       csrfPath: csrfPath,
+      csrfHeader: header,
       tenantId: tenant,
       tenantPath: tenantPath,
     );
@@ -830,7 +848,8 @@ class UntisApiImpl implements FullUntisApi {
   }
 
   /// Request to a classic `/WebUntis/api/...` endpoint with the web session
-  /// cookie (when one could be opened) and the bearer token. Redirects are
+  /// headers like the browser (no bearer token), or with only the bearer
+  /// token when no session could be opened. Redirects are
   /// not followed: a 3xx (or an HTML page) means the server wants a browser
   /// login. A cached session that gets one is reopened once.
   Future<Object?> _classic(
@@ -857,6 +876,7 @@ class UntisApiImpl implements FullUntisApi {
         body: body,
         followRedirects: false,
         headers: session ?? const {},
+        sendToken: session == null,
       );
       final s = resp.statusCode ?? 0;
       final rejected = (s >= 300 && s < 400) || s == 403;
@@ -920,11 +940,12 @@ class UntisApiImpl implements FullUntisApi {
     bool followRedirects = true,
     Map<String, String> headers = const {},
     bool logBody = true,
+    bool sendToken = true,
   }) async {
     final tokenKey = '$host|$school|${auth.username}';
     late Response<String> resp;
     for (var attempt = 0; attempt < 2; attempt++) {
-      final token = await _token(host, school, auth);
+      final token = sendToken ? await _token(host, school, auth) : null;
       try {
         resp = await _dio.request<String>(
           url,
@@ -938,7 +959,7 @@ class UntisApiImpl implements FullUntisApi {
             contentType: body == null ? null : 'application/json',
             headers: {
               'Accept': 'application/json',
-              'Authorization': 'Bearer $token',
+              if (token != null) 'Authorization': 'Bearer $token',
               ...headers,
             },
           ),
@@ -969,7 +990,7 @@ class UntisApiImpl implements FullUntisApi {
             ? data
             : jsonEncode({'_redirectTo': _stripQuery(location), '_body': data}),
       );
-      if (resp.statusCode != 401) break;
+      if (!sendToken || resp.statusCode != 401) break;
       _tokens.remove(tokenKey);
     }
     return resp;

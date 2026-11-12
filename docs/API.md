@@ -108,7 +108,9 @@ Seen with real parent accounts (2026-11-12, two schools, password and QR login a
 
 Session (0.4.6+23, to be confirmed):
 - We open a browser session the way the WebUntis JS library's secret login does: `POST jsonrpc_intern.do?school=<s>&m=getUserData2017&v=i2.2` with `{auth:{user, otp, clientTime}}`. Its `Set-Cookie` should carry `JSESSIONID`. All classic calls then send `Cookie: schoolname="_<base64 school>"; JSESSIONID=…` (plus any other cookies) and still the bearer token.
-- Then `GET /WebUntis/api/app/config` with that cookie; the first key matching `csrf` and a `tenantId` / `tenant.id` are sent as `X-CSRF-TOKEN` / `Tenant-Id`. An `XSRF-TOKEN` cookie is echoed as `X-XSRF-TOKEN`.
+- Confirmed 2026-11-12: `getUserData2017` sets the cookies `JSESSIONID`, `schoolname` and `Tenant-Id`; with them `absences/meta` answers. `absences/students` and the POST still got the HTML "Access denied" while we also sent our bearer token and a wrong CSRF value.
+- Then `GET /WebUntis/api/app/config` with that cookie. Its `data` has `csrfHeader` (the header **name**), `csrfToken` (the value) and `tenantId`. We send `<csrfHeader>: <csrfToken>` and `Tenant-Id`. An `XSRF-TOKEN` cookie is echoed as `X-XSRF-TOKEN`.
+- What the browser sends on the POST (captured 2026-11-12): `Accept: application/json`, `Content-Type: application/json`, `X-CSRF-TOKEN`, `Tenant-Id`, `Origin: https://<host>`, `Referer: https://<host>/WebUntis/embedded.do?showSidebar=false`, `Cookie`, and **no** `Authorization`. With a session we send exactly these (0.4.6+24); the bearer token only when no session could be opened.
 - The Debug log shows `web session: …` entries: cookie names received, the config's top-level keys and the key paths where CSRF / tenant were found (never values). A cached session that is redirected or refused is reopened once.
 - Native apps only: on the web the browser hides `Set-Cookie` and our proxy drops cookies.
 - If it still fails, the server answers with a redirect or a login page; our client then reports "The school's server didn't accept the app's sign-in for this function" (code `-8530`, internal).

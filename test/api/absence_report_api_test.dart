@@ -388,7 +388,10 @@ void main() {
         post.headers['Cookie'],
         'schoolname="_$b64"; JSESSIONID=SESSION-SECRET; traceId=t1',
       );
-      expect(post.headers['Authorization'], 'Bearer t');
+      // Like the browser: session headers, no bearer token.
+      expect(post.headers['Authorization'], isNull);
+      expect(post.headers['Origin'], 'https://$host');
+      expect(post.headers['Referer'], contains('/WebUntis/embedded.do'));
       final log = api.debugLog;
       expect(log.last.method, contains('(web session)'));
       final names = log.firstWhere((e) => e.method.contains('cookies'));
@@ -407,6 +410,8 @@ void main() {
             'data': {
               'tenant': {'id': 4711, 'displayName': 'X'},
               'user': {'name': 'Parent'},
+              // csrfHeader comes first, as in real WebUntis; it's the name.
+              'csrfHeader': 'X-CSRF-TOKEN',
               'csrfToken': 'CSRF-SECRET',
             },
           });
@@ -434,9 +439,10 @@ void main() {
     test('findSessionValues: loose key matching', () {
       final v = UntisApiImpl.findSessionValues({
         'tenantId': '12',
-        'security': {'_csrf': 'abc'},
+        'security': {'csrfHeader': 'X-Csrf', '_csrf': 'abc'},
       });
       expect((v.csrf, v.csrfPath), ('abc', 'security._csrf'));
+      expect(v.csrfHeader, 'X-Csrf');
       expect((v.tenantId, v.tenantPath), ('12', 'tenantId'));
       final none = UntisApiImpl.findSessionValues('x');
       expect(none.csrf, isNull);
