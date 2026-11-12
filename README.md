@@ -65,7 +65,7 @@ timetables**.
 
 ## 🐞 Known issues
 
-- **Reporting absences** (parent accounts) doesn't work yet.
+- Absences you reported can't be deleted in the app yet. Delete them on the WebUntis website.
 
 ## 📲 Install
 

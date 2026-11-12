@@ -8,10 +8,8 @@
 - **Upcoming absences show up:** the list now reaches the end of the school year, so absences you report in advance are listed too.
 
 ### Fixed
+- **Reporting absences works** (parent accounts). The school's server didn't accept the app's normal sign-in for it, so the app now opens a WebUntis web session like the browser does.
 - ID Austria parent accounts work through the QR code, so they're no longer a known issue.
 
-### Changed
-- **Reporting absences:** the app now opens a WebUntis web session for it, like the browser does, with the same security token (CSRF) and headers. Your school's server didn't accept the app's normal sign-in for this. Still being tested.
-
 ### Known issues
-- **Reporting absences** (parent accounts) doesn't work yet.
+- Absences you reported can't be deleted in the app yet. Delete them on the WebUntis website.
