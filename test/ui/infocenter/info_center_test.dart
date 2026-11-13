@@ -415,8 +415,114 @@ void main() {
       oh(5, '', 9),
       oh(6, 'Otto', 9),
     ]);
-    expect(g.map((e) => e.key), ['anders', 'Otto', 'Özdemir', 'Zimmer', '']);
-    expect(g[2].value.map((o) => o.id), [4, 2]);
+    expect(g.map((e) => e.name), ['anders', 'Otto', 'Özdemir', 'Zimmer', '']);
+    expect(g[2].items.map((o) => o.id), [4, 2]);
+    expect(g.last.title, 'Teacher');
+  });
+
+  test('teachers with the same last name only are not merged', () {
+    OfficeHourItem oh(
+      int id,
+      String t, {
+      int teacherId = 0,
+      String rooms = '',
+      String email = '',
+    }) => OfficeHourItem(
+      id: id,
+      start: DateTime(2026, 11, 10, 8 + id),
+      end: DateTime(2026, 11, 10, 9 + id),
+      teacherName: t,
+      teacherId: teacherId,
+      rooms: rooms,
+      email: email,
+    );
+    // By teacher id.
+    var g = groupByTeacher([
+      oh(1, 'Huber', teacherId: 7, rooms: 'R1'),
+      oh(2, 'Huber', teacherId: 8, rooms: 'R1'),
+      oh(3, 'Huber', teacherId: 7, rooms: 'R2'),
+    ]);
+    expect(g.map((e) => e.items.map((o) => o.id).toList()), [
+      [2],
+      [1, 3],
+    ]);
+    expect(g.map((e) => e.title), ['Huber · R1', 'Huber · R1, R2']);
+    // By email.
+    g = groupByTeacher([
+      oh(1, 'Huber', email: 'a@x.org'),
+      oh(2, 'Huber', email: 'b@x.org'),
+      oh(3, 'Huber', email: 'a@x.org'),
+    ]);
+    expect(g.length, 2);
+    expect(g.map((e) => e.title), ['Huber · a@x.org', 'Huber · b@x.org']);
+    // Bare last name, nothing else: the room tells them apart.
+    g = groupByTeacher([
+      oh(1, 'Huber', rooms: 'R110'),
+      oh(2, 'Huber', rooms: 'R215'),
+      oh(3, 'Huber', rooms: 'R110'),
+    ]);
+    expect(g.map((e) => e.title), ['Huber · R110', 'Huber · R215']);
+    expect(g.first.items.map((o) => o.id), [1, 3]);
+    // A full name stays one teacher even across rooms.
+    g = groupByTeacher([
+      oh(1, 'Anna Huber', rooms: 'R110'),
+      oh(2, 'Anna Huber', rooms: 'R215'),
+    ]);
+    expect(g.single.title, 'Anna Huber');
+  });
+
+  test('office hour search matches teacher, room and email', () {
+    final o = OfficeHourItem(
+      id: 1,
+      start: DateTime(2026, 11, 10, 9),
+      end: DateTime(2026, 11, 10, 10),
+      teacherName: 'Anna Müller',
+      rooms: 'Lehrerzimmer',
+      email: 'a.mueller@example.org',
+    );
+    expect(officeHourMatches(o, ''), isTrue);
+    expect(officeHourMatches(o, 'müll'), isTrue);
+    expect(officeHourMatches(o, 'lehrer'), isTrue);
+    expect(officeHourMatches(o, 'mueller'), isTrue);
+    expect(officeHourMatches(o, 'weber'), isFalse);
+  });
+
+  testWidgets('office hours: same last names stay apart; search filters', (
+    tester,
+  ) async {
+    await pump(tester);
+    await openTab(tester, 'Office hours');
+    expect(find.text('Huber · R110'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('officehours-search')),
+      'HUB',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Anna Müller'), findsNothing);
+    expect(find.text('Huber · R110'), findsOneWidget);
+    expect(find.text('Huber · R215'), findsOneWidget);
+    expect(find.byKey(const ValueKey('officehour-5')), findsOneWidget);
+    expect(find.byKey(const ValueKey('officehour-6')), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('officehours-search')),
+      'r215',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Huber · R110'), findsNothing);
+    expect(find.byKey(const ValueKey('officehour-5')), findsNothing);
+    expect(find.byKey(const ValueKey('officehour-6')), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('officehours-search')),
+      'nobody',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('No matches'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('officehours-search')),
+      '',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Anna Müller'), findsOneWidget);
   });
 
   testWidgets('refresh failure keeps cached data and shows a banner', (

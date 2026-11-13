@@ -228,6 +228,7 @@ class OfficeHourItem {
     required this.start,
     required this.end,
     required this.teacherName,
+    this.teacherId = 0,
     this.rooms = '',
     this.email = '',
     this.phone = '',
@@ -239,6 +240,10 @@ class OfficeHourItem {
   final DateTime start;
   final DateTime end;
   final String teacherName;
+
+  /// The teacher's element id when the response has one, else 0. Names alone
+  /// aren't unique (some schools send only last names).
+  final int teacherId;
   final String rooms;
   final String email;
   final String phone;
