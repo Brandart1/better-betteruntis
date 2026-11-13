@@ -17,12 +17,20 @@ import 'package:flutter_test/flutter_test.dart';
 
 class FakeSpeaker implements Speaker {
   final spoken = <(String, SpeechLanguage)>[];
+  final rates = <double>[];
   final _speaking = ValueNotifier(false);
   @override
   ValueListenable<bool> get speaking => _speaking;
   @override
-  Future<void> speak(String text, SpeechLanguage language) async =>
-      spoken.add((text, language));
+  Future<void> speak(
+    String text,
+    SpeechLanguage language, {
+    double rate = 1,
+  }) async {
+    spoken.add((text, language));
+    rates.add(rate);
+  }
+
   @override
   Future<void> stop() async => _speaking.value = false;
 }
@@ -70,6 +78,7 @@ void main() {
         speakButton: true,
         speechLanguage: SpeechLanguage.de,
         textScale: 1.3,
+        speechRate: 1.5,
       );
       expect(AccessibilitySettings.fromJson(a.toJson()), a);
       expect(AccessibilitySettings.fromJson({'textScale': 99}).textScale, 1.0);
@@ -81,6 +90,16 @@ void main() {
         AccessibilitySettings.fromJson(null),
         const AccessibilitySettings(),
       );
+    });
+
+    test('voice speed maps to each engine\'s scale', () {
+      expect(engineRate(1, TargetPlatform.android), 1);
+      expect(engineRate(2, TargetPlatform.android), 2);
+      expect(engineRate(0.5, TargetPlatform.android), 0.5);
+      expect(engineRate(1, TargetPlatform.iOS), 0.5);
+      expect(engineRate(2, TargetPlatform.iOS), 1);
+      expect(engineRate(5, TargetPlatform.android), 2);
+      expect(AccessibilitySettings.fromJson({'speechRate': 9}).speechRate, 1.0);
     });
 
     test('speech language: device language for "system"', () {
@@ -354,6 +373,7 @@ void main() {
           dayViewByDefault: true,
           speakButton: true,
           speechLanguage: SpeechLanguage.de,
+          speechRate: 1.25,
         ),
       );
       await t.tap(find.byKey(const ValueKey('speak-day')));
@@ -361,6 +381,7 @@ void main() {
       expect(speaker.spoken, hasLength(1));
       final (text, lang) = speaker.spoken.single;
       expect(lang, SpeechLanguage.de);
+      expect(speaker.rates.single, 1.25);
       expect(
         text,
         matches(RegExp(r'^(Montag|Dienstag|Mittwoch|Donnerstag|Freitag), ')),

@@ -32,7 +32,11 @@ class _SilentSpeaker implements Speaker {
   @override
   ValueListenable<bool> get speaking => _speaking;
   @override
-  Future<void> speak(String text, SpeechLanguage language) async {}
+  Future<void> speak(
+    String text,
+    SpeechLanguage language, {
+    double rate = 1,
+  }) async {}
   @override
   Future<void> stop() async {}
 }

@@ -50,7 +50,11 @@ class AccessibilitySettings {
     this.speakButton = false,
     this.speechLanguage = SpeechLanguage.system,
     this.textScale = 1.0,
+    this.speechRate = 1.0,
   });
+
+  /// Voice speed steps (1.0 = the engine's normal speed).
+  static const speechRates = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 
   /// Text size steps offered in the menu (on top of the system setting).
   static const textScales = [0.85, 1.0, 1.15, 1.3, 1.5];
@@ -70,6 +74,9 @@ class AccessibilitySettings {
   /// Factor on the system text size (1.0 = unchanged).
   final double textScale;
 
+  /// Voice speed factor, 0.5–2.0 (1.0 = normal).
+  final double speechRate;
+
   bool get highContrast => contrast != ContrastMode.off;
 
   AccessibilitySettings copyWith({
@@ -79,6 +86,7 @@ class AccessibilitySettings {
     bool? speakButton,
     SpeechLanguage? speechLanguage,
     double? textScale,
+    double? speechRate,
   }) => AccessibilitySettings(
     contrast: contrast ?? this.contrast,
     dayViewByDefault: dayViewByDefault ?? this.dayViewByDefault,
@@ -86,6 +94,7 @@ class AccessibilitySettings {
     speakButton: speakButton ?? this.speakButton,
     speechLanguage: speechLanguage ?? this.speechLanguage,
     textScale: textScale ?? this.textScale,
+    speechRate: speechRate ?? this.speechRate,
   );
 
   Map<String, Object?> toJson() => {
@@ -95,6 +104,7 @@ class AccessibilitySettings {
     'speakButton': speakButton,
     'speechLanguage': speechLanguage.name,
     'textScale': textScale,
+    'speechRate': speechRate,
   };
 
   /// Tolerant: anything unknown falls back to the default.
@@ -111,6 +121,10 @@ class AccessibilitySettings {
         final num n when n >= 0.5 && n <= 3 => n.toDouble(),
         _ => 1.0,
       },
+      speechRate: switch (j['speechRate']) {
+        final num n when n >= 0.5 && n <= 2 => n.toDouble(),
+        _ => 1.0,
+      },
     );
   }
 
@@ -122,7 +136,8 @@ class AccessibilitySettings {
       other.largeDayHeaders == largeDayHeaders &&
       other.speakButton == speakButton &&
       other.speechLanguage == speechLanguage &&
-      other.textScale == textScale;
+      other.textScale == textScale &&
+      other.speechRate == speechRate;
 
   @override
   int get hashCode => Object.hash(
@@ -132,6 +147,7 @@ class AccessibilitySettings {
     speakButton,
     speechLanguage,
     textScale,
+    speechRate,
   );
 }
 

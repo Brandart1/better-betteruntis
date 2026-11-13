@@ -6,6 +6,7 @@
   - Open the timetable on today's day view instead of the week.
   - Larger day headers; the day view spells out the weekday and date.
   - Text size: five steps from 85 % to 150 %, on top of your device's text size.
+  - Voice speed for reading aloud, from 50 % to 200 %.
   - Loudspeaker button in the timetable that reads the day aloud ("First lesson: Maths with … in room …") with your device's voice. The voice language (English or German) is set separately from the app.
 
 ### Fixed

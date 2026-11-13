@@ -215,6 +215,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
         showCancelled: ref.read(timetableSettingsProvider).showCancelled,
       ),
       lang,
+      rate: a11y.speechRate,
     );
   }
 

@@ -291,11 +291,22 @@ String daySpeech({
 
 /// Speaks text with the operating system's text-to-speech engine.
 abstract interface class Speaker {
-  Future<void> speak(String text, SpeechLanguage language);
+  /// [rate]: speed factor, 1.0 = the engine's normal speed (0.5–2.0).
+  Future<void> speak(String text, SpeechLanguage language, {double rate = 1});
   Future<void> stop();
 
   /// Whether something is being read right now.
   ValueListenable<bool> get speaking;
+}
+
+/// The flutter_tts rate for speed factor [factor]: iOS/macOS treat 0.5 as
+/// normal speed (range 0–1), Android and the web 1.0 (2.0 = double).
+double engineRate(double factor, TargetPlatform platform) {
+  final f = factor.clamp(0.5, 2.0);
+  return switch (platform) {
+    TargetPlatform.iOS || TargetPlatform.macOS => (0.5 * f).clamp(0.0, 1.0),
+    _ => f,
+  };
 }
 
 class TtsSpeaker implements Speaker {
@@ -312,12 +323,21 @@ class TtsSpeaker implements Speaker {
   ValueListenable<bool> get speaking => _speaking;
 
   @override
-  Future<void> speak(String text, SpeechLanguage language) async {
+  Future<void> speak(
+    String text,
+    SpeechLanguage language, {
+    double rate = 1,
+  }) async {
     await _tts.stop();
     try {
       await _tts.setLanguage(language.voiceTag);
     } catch (_) {
       // Voice not installed: the engine keeps its default voice.
+    }
+    try {
+      await _tts.setSpeechRate(engineRate(rate, defaultTargetPlatform));
+    } catch (_) {
+      // Keep the engine's speed.
     }
     _speaking.value = true;
     await _tts.speak(text);

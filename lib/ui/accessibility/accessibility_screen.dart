@@ -119,6 +119,11 @@ class AccessibilityScreen extends ConsumerWidget {
               ],
             ),
           ),
+          _SpeedTile(
+            enabled: a.speakButton,
+            value: a.speechRate,
+            onChanged: (v) => notifier.update((s) => s.copyWith(speechRate: v)),
+          ),
           if (a.speakButton)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
@@ -143,6 +148,7 @@ class AccessibilityScreen extends ConsumerWidget {
                               ? 'Erste Stunde: Mathematik bei Frau Müller in Raum 101.'
                               : 'First lesson: Maths with Ms Müller in room 101.',
                           lang,
+                          rate: a.speechRate,
                         );
                   },
                 ),
@@ -199,6 +205,48 @@ class _TextSizeTile extends StatelessWidget {
             'First lesson: Maths with Anna Müller in room R101',
             style: Theme.of(context).textTheme.bodyLarge,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Voice speed slider over [AccessibilitySettings.speechRates] (50–200 %).
+class _SpeedTile extends StatelessWidget {
+  const _SpeedTile({
+    required this.enabled,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final bool enabled;
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    const steps = AccessibilitySettings.speechRates;
+    var i = steps.indexOf(value);
+    if (i < 0) i = steps.indexOf(1.0);
+    String pct(double r) => '${(r * 100).round()} %';
+    return ListTile(
+      enabled: enabled,
+      title: Text('Voice speed · ${pct(steps[i])}'),
+      subtitle: Row(
+        children: [
+          const Icon(Icons.slow_motion_video, size: 20),
+          Expanded(
+            child: Slider(
+              key: const ValueKey('a11y-speech-rate'),
+              value: i.toDouble(),
+              max: steps.length - 1.0,
+              divisions: steps.length - 1,
+              label: pct(steps[i]),
+              semanticFormatterCallback: (v) => pct(steps[v.round()]),
+              onChanged: enabled ? (v) => onChanged(steps[v.round()]) : null,
+            ),
+          ),
+          const Icon(Icons.speed, size: 20),
         ],
       ),
     );
