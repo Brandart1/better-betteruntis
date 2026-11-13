@@ -26,22 +26,18 @@ timetables**.
 
 ## 📸 Screenshots
 
-<table>
-  <tr>
-    <td width="25%" align="center" valign="top"><img src="docs/screenshots/week.png" width="180" alt="Week view"><br><sub>Week view</sub></td>
-    <td width="25%" align="center" valign="top"><img src="docs/screenshots/lesson.png" width="180" alt="Lesson details"><br><sub>Lesson details</sub></td>
-    <td width="25%" align="center" valign="top"><img src="docs/screenshots/day.png" width="180" alt="Day view"><br><sub>Day view, read aloud</sub></td>
-    <td width="25%" align="center" valign="top"><img src="docs/screenshots/info.png" width="180" alt="Info center"><br><sub>Homework</sub></td>
-  </tr>
-  <tr>
-    <td width="25%" align="center" valign="top"><img src="docs/screenshots/absences.png" width="180" alt="Absences"><br><sub>Absences</sub></td>
-    <td width="25%" align="center" valign="top"><img src="docs/screenshots/contrast.png" width="180" alt="High contrast"><br><sub>High contrast*</sub></td>
-    <td width="25%" align="center" valign="top"><img src="docs/screenshots/week-dark.png" width="180" alt="Dark mode"><br><sub>Dark mode</sub></td>
-    <td width="25%" align="center" valign="top"><img src="docs/screenshots/settings.png" width="180" alt="Settings"><br><sub>Colors &amp; text</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/screenshots/week.png" width="24%" alt="Week view with substitutions, exams and cancelled lessons">
+  <img src="docs/screenshots/lesson.png" width="24%" alt="Lesson details">
+  <img src="docs/screenshots/day.png" width="24%" alt="Day view with read-aloud button">
+  <img src="docs/screenshots/info.png" width="24%" alt="Info center: homework">
+  <img src="docs/screenshots/absences.png" width="24%" alt="Info center: absences">
+  <img src="docs/screenshots/exams.png" width="24%" alt="Info center: exams">
+  <img src="docs/screenshots/contrast.png" width="24%" alt="High contrast mode">
+  <img src="docs/screenshots/settings.png" width="24%" alt="Color and text settings">
+</p>
 
-<sub>Week view shows substitutions, exams and cancelled lessons. *Accessibility features are a work in progress. Demo data — made-up school and names. Regenerate with `tool/screenshots/update.sh`.</sub>
+<sub>Left: light mode, right: dark mode. Accessibility features are a work in progress. Demo data — made-up school and names. Regenerate with `tool/screenshots/update.sh`.</sub>
 
 ## ✨ Features
 
