@@ -5,3 +5,4 @@
 
 ### Improved
 - Office hours can now be searched by teacher or room.
+- Search fields (Browse timetables, office hours, subject colors) are easier to spot: a filled, rounded bar with a clear button.

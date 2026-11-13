@@ -7,6 +7,7 @@ import '../../core/models.dart';
 import '../timetable/timetable_utils.dart';
 import 'info_common.dart';
 import 'info_providers.dart';
+import '../common/search_field.dart';
 
 /// Office hours of the next 2 weeks, grouped by teacher (A–Z), each
 /// teacher's slots by time. All teachers by default; a chip narrows the list
@@ -133,13 +134,9 @@ class _OfficeHoursTabState extends ConsumerState<OfficeHoursTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextField(
-            key: const ValueKey('officehours-search'),
-            decoration: const InputDecoration(
-              hintText: 'Search teachers or rooms',
-              prefixIcon: Icon(Icons.search),
-              isDense: true,
-            ),
+          AppSearchField(
+            fieldKey: const ValueKey('officehours-search'),
+            hintText: 'Search teachers or rooms',
             onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
           ),
           const SizedBox(height: 8),

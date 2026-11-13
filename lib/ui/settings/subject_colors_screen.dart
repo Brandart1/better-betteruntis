@@ -6,6 +6,7 @@ import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/settings.dart';
 import 'color_picker_sheet.dart';
+import '../common/search_field.dart';
 
 /// One row of [SubjectColorsScreen].
 class _SubjectEntry {
@@ -24,7 +25,10 @@ class _SubjectEntry {
 /// none are active.
 List<MasterElement> colorableSubjects(NameResolver names) {
   final all = names.elementsOf(ElementType.subject, onlyActive: false);
-  final active = [for (final e in all) if (e.active) e];
+  final active = [
+    for (final e in all)
+      if (e.active) e,
+  ];
   return active.isEmpty ? all : active;
 }
 
@@ -129,13 +133,9 @@ class _SubjectColorsScreenState extends ConsumerState<SubjectColorsScreen> {
           if (all.length > SubjectColorsScreen.searchThreshold)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: TextField(
-                key: const ValueKey('subject-search'),
-                decoration: const InputDecoration(
-                  hintText: 'Search subjects',
-                  prefixIcon: Icon(Icons.search),
-                  isDense: true,
-                ),
+              child: AppSearchField(
+                fieldKey: const ValueKey('subject-search'),
+                hintText: 'Search subjects',
                 onChanged: (v) => setState(() => _query = v.trim()),
               ),
             ),
