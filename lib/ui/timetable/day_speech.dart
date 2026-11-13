@@ -21,7 +21,6 @@ class _Words {
     required this.lesson,
     required this.lessonsRange,
     required this.and,
-    required this.at,
     required this.withTeacher,
     required this.inRoom,
     required this.cancelled,
@@ -40,7 +39,6 @@ class _Words {
   final String Function(String ordinal) lesson;
   final String Function(int from, int to) lessonsRange;
   final String and;
-  final String Function(String time) at;
   final String withTeacher;
   final String inRoom;
   final String cancelled;
@@ -95,7 +93,6 @@ final _en = _Words(
   lesson: (o) => '$o lesson',
   lessonsRange: (a, b) => 'lessons $a to $b',
   and: 'and',
-  at: (t) => 'at $t',
   withTeacher: 'with',
   inRoom: 'in room',
   cancelled: 'cancelled',
@@ -150,7 +147,6 @@ final _de = _Words(
   lesson: (o) => '$o Stunde',
   lessonsRange: (a, b) => 'Stunden $a bis $b',
   and: 'und',
-  at: (t) => 'um $t',
   withTeacher: 'bei',
   inRoom: 'in Raum',
   cancelled: 'entfällt',
@@ -175,19 +171,51 @@ String _joinAnd(List<String> parts, String and) => switch (parts.length) {
   _ => '${parts.sublist(0, parts.length - 1).join(', ')} $and ${parts.last}',
 };
 
-/// "First lesson", "First and second lesson", "Lessons 3 to 5", or the
-/// start time when the time grid has no numbered units for it.
-String _when(_Words w, TimeGrid grid, LessonBlock b) {
-  final s = minuteOfDay(b.start), e = minuteOfDay(b.end);
-  final labels = [
-    for (final u in unitsFor(grid, b.start.weekday))
-      if (u.start < e && u.end > s) u.label,
-  ];
-  final nums = labels.map(int.tryParse).toList();
-  if (nums.isEmpty || nums.any((n) => n == null || n < 1)) {
-    return _cap(w.at(hhmm(s)));
+/// Lesson numbers of [b] (one per period, e.g. 2 and 3 for a double
+/// lesson). From the school's time grid when every period starts in one of
+/// its units (the unit's label if it is a number, else its position), else
+/// counted from the day's own lessons: the n-th distinct start time is
+/// lesson n. Parallel lessons share a number.
+List<int> lessonNumbersOf(
+  TimeGrid grid,
+  LessonBlock b,
+  Iterable<Period> dayPeriods,
+) {
+  final starts = {for (final p in b.periods) minuteOfDay(p.start)}.toList()
+    ..sort();
+  if (!grid.isFallback) {
+    final units = [...unitsFor(grid, b.start.weekday)]
+      ..sort((x, y) => x.start.compareTo(y.start));
+    final labelsAreNumbers = units.every(
+      (u) => (int.tryParse(u.label.trim()) ?? 0) > 0,
+    );
+    final nums = <int>{};
+    for (final s in starts) {
+      // A lesson may start a few minutes after its unit (late grids).
+      final i = units.indexWhere((u) => s >= u.start - 5 && s < u.end);
+      if (i < 0) {
+        nums.clear();
+        break;
+      }
+      // Several units in one period (a 90-minute double): count them all.
+      final end = b.periods
+          .where((p) => minuteOfDay(p.start) == s)
+          .map((p) => minuteOfDay(p.end))
+          .reduce((a, c) => a > c ? a : c);
+      for (var k = i; k < units.length && units[k].start < end; k++) {
+        nums.add(labelsAreNumbers ? int.parse(units[k].label.trim()) : k + 1);
+      }
+    }
+    if (nums.isNotEmpty) return nums.toList()..sort();
   }
-  final first = nums.first!, last = nums.last!;
+  final dayStarts = {for (final p in dayPeriods) minuteOfDay(p.start)}.toList()
+    ..sort();
+  return [for (final s in starts) dayStarts.indexOf(s) + 1];
+}
+
+/// "First lesson", "First and second lesson", "Lessons 3 to 5".
+String _when(_Words w, List<int> nums) {
+  final first = nums.first, last = nums.last;
   String ord(int n) => n <= w.ordinals.length ? w.ordinals[n - 1] : '$n.';
   if (nums.length == 1) return _cap(w.lesson(ord(first)));
   if (nums.length == 2) {
@@ -211,10 +239,10 @@ String daySpeech({
     w.date(w.weekdays[date.weekday - 1], date.day, w.months[date.month - 1]),
   ];
   final holiday = holidayOn(names.holidays, date);
+  // Numbering counts every lesson of the day, also hidden cancelled ones.
+  final dayPeriods = periods.where((p) => sameDay(p.start, date)).toList();
   final blocks = layoutDay(
-    periods.where(
-      (p) => sameDay(p.start, date) && (showCancelled || !p.isCancelled),
-    ),
+    dayPeriods.where((p) => showCancelled || !p.isCancelled),
   )..sort((a, b) => a.start.compareTo(b.start));
   if (blocks.isEmpty) {
     out.add(
@@ -255,7 +283,8 @@ String daySpeech({
       ],
     ];
     final sentence = [if (what.isNotEmpty) what, ...notes].join(', ');
-    out.add('${_when(w, names.timeGrid, b)}: $sentence.');
+    final nums = lessonNumbersOf(names.timeGrid, b, dayPeriods);
+    out.add('${_when(w, nums)}: $sentence.');
   }
   return out.join(' ');
 }

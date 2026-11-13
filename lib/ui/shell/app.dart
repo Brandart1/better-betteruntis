@@ -73,6 +73,9 @@ class BetterUntisApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final textScale = ref.watch(
+      accessibilityProvider.select((a) => a.textScale),
+    );
     final contrast = ref.watch(accessibilityProvider.select((a) => a.contrast));
     ThemeData theme(Brightness b) {
       if (contrast == ContrastMode.off) {
@@ -108,13 +111,20 @@ class BetterUntisApp extends ConsumerWidget {
       },
       routerConfig: router,
       builder: (context, child) {
+        // Accessibility text size multiplies the system's.
+        final mq = MediaQuery.of(context);
         // Always wrapped (identity when off), so toggling the mode keeps
         // the widget tree and the open screens.
-        return ColorFiltered(
-          colorFilter: contrast == ContrastMode.off ? _identity : _grayscale,
-          child: UpdateChecker(
-            navigatorKey: router.routerDelegate.navigatorKey,
-            child: child ?? const SizedBox.shrink(),
+        return MediaQuery(
+          data: mq.copyWith(
+            textScaler: TextScaler.linear(mq.textScaler.scale(1) * textScale),
+          ),
+          child: ColorFiltered(
+            colorFilter: contrast == ContrastMode.off ? _identity : _grayscale,
+            child: UpdateChecker(
+              navigatorKey: router.routerDelegate.navigatorKey,
+              child: child ?? const SizedBox.shrink(),
+            ),
           ),
         );
       },

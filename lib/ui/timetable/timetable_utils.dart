@@ -91,6 +91,8 @@ List<TimeUnit> unitsFor(TimeGrid grid, int weekday) {
 
 /// Lesson-number label for a time span, e.g. "3" or "1–2" ("" if none).
 String lessonNumbers(TimeGrid grid, DateTime start, DateTime end) {
+  // Made-up hourly units: their labels aren't the school's lesson numbers.
+  if (grid.isFallback) return '';
   final s = minuteOfDay(start), e = minuteOfDay(end);
   final hit = [
     for (final u in unitsFor(grid, start.weekday))

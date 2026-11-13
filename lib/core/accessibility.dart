@@ -49,7 +49,11 @@ class AccessibilitySettings {
     this.largeDayHeaders = false,
     this.speakButton = false,
     this.speechLanguage = SpeechLanguage.system,
+    this.textScale = 1.0,
   });
+
+  /// Text size steps offered in the menu (on top of the system setting).
+  static const textScales = [0.85, 1.0, 1.15, 1.3, 1.5];
 
   final ContrastMode contrast;
 
@@ -63,6 +67,9 @@ class AccessibilitySettings {
   final bool speakButton;
   final SpeechLanguage speechLanguage;
 
+  /// Factor on the system text size (1.0 = unchanged).
+  final double textScale;
+
   bool get highContrast => contrast != ContrastMode.off;
 
   AccessibilitySettings copyWith({
@@ -71,12 +78,14 @@ class AccessibilitySettings {
     bool? largeDayHeaders,
     bool? speakButton,
     SpeechLanguage? speechLanguage,
+    double? textScale,
   }) => AccessibilitySettings(
     contrast: contrast ?? this.contrast,
     dayViewByDefault: dayViewByDefault ?? this.dayViewByDefault,
     largeDayHeaders: largeDayHeaders ?? this.largeDayHeaders,
     speakButton: speakButton ?? this.speakButton,
     speechLanguage: speechLanguage ?? this.speechLanguage,
+    textScale: textScale ?? this.textScale,
   );
 
   Map<String, Object?> toJson() => {
@@ -85,6 +94,7 @@ class AccessibilitySettings {
     'largeDayHeaders': largeDayHeaders,
     'speakButton': speakButton,
     'speechLanguage': speechLanguage.name,
+    'textScale': textScale,
   };
 
   /// Tolerant: anything unknown falls back to the default.
@@ -97,6 +107,10 @@ class AccessibilitySettings {
       largeDayHeaders: b('largeDayHeaders'),
       speakButton: b('speakButton'),
       speechLanguage: SpeechLanguage.parse(j['speechLanguage']),
+      textScale: switch (j['textScale']) {
+        final num n when n >= 0.5 && n <= 3 => n.toDouble(),
+        _ => 1.0,
+      },
     );
   }
 
@@ -107,7 +121,8 @@ class AccessibilitySettings {
       other.dayViewByDefault == dayViewByDefault &&
       other.largeDayHeaders == largeDayHeaders &&
       other.speakButton == speakButton &&
-      other.speechLanguage == speechLanguage;
+      other.speechLanguage == speechLanguage &&
+      other.textScale == textScale;
 
   @override
   int get hashCode => Object.hash(
@@ -116,6 +131,7 @@ class AccessibilitySettings {
     largeDayHeaders,
     speakButton,
     speechLanguage,
+    textScale,
   );
 }
 

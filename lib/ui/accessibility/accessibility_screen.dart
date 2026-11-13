@@ -54,6 +54,11 @@ class AccessibilityScreen extends ConsumerWidget {
               ],
             ),
           ),
+          section('Text size'),
+          _TextSizeTile(
+            value: a.textScale,
+            onChanged: (v) => notifier.update((s) => s.copyWith(textScale: v)),
+          ),
           section('Timetable'),
           SwitchListTile(
             key: const ValueKey('a11y-day-view'),
@@ -143,6 +148,57 @@ class AccessibilityScreen extends ConsumerWidget {
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Slider over [AccessibilitySettings.textScales] with a live sample.
+class _TextSizeTile extends StatelessWidget {
+  const _TextSizeTile({required this.value, required this.onChanged});
+
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  static const _labels = ['Small', 'Default', 'Large', 'Larger', 'Largest'];
+
+  @override
+  Widget build(BuildContext context) {
+    const steps = AccessibilitySettings.textScales;
+    var i = steps.indexOf(value);
+    if (i < 0) i = steps.indexOf(1.0);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.text_decrease, size: 20),
+              Expanded(
+                child: Slider(
+                  key: const ValueKey('a11y-text-size'),
+                  value: i.toDouble(),
+                  max: steps.length - 1.0,
+                  divisions: steps.length - 1,
+                  label: _labels[i],
+                  semanticFormatterCallback: (v) => _labels[v.round()],
+                  onChanged: (v) => onChanged(steps[v.round()]),
+                ),
+              ),
+              const Icon(Icons.text_increase, size: 28),
+            ],
+          ),
+          Text(
+            '${_labels[i]} · ${(steps[i] * 100).round()} %',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'First lesson: Maths with Anna Müller in room R101',
+            style: Theme.of(context).textTheme.bodyLarge,
+          ),
         ],
       ),
     );

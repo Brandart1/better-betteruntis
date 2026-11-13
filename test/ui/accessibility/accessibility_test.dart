@@ -69,8 +69,10 @@ void main() {
         largeDayHeaders: true,
         speakButton: true,
         speechLanguage: SpeechLanguage.de,
+        textScale: 1.3,
       );
       expect(AccessibilitySettings.fromJson(a.toJson()), a);
+      expect(AccessibilitySettings.fromJson({'textScale': 99}).textScale, 1.0);
       expect(
         AccessibilitySettings.fromJson({'contrast': 'nope', 'speakButton': 1}),
         const AccessibilitySettings(),
@@ -179,6 +181,83 @@ void main() {
           language: SpeechLanguage.de,
         ),
         'Sonntag, 15. November. Frei: Herbstferien.',
+      );
+    });
+  });
+
+  group('lesson numbers', () {
+    Period at(int id, int h, int m, {int minutes = 45}) {
+      final start = monday.add(Duration(hours: h, minutes: m));
+      return Period(
+        id: id,
+        lessonId: id,
+        start: start,
+        end: start.add(Duration(minutes: minutes)),
+        elements: const [
+          ElementRef(
+            type: ElementType.subject,
+            id: DemoIds.m,
+            orgId: DemoIds.m,
+          ),
+        ],
+        flags: const {PeriodFlag.regular},
+      );
+    }
+
+    String speak(List<Period> ps, TimeGrid grid) => daySpeech(
+      date: monday,
+      periods: ps,
+      names: FakeNameResolver(timeGrid: grid),
+      language: SpeechLanguage.en,
+    );
+
+    test('no school grid (fallback): counted from the day, never times', () {
+      final ps = [at(1, 8, 0), at(2, 8, 50), at(3, 9, 50), at(4, 13, 0)];
+      final text = speak(ps, TimeGrid.fallback());
+      expect(text, contains('First lesson'));
+      expect(text, contains('Second lesson'));
+      expect(text, contains('Third lesson'));
+      expect(text, contains('Fourth lesson'));
+      expect(text, isNot(contains(':00')));
+    });
+
+    test('grid with letter labels: position in the grid', () {
+      const grid = TimeGrid({
+        1: [
+          TimeUnit(label: 'A', start: 8 * 60, end: 8 * 60 + 45),
+          TimeUnit(label: 'B', start: 8 * 60 + 50, end: 9 * 60 + 35),
+          TimeUnit(label: 'C', start: 9 * 60 + 50, end: 10 * 60 + 35),
+        ],
+      });
+      expect(speak([at(1, 9, 50)], grid), contains('Third lesson'));
+    });
+
+    test('lesson starting a few minutes late still matches its unit', () {
+      expect(speak([at(1, 8, 38)], demoTimeGrid), contains('Second lesson'));
+    });
+
+    test('one 90-minute period is a double lesson', () {
+      expect(
+        speak([at(1, 7, 45, minutes: 95)], demoTimeGrid),
+        contains('First and second lesson'),
+      );
+    });
+
+    test('lessons outside the grid: counted from the day', () {
+      expect(
+        speak([at(1, 16, 0), at(2, 17, 0)], demoTimeGrid),
+        allOf(contains('First lesson'), contains('Second lesson')),
+      );
+    });
+
+    test('lesson sheet numbers hide on the fallback grid', () {
+      expect(
+        lessonNumbers(
+          TimeGrid.fallback(),
+          monday.add(const Duration(hours: 8)),
+          monday.add(const Duration(hours: 9)),
+        ),
+        '',
       );
     });
   });
@@ -340,6 +419,31 @@ void main() {
           speakButton: true,
         ),
       );
+    });
+
+    testWidgets('text size slider', (t) async {
+      t.view.physicalSize = const Size(1000, 2000);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsStoreProvider.overrideWithValue(store),
+            speakerProvider.overrideWithValue(speaker),
+          ],
+          child: const MaterialApp(home: AccessibilityScreen()),
+        ),
+      );
+      final slider = find.byKey(const ValueKey('a11y-text-size'));
+      await t.tapAt(t.getBottomRight(slider) - const Offset(30, 24));
+      await t.pumpAndSettle();
+      expect(
+        AccessibilitySettings.fromJson(
+          store.values[AccessibilityNotifier.storeKey],
+        ).textScale,
+        AccessibilitySettings.textScales.last,
+      );
+      expect(find.textContaining('Largest'), findsWidgets);
     });
   });
 }
