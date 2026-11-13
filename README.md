@@ -34,10 +34,10 @@ timetables**.
     <td width="25%" align="center" valign="top"><img src="docs/screenshots/info.png" width="180" alt="Info center"><br><sub>Homework</sub></td>
   </tr>
   <tr>
+    <td width="25%" align="center" valign="top"><img src="docs/screenshots/absences.png" width="180" alt="Absences"><br><sub>Absences</sub></td>
     <td width="25%" align="center" valign="top"><img src="docs/screenshots/contrast.png" width="180" alt="High contrast"><br><sub>High contrast*</sub></td>
     <td width="25%" align="center" valign="top"><img src="docs/screenshots/week-dark.png" width="180" alt="Dark mode"><br><sub>Dark mode</sub></td>
     <td width="25%" align="center" valign="top"><img src="docs/screenshots/settings.png" width="180" alt="Settings"><br><sub>Colors &amp; text</sub></td>
-    <td width="25%" valign="top"></td>
   </tr>
 </table>
 

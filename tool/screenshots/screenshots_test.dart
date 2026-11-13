@@ -205,6 +205,16 @@ void main() {
   );
 
   testWidgets(
+    'absences',
+    (t) => shoot(
+      t,
+      'absences',
+      const InfoCenterScreen(),
+      before: (t) => t.tap(find.text('Absences').first),
+    ),
+  );
+
+  testWidgets(
     'high contrast',
     (t) => shoot(
       t,
