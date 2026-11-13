@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
+import '../common/search_field.dart';
 
 /// Search + tabs over master data; tapping opens that element's timetable.
 class ElementPickerScreen extends ConsumerStatefulWidget {
@@ -30,14 +31,15 @@ class _ElementPickerScreenState extends ConsumerState<ElementPickerScreen> {
       length: _tabs.length,
       child: Scaffold(
         appBar: AppBar(
-          title: TextField(
-            autofocus: false,
-            decoration: const InputDecoration(
-              hintText: 'Search timetables',
-              border: InputBorder.none,
-              prefixIcon: Icon(Icons.search),
+          titleSpacing: 0,
+          title: Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: AppSearchField(
+              fieldKey: const ValueKey('browse-search'),
+              hintText: 'Search classes, teachers, rooms',
+              onChanged: (v) =>
+                  setState(() => _query = v.trim().toLowerCase()),
             ),
-            onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
           ),
           bottom: TabBar(
             isScrollable: true,

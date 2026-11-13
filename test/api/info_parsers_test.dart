@@ -220,6 +220,34 @@ void main() {
     expect(o.registrationPossible, isTrue);
     expect(o.registered, isFalse);
     expect(o.end, DateTime(2026, 11, 11, 10, 45));
+    expect(o.teacherId, 0);
+  });
+
+  test('office hours: teacher id in its various shapes', () {
+    Map<String, Object?> e(Map<String, Object?> extra) => {
+      'startDateTime': '2026-11-11T10:00',
+      'endDateTime': '2026-11-11T10:45',
+      ...extra,
+    };
+    final items = parseOfficeHourItems([
+      e({'teacherId': 12, 'displayNameTeacher': 'Huber'}),
+      e({'teacherId': '13', 'displayNameTeacher': 'Huber'}),
+      e({
+        'teacher': {'id': 14, 'lastName': 'Huber'},
+      }),
+      e({
+        'teacherIds': [15],
+        'displayNameTeacher': 'Huber',
+      }),
+      e({
+        'teachers': [
+          {'id': 16, 'name': 'Huber'},
+        ],
+      }),
+      e({'teacherId': 'x', 'teacher': 'Huber'}),
+    ]);
+    expect(items.map((o) => o.teacherId), [12, 13, 14, 15, 16, 0]);
+    expect(items.map((o) => o.teacherName).toSet(), {'Huber'});
   });
 
   group('inbox', () {

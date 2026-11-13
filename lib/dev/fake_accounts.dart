@@ -850,6 +850,9 @@ class FakeUntisApi implements FullUntisApi {
       at(1, 0, 10, 'Anna Müller', 'R101', 'a.mueller@example.invalid'),
       at(2, 2, 11, 'Jonas Schmidt', 'R204', 'j.schmidt@example.invalid'),
       at(3, 3, 13, 'Lea Weber', 'Lehrerzimmer', ''),
+      // Two teachers sent with only their last name.
+      at(4, 1, 9, 'Huber', 'R110', ''),
+      at(5, 4, 12, 'Huber', 'R215', ''),
     ];
   }
 

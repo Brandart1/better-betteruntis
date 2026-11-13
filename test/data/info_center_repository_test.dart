@@ -5,6 +5,7 @@ import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/data/account_repository_impl.dart';
 import 'package:better_betteruntis/data/db/database.dart';
 import 'package:better_betteruntis/data/info_center_repository_impl.dart';
+import 'package:better_betteruntis/data/info_codec.dart';
 import 'package:better_betteruntis/data/master_data_store.dart';
 import 'package:better_betteruntis/data/period_codec.dart';
 import 'package:better_betteruntis/data/secret_store.dart';
@@ -203,6 +204,22 @@ void main() {
       registered: true,
     ),
   ];
+
+  test('office hour cache keeps the teacher id', () {
+    final json = officeHoursCodec.encode([
+      OfficeHourItem(
+        id: 1,
+        start: DateTime(2026, 11, 11, 10),
+        end: DateTime(2026, 11, 11, 10, 45),
+        teacherName: 'Huber',
+        teacherId: 42,
+      ),
+    ]);
+    expect(officeHoursCodec.decode(json)!.single.teacherId, 42);
+    // Caches written before the field existed.
+    final old = officeHoursCodec.decode(json.replaceAll(',"teacherId":42', ''));
+    expect(old!.single.teacherId, 0);
+  });
 
   test('office hours default to all teachers (-1)', () async {
     whenOfficeHours().thenAnswer((_) async => oneOfficeHour);

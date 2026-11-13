@@ -137,7 +137,12 @@ class Homework {
 }
 
 class Exam {
-  const Exam({required this.id, this.type = '', this.name = '', this.text = ''});
+  const Exam({
+    required this.id,
+    this.type = '',
+    this.name = '',
+    this.text = '',
+  });
   final int id;
   final String type;
   final String name;
@@ -220,11 +225,16 @@ class TimeUnit {
 
 /// School time grid. [days] maps DateTime.weekday (1 = Mon) to its units.
 class TimeGrid {
-  const TimeGrid(this.days);
+  const TimeGrid(this.days) : isFallback = false;
+  const TimeGrid._fallback(this.days) : isFallback = true;
   final Map<int, List<TimeUnit>> days;
 
+  /// True for [TimeGrid.fallback]: its units are made up, so their labels
+  /// are not the school's lesson numbers.
+  final bool isFallback;
+
   /// Fallback when the school sends none: Mon–Fri, hourly 06:00–22:00.
-  factory TimeGrid.fallback() => TimeGrid({
+  factory TimeGrid.fallback() => TimeGrid._fallback({
     for (var d = 1; d <= 5; d++)
       d: [
         for (var h = 6; h < 22; h++)

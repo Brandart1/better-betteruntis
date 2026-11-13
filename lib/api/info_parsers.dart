@@ -195,6 +195,9 @@ List<RawAbsence> parseRawAbsences(Object? raw) {
 ///   `endTime` (hhmm int, "1345", "13:45" or "T13:45");
 /// * the teacher as `displayNameTeacher`/`teacherName`/`teacher` (string or
 ///   `{displayName|longName|name}`);
+/// * the teacher's id as `teacherId`/`teacherID`/`teacherElementId`/
+///   `teacherIds[0]` (int or numeric string) or `id` inside a `teacher` map
+///   (or the first map of a `teacher`/`teachers` list); 0 when absent;
 /// * rooms as `displayNameRooms`/`rooms`/`roomName` (string, list of strings
 ///   or list of `{displayName|name}`).
 List<OfficeHourItem> parseOfficeHourItems(Object? raw) {
@@ -230,8 +233,10 @@ List<OfficeHourItem> parseOfficeHourItems(Object? raw) {
               'teacherName',
               'teacher',
               'teacherLongName',
+              'teachers',
             ]) ??
             '',
+        teacherId: _ohTeacherId(o),
         rooms: _ohName(o, const [
               'displayNameRooms',
               'rooms',
@@ -279,6 +284,23 @@ DateTime? _ohAt(DateTime? day, Object? time) {
 
 /// A name from a string, a `{displayName|longName|name}` map, or a list of
 /// either (joined with ", "). First of [keys] that yields one wins.
+/// The teacher's id (see [parseOfficeHourItems]), 0 when there is none.
+int _ohTeacherId(Map<String, Object?> o) {
+  for (final k in const ['teacherId', 'teacherID', 'teacherElementId']) {
+    final id = _intOrNull(o[k]);
+    if (id != null && id > 0) return id;
+  }
+  for (final k in const ['teacherIds', 'teacher', 'teachers']) {
+    var v = o[k];
+    if (v is List) v = v.isEmpty ? null : v.first;
+    final id = v is Map
+        ? _intOrNull(_map(v)['id'])
+        : (k == 'teacherIds' ? _intOrNull(v) : null);
+    if (id != null && id > 0) return id;
+  }
+  return 0;
+}
+
 String? _ohName(Map<String, Object?> o, List<String> keys) {
   String? one(Object? v) {
     if (v is Map) {

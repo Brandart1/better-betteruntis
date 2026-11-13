@@ -80,6 +80,11 @@ class AppDrawer extends StatelessWidget {
           title: const Text('Settings'),
           onTap: () => go('/settings'),
         ),
+        ListTile(
+          leading: const Icon(Icons.accessibility_new),
+          title: const Text('Accessibility'),
+          onTap: () => go('/accessibility'),
+        ),
         if (debugToolsEnabled) ...[
           const Divider(indent: 28, endIndent: 28),
           ListTile(

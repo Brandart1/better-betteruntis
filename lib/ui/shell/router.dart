@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/build_channel.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
+import '../accessibility/accessibility_screen.dart';
 import '../accounts/manage_accounts_screen.dart';
 import '../classreg/open_lessons_screen.dart';
 import '../infocenter/info_center_screen.dart';
@@ -28,6 +29,7 @@ import 'element_picker_screen.dart';
 ///   /login, /login/add, /login/form (extra: School?), /login/qr,
 ///   /login/idaustria       how to log in when the school uses ID Austria
 ///   /accounts              manage accounts
+///   /accessibility         high contrast, day view, read aloud (no login needed)
 ///   /settings              timetable look (colors, text, cancelled)
 ///   /debug                 raw API responses
 final routerProvider = Provider<GoRouter>((ref) {
@@ -47,7 +49,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (has == null) return null;
       final loc = state.matchedLocation;
       final inLogin = loc.startsWith('/login');
-      if (!has && !inLogin) return '/login';
+      // Accessibility options are reachable before the first login.
+      if (!has && !inLogin && loc != '/accessibility') return '/login';
       if (has && loc == '/login') return '/';
       return null;
     },
@@ -64,6 +67,10 @@ final routerProvider = Provider<GoRouter>((ref) {
             int.tryParse(s.pathParameters['id'] ?? '') ?? 0,
           ),
         ),
+      ),
+      GoRoute(
+        path: '/accessibility',
+        builder: (_, _) => const AccessibilityScreen(),
       ),
       GoRoute(path: '/browse', builder: (_, _) => const ElementPickerScreen()),
       GoRoute(

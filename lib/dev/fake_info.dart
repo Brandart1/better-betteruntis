@@ -531,4 +531,19 @@ List<OfficeHourItem> demoOfficeHours(DateTime today) => [
     teacherName: 'Jonas Fischer',
     rooms: 'PH1',
   ),
+  // Two different teachers the school sends with only their last name.
+  OfficeHourItem(
+    id: 5,
+    start: _at(_d(today, 3), 8, 50),
+    end: _at(_d(today, 3), 9, 35),
+    teacherName: 'Huber',
+    rooms: 'R110',
+  ),
+  OfficeHourItem(
+    id: 6,
+    start: _at(_d(today, 4), 10, 30),
+    end: _at(_d(today, 4), 11, 15),
+    teacherName: 'Huber',
+    rooms: 'R215',
+  ),
 ];
