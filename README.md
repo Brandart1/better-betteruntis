@@ -24,6 +24,25 @@ timetables**.
 > [open an issue](https://github.com/Brandart1/better-betteruntis/issues) when
 > something looks wrong at your school.
 
+## 📸 Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/week.png" width="200" alt="Week view"><br><sub>Week with substitutions, exams, cancelled lessons</sub></td>
+    <td align="center"><img src="docs/screenshots/lesson.png" width="200" alt="Lesson details"><br><sub>Lesson details</sub></td>
+    <td align="center"><img src="docs/screenshots/day.png" width="200" alt="Day view"><br><sub>Day view with read-aloud button</sub></td>
+    <td align="center"><img src="docs/screenshots/info.png" width="200" alt="Info center"><br><sub>Info center: homework</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/contrast.png" width="200" alt="High contrast"><br><sub>High contrast mode<br><i>(accessibility features are a work in progress)</i></sub></td>
+    <td align="center"><img src="docs/screenshots/week-dark.png" width="200" alt="Dark mode"><br><sub>Dark mode</sub></td>
+    <td align="center"><img src="docs/screenshots/settings.png" width="200" alt="Settings"><br><sub>Colors and text settings</sub></td>
+    <td></td>
+  </tr>
+</table>
+
+<sub>Demo data — made-up school and names. Regenerate with `tool/screenshots/update.sh`.</sub>
+
 ## ✨ Features
 
 **Timetable**
