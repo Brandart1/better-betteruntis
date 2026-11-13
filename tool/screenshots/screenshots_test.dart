@@ -125,8 +125,8 @@ class _DarkHalf extends CustomClipper<Path> {
 }
 
 /// The store-style image: [title] above a phone showing [light] with the
-/// right part replaced by [dark].
-Widget _frame(String title, ui.Image light, ui.Image dark) {
+/// right part replaced by [dark] (if given).
+Widget _frame(String title, ui.Image light, ui.Image? dark) {
   const titleHeight = 400.0;
   const width = 756.0; // 70 % of the image
   final height = width * _phone.height / _phone.width;
@@ -193,10 +193,11 @@ Widget _frame(String title, ui.Image light, ui.Image dark) {
                 child: Stack(
                   children: [
                     shot(light),
-                    ClipPath(
-                      clipper: _DarkHalf(_out.height - titleHeight),
-                      child: shot(dark),
-                    ),
+                    if (dark != null)
+                      ClipPath(
+                        clipper: _DarkHalf(_out.height - titleHeight),
+                        child: shot(dark),
+                      ),
                   ],
                 ),
               ),
@@ -281,6 +282,7 @@ void main() {
     Widget home, {
     AccessibilitySettings Function(Brightness b) a11y = _noA11y,
     Future<void> Function(WidgetTester t)? before,
+    bool split = true,
   }) async {
     addTearDown(t.view.reset);
     final light = await render(
@@ -290,13 +292,9 @@ void main() {
       a11y(Brightness.light),
       before,
     );
-    final dark = await render(
-      t,
-      home,
-      Brightness.dark,
-      a11y(Brightness.dark),
-      before,
-    );
+    final dark = split
+        ? await render(t, home, Brightness.dark, a11y(Brightness.dark), before)
+        : null;
     t.view.physicalSize = _out;
     t.view.devicePixelRatio = 1;
     await t.pumpWidget(const SizedBox());
@@ -306,7 +304,7 @@ void main() {
       matchesGoldenFile('../../docs/screenshots/$name.png'),
     );
     light.dispose();
-    dark.dispose();
+    dark?.dispose();
   }
 
   testWidgets(
@@ -335,6 +333,7 @@ void main() {
         );
         await t.tap(cards.at(i));
       },
+      split: false,
     ),
   );
 
@@ -361,6 +360,7 @@ void main() {
       'Homework with\ndue dates and files',
       const InfoCenterScreen(),
       before: (t) => t.tap(find.text('Homework').first),
+      split: false,
     ),
   );
 
@@ -372,6 +372,7 @@ void main() {
       'All absences,\nexcused or not',
       const InfoCenterScreen(),
       before: (t) => t.tap(find.text('Absences').first),
+      split: false,
     ),
   );
 
@@ -396,6 +397,7 @@ void main() {
       'Every exam\nin one place',
       const InfoCenterScreen(),
       before: (t) => t.tap(find.text('Exams').first),
+      split: false,
     ),
   );
 
