@@ -37,7 +37,7 @@ timetables**.
   <img src="docs/screenshots/exams.png" width="24%" alt="Info center: exams">
 </p>
 
-<sub>Top row: light mode left, dark mode right. Accessibility features are a work in progress. Demo data — made-up school and names. Regenerate with `tool/screenshots/update.sh`.</sub>
+<sub>Top row: light mode left, dark mode right. Demo data — made-up school and names. Regenerate with `tool/screenshots/update.sh`.</sub>
 
 ## ✨ Features
 
