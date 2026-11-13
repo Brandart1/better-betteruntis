@@ -28,20 +28,20 @@ timetables**.
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/week.png" width="200" alt="Week view"><br><sub>Week with substitutions, exams, cancelled lessons</sub></td>
-    <td align="center"><img src="docs/screenshots/lesson.png" width="200" alt="Lesson details"><br><sub>Lesson details</sub></td>
-    <td align="center"><img src="docs/screenshots/day.png" width="200" alt="Day view"><br><sub>Day view with read-aloud button</sub></td>
-    <td align="center"><img src="docs/screenshots/info.png" width="200" alt="Info center"><br><sub>Info center: homework</sub></td>
+    <td width="25%" align="center" valign="top"><img src="docs/screenshots/week.png" width="180" alt="Week view"><br><sub>Week view</sub></td>
+    <td width="25%" align="center" valign="top"><img src="docs/screenshots/lesson.png" width="180" alt="Lesson details"><br><sub>Lesson details</sub></td>
+    <td width="25%" align="center" valign="top"><img src="docs/screenshots/day.png" width="180" alt="Day view"><br><sub>Day view, read aloud</sub></td>
+    <td width="25%" align="center" valign="top"><img src="docs/screenshots/info.png" width="180" alt="Info center"><br><sub>Homework</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/contrast.png" width="200" alt="High contrast"><br><sub>High contrast mode<br><i>(accessibility features are a work in progress)</i></sub></td>
-    <td align="center"><img src="docs/screenshots/week-dark.png" width="200" alt="Dark mode"><br><sub>Dark mode</sub></td>
-    <td align="center"><img src="docs/screenshots/settings.png" width="200" alt="Settings"><br><sub>Colors and text settings</sub></td>
-    <td></td>
+    <td width="25%" align="center" valign="top"><img src="docs/screenshots/contrast.png" width="180" alt="High contrast"><br><sub>High contrast*</sub></td>
+    <td width="25%" align="center" valign="top"><img src="docs/screenshots/week-dark.png" width="180" alt="Dark mode"><br><sub>Dark mode</sub></td>
+    <td width="25%" align="center" valign="top"><img src="docs/screenshots/settings.png" width="180" alt="Settings"><br><sub>Colors &amp; text</sub></td>
+    <td width="25%" valign="top"></td>
   </tr>
 </table>
 
-<sub>Demo data — made-up school and names. Regenerate with `tool/screenshots/update.sh`.</sub>
+<sub>Week view shows substitutions, exams and cancelled lessons. *Accessibility features are a work in progress. Demo data — made-up school and names. Regenerate with `tool/screenshots/update.sh`.</sub>
 
 ## ✨ Features
 
