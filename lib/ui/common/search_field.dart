@@ -62,9 +62,18 @@ class _AppSearchFieldState extends State<AppSearchField> {
         fillColor: cs.surfaceContainerHighest,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(vertical: 12),
+        // High contrast: the fill equals the background, so draw an edge.
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(28),
-          borderSide: BorderSide.none,
+          borderSide: cs.surfaceContainerHighest == cs.surface
+              ? BorderSide(color: cs.onSurface)
+              : BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(28),
+          borderSide: cs.surfaceContainerHighest == cs.surface
+              ? BorderSide(color: cs.onSurface)
+              : BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(28),

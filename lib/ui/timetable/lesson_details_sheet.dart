@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/accessibility.dart';
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/settings.dart';
@@ -122,7 +123,13 @@ class LessonDetailsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final settings = ref.watch(timetableSettingsProvider);
-    final accent = LessonStyle.of(theme.colorScheme, block, settings, names);
+    final accent = LessonStyle.of(
+      theme.colorScheme,
+      block,
+      settings,
+      names,
+      ref.watch(accessibilityProvider.select((a) => a.highContrast)),
+    );
     final p = block.first;
     final subjects = p.ofType(ElementType.subject).toList();
     final title = subjects.isNotEmpty

@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/accessibility.dart';
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/settings.dart';
 import '../export/export_sheet.dart';
+import 'day_speech.dart';
 import 'day_timeline.dart';
 import 'lesson_details_sheet.dart';
 import 'lesson_layout.dart';
@@ -170,6 +172,72 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     if (picked != null && mounted) _goToDate(picked);
   }
 
+  /// Reads the shown day aloud: the day view's day, else today when it is in
+  /// the shown week, else the week's first school day.
+  Future<void> _speakDay(
+    Account account,
+    TimetableTarget target,
+    DateTime weekStart,
+  ) async {
+    final speaker = ref.read(speakerProvider);
+    if (speaker.speaking.value) {
+      await speaker.stop();
+      return;
+    }
+    final names = ref.read(nameResolverProvider).value;
+    if (names == null) return;
+    final today = dateOnly(DateTime.now());
+    final weekdays = visibleWeekdays(names.timeGrid, const []);
+    final date =
+        _day ??
+        (mondayOf(today) == weekStart
+            ? today
+            : addDays(weekStart, weekdays.first - 1));
+    final List<Period> periods;
+    try {
+      periods = await ref.read(
+        weekPeriodsProvider(WeekRequest(account, target, mondayOf(date)))
+            .future,
+      );
+    } catch (_) {
+      return;
+    }
+    final a11y = ref.read(accessibilityProvider);
+    final lang = a11y.speechLanguage.resolve(
+      WidgetsBinding.instance.platformDispatcher.locale.languageCode,
+    );
+    await speaker.speak(
+      daySpeech(
+        date: date,
+        periods: periods,
+        names: names,
+        language: lang,
+        showCancelled: ref.read(timetableSettingsProvider).showCancelled,
+      ),
+      lang,
+    );
+  }
+
+  bool _defaultDayChecked = false;
+
+  /// Accessibility "day view by default": once the time grid is known, jump
+  /// (without animation) to today's day view, or the next school day.
+  void _maybeOpenDefaultDay(NameResolver? names, List<int> weekdays) {
+    if (_defaultDayChecked || names == null) return;
+    _defaultDayChecked = true;
+    if (!ref.read(accessibilityProvider).dayViewByDefault) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _day != null) return;
+      var d = dateOnly(DateTime.now());
+      for (var i = 0; i < 7 && !weekdays.contains(d.weekday); i++) {
+        d = addDays(d, 1);
+      }
+      _enterDay(d, weekdays);
+      _zoom.value = 1;
+      setState(() => _page = kPagerOrigin + weekOffset(_origin, d));
+    });
+  }
+
   void _openElement(TimetableTarget t) =>
       (widget.onOpenElement ?? defaultOpenElement)(context, t);
 
@@ -226,6 +294,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
       names?.timeGrid ?? TimeGrid.fallback(),
       const [],
     );
+    _maybeOpenDefaultDay(names, weekdays);
     final ws = _weekStart(_page);
     final element = widget.target == null
         ? null
@@ -415,6 +484,8 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
               ],
             ),
             actions: [
+              if (ref.watch(accessibilityProvider.select((a) => a.speakButton)))
+                _SpeakButton(onSpeak: () => _speakDay(account, target, ws)),
               IconButton(
                 tooltip: 'Today',
                 onPressed: atToday ? null : () => _goToDate(DateTime.now()),
@@ -533,6 +604,26 @@ class NoPersonalTimetable extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Loudspeaker in the app bar; shows "stop" while reading.
+class _SpeakButton extends ConsumerWidget {
+  const _SpeakButton({required this.onSpeak});
+  final VoidCallback onSpeak;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final speaker = ref.watch(speakerProvider);
+    return ValueListenableBuilder<bool>(
+      valueListenable: speaker.speaking,
+      builder: (context, speaking, _) => IconButton(
+        key: const ValueKey('speak-day'),
+        tooltip: speaking ? 'Stop reading' : 'Read this day aloud',
+        onPressed: onSpeak,
+        icon: Icon(speaking ? Icons.stop_circle_outlined : Icons.volume_up),
       ),
     );
   }

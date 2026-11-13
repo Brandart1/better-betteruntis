@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/accessibility.dart';
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/settings.dart';
@@ -34,7 +35,10 @@ class LessonCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(timetableSettingsProvider);
     final cs = Theme.of(context).colorScheme;
-    final style = LessonStyle.of(cs, block, settings, names);
+    final highContrast = ref.watch(
+      accessibilityProvider.select((a) => a.highContrast),
+    );
+    final style = LessonStyle.of(cs, block, settings, names, highContrast);
     final radius = BorderRadius.circular(detailed ? 10 : 6);
     final fg = style.foreground;
     final centered = settings.centerText;

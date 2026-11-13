@@ -57,6 +57,7 @@ class DayTimeline extends StatelessWidget {
                 date: date,
                 isToday: sameDay(date, DateTime.now()),
                 onTap: onHeaderTap,
+                wide: true,
               ),
             ),
           ],

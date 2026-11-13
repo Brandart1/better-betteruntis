@@ -84,16 +84,32 @@ class LessonStyle {
 
   /// [names] resolves the subject for custom subject colors; without it only
   /// inline subject names are matched.
+  ///
+  /// [highContrast]: monochrome cards (background and text from [cs], always
+  /// outlined); exams and substitutions get a thicker border, cancelled
+  /// lessons keep their hatching and strike-through.
   factory LessonStyle.of(
     ColorScheme cs,
     LessonBlock block, [
     TimetableSettings settings = const TimetableSettings(),
     NameResolver? names,
+    bool highContrast = false,
   ]) {
     final p = block.first;
     final cancelled = block.isCancelled;
     final exam = !cancelled && block.isExam;
     final irregular = !cancelled && !exam && block.isIrregular;
+
+    if (highContrast) {
+      return LessonStyle(
+        background: cs.surface,
+        foreground: cs.onSurface,
+        border: cs.onSurface,
+        borderWidth: exam || irregular ? 4 : 1.5,
+        cancelled: cancelled,
+        exam: exam,
+      );
+    }
 
     // State color as a border around the normal lesson color.
     LessonStyle bordered(Color border) {

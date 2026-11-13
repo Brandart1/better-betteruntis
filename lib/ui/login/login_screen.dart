@@ -168,41 +168,58 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             )
           : null,
       body: SafeArea(
-        child: CenteredContent(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (_demoBusy) const LinearProgressIndicator(),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                alignment: Alignment.topCenter,
-                child: searching
-                    ? const SizedBox(width: double.infinity, height: 16)
-                    : _WelcomeHeader(addingAccount: widget.addingAccount),
-              ),
-              _SearchField(
-                controller: _controller,
-                focusNode: _focus,
-                onChanged: _onChanged,
-                onClear: _clear,
-                onSubmitted: (q) {
-                  _debounce?.cancel();
-                  if (q.trim().length >= 2) _search(q.trim());
-                },
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  child: KeyedSubtree(
-                    key: ValueKey(_status),
-                    child: _buildBody(context),
+        child: Stack(
+          children: [
+            CenteredContent(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (_demoBusy) const LinearProgressIndicator(),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topCenter,
+                    child: searching
+                        ? const SizedBox(width: double.infinity, height: 16)
+                        : _WelcomeHeader(addingAccount: widget.addingAccount),
                   ),
+                  _SearchField(
+                    controller: _controller,
+                    focusNode: _focus,
+                    onChanged: _onChanged,
+                    onClear: _clear,
+                    onSubmitted: (q) {
+                      _debounce?.cancel();
+                      if (q.trim().length >= 2) _search(q.trim());
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      child: KeyedSubtree(
+                        key: ValueKey(_status),
+                        child: _buildBody(context),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Top-right, taking no space, so small screens still fit
+            // everything; reachable before the first login.
+            if (!widget.addingAccount)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: IconButton(
+                  key: const ValueKey('login-accessibility'),
+                  tooltip: 'Accessibility',
+                  onPressed: () => context.push('/accessibility'),
+                  icon: const Icon(Icons.accessibility_new),
                 ),
               ),
-            ],
-          ),
+          ],
         ),
       ),
     );
