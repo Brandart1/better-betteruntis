@@ -14,6 +14,7 @@ class DeviceCalendarInfo {
     this.color,
     this.account,
     this.primary = false,
+    this.hidden = false,
   });
 
   final String id;
@@ -25,6 +26,10 @@ class DeviceCalendarInfo {
   /// e.g. "me@gmail.com" / "iCloud".
   final String? account;
   final bool primary;
+
+  /// Not shown / not synced in the calendar app (Android VISIBLE = 0). Still
+  /// writable, but its events only appear once it is turned on there.
+  final bool hidden;
 }
 
 /// One timed event as the sync writes it.
@@ -146,17 +151,26 @@ class PluginDeviceCalendar implements DeviceCalendarApi {
   @override
   Future<List<DeviceCalendarInfo>> calendars() async {
     final all = await _p.listCalendars();
-    return [
+    final out = [
       for (final c in all)
-        if (!c.readOnly && !c.hidden)
+        if (!c.readOnly)
           DeviceCalendarInfo(
             id: c.id,
             name: c.name,
             color: _argb(c.colorHex),
             account: c.accountName,
             primary: c.isPrimary,
+            hidden: c.hidden,
           ),
     ];
+    // Per account: the main calendar first, then the others by name.
+    out.sort((a, b) {
+      final byAccount = (a.account ?? '').compareTo(b.account ?? '');
+      if (byAccount != 0) return byAccount;
+      if (a.primary != b.primary) return a.primary ? -1 : 1;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+    return out;
   }
 
   @override

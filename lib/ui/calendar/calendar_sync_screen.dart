@@ -367,6 +367,7 @@ class _StateRow extends StatelessWidget {
               [
                 c.name,
                 if (c.account != null && c.account != c.name) '(${c.account})',
+                if (c.hidden) '· turned off in calendar app',
               ].join(' '),
             ),
           item(const SkipCalendar(), null, "Don't add"),
