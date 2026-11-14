@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
@@ -8,6 +9,7 @@ import '../../core/providers.dart';
 import '../../core/settings.dart';
 import '../../export/csv_export.dart';
 import '../../export/export_model.dart';
+import '../calendar/calendar_sync_screen.dart';
 import 'export_service.dart';
 
 /// Display name of the exported element: classes and rooms by short name,
@@ -108,6 +110,23 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
     final box = _buttonKey.currentContext?.findRenderObject();
     if (box is! RenderBox || !box.hasSize) return null;
     return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  /// Calendar sync setup for this timetable (always the real weeks, so
+  /// substitutions and cancellations can be kept up to date).
+  void _addToCalendar(NameResolver names) {
+    final router = GoRouter.of(context);
+    Navigator.of(context).pop();
+    router.push(
+      '/calendar/setup',
+      extra: CalendarSetupArgs(
+        accountId: widget.account.id,
+        target: widget.target,
+        elementName:
+            widget.elementName ??
+            exportElementName(names, widget.account, widget.target),
+      ),
+    );
   }
 
   Future<void> _export(NameResolver names) async {
@@ -342,7 +361,20 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
                 ),
               ),
             const SizedBox(height: 16),
-            FilledButton.icon(
+            if (_format == ExportFormat.ics && !kIsWeb) ...[
+              FilledButton.icon(
+                key: const ValueKey('export-add-to-calendar'),
+                onPressed: _busy || names == null
+                    ? null
+                    : () => _addToCalendar(names),
+                icon: const Icon(Icons.event_available),
+                label: const Text('Add to calendar'),
+              ),
+              const SizedBox(height: 8),
+            ],
+            (_format == ExportFormat.ics && !kIsWeb
+                ? OutlinedButton.icon
+                : FilledButton.icon)(
               key: _buttonKey,
               onPressed: _busy || names == null ? null : () => _export(names),
               icon: _busy
@@ -351,7 +383,13 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.ios_share),
-              label: Text(_busy ? (_progress ?? 'Exporting…') : 'Export'),
+              label: Text(
+                _busy
+                    ? (_progress ?? 'Exporting…')
+                    : _format == ExportFormat.ics
+                    ? 'Download .ics'
+                    : 'Export',
+              ),
             ),
           ],
         ),

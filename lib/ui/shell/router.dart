@@ -7,6 +7,8 @@ import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../accessibility/accessibility_screen.dart';
 import '../accounts/manage_accounts_screen.dart';
+import '../calendar/calendar_sync_screen.dart';
+import '../calendar/calendar_syncs_screen.dart';
 import '../infocenter/info_center_screen.dart';
 import '../infocenter/messages_tab.dart';
 import '../login/login_form_screen.dart';
@@ -30,6 +32,8 @@ import 'element_picker_screen.dart';
 ///   /accounts              manage accounts
 ///   /accessibility         high contrast, day view, read aloud (no login needed)
 ///   /settings              timetable look (colors, text, cancelled)
+///   /calendar              calendar syncs; /calendar/setup (extra:
+///                          CalendarSetupArgs) adds or edits one
 ///   /debug                 raw API responses
 final routerProvider = Provider<GoRouter>((ref) {
   // null = still loading, otherwise whether any account exists.
@@ -101,6 +105,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/accounts',
         builder: (_, _) => const ManageAccountsScreen(),
+      ),
+      GoRoute(
+        path: '/calendar',
+        builder: (_, _) => const CalendarSyncsScreen(),
+      ),
+      GoRoute(
+        path: '/calendar/setup',
+        builder: (_, s) =>
+            CalendarSyncScreen(args: s.extra! as CalendarSetupArgs),
       ),
       GoRoute(
         path: '/settings',

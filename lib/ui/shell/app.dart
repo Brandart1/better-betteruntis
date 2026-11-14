@@ -1,3 +1,5 @@
+import '../../calendar/calendar_sync_service.dart' show kAppSeedColor;
+import '../calendar/calendar_auto_sync.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,7 +8,7 @@ import '../../core/accessibility.dart';
 import 'router.dart';
 import 'update_check.dart';
 
-const _seed = Color(0xFF3F6FD8);
+const _seed = kAppSeedColor;
 
 /// Pure black/white scheme for high-contrast mode: every foreground role is
 /// [fg], every background role [bg].
@@ -123,7 +125,7 @@ class BetterUntisApp extends ConsumerWidget {
             colorFilter: contrast == ContrastMode.off ? _identity : _grayscale,
             child: UpdateChecker(
               navigatorKey: router.routerDelegate.navigatorKey,
-              child: child ?? const SizedBox.shrink(),
+              child: CalendarAutoSync(child: child ?? const SizedBox.shrink()),
             ),
           ),
         );

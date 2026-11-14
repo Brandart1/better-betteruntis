@@ -73,6 +73,7 @@ timetables**.
 
 **Export**
 - Export any timetable as **CSV**, **XLSX**, **PDF** (using your colours and text settings) or as a **calendar file (.ics)**
+- **Add to calendar:** keep a timetable in your phone's calendar, with separate coloured calendars for lessons, substitutions, exams and cancellations, updated when you open the app
 - Pick a specific week, or the *regular* timetable derived from the last few weeks
 
 **Web version**

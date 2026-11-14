@@ -60,13 +60,14 @@ String _slug(String v) => v
     .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
     .replaceAll(RegExp(r'^-+|-+$'), '');
 
-/// Event title: subject (long name if known), for teacher/room timetables
-/// with the classes, prefixed for cancelled lessons and exams.
-String icsSummary(ExportTimetable t, ExportLesson l) {
+/// Event title: subject (long name if known), with the classes when
+/// [showClasses] (teacher/room timetables), prefixed for cancelled lessons
+/// and exams.
+String lessonEventTitle(ExportLesson l, {bool showClasses = false}) {
   var s = l.subjectLong.isNotEmpty
       ? l.subjectLong
       : (l.subject.isNotEmpty ? l.subject : 'Lesson');
-  if (t.showClasses && l.classes.isNotEmpty) s += ' – ${l.classes.join(', ')}';
+  if (showClasses && l.classes.isNotEmpty) s += ' – ${l.classes.join(', ')}';
   return switch (l.status) {
     LessonStatus.cancelled => 'Cancelled: $s',
     LessonStatus.exam => 'Exam: $s',
@@ -74,7 +75,11 @@ String icsSummary(ExportTimetable t, ExportLesson l) {
   };
 }
 
-String _description(ExportTimetable t, ExportLesson l) => [
+String icsSummary(ExportTimetable t, ExportLesson l) =>
+    lessonEventTitle(l, showClasses: t.showClasses);
+
+/// Event details: lesson numbers, teachers, classes, substitution, notes.
+String lessonEventDescription(ExportLesson l) => [
   if (l.lessonNumbers.isNotEmpty) 'Lesson ${l.lessonNumbers}',
   if (l.subject.isNotEmpty && l.subject != l.subjectLong)
     'Subject: ${l.subject}',
@@ -118,7 +123,7 @@ String icsString(ExportTimetable t) {
     if (l.rooms.isNotEmpty) {
       lines.add('LOCATION:${icsText(l.rooms.join(', '))}');
     }
-    final desc = _description(t, l);
+    final desc = lessonEventDescription(l);
     if (desc.isNotEmpty) lines.add('DESCRIPTION:${icsText(desc)}');
     if (l.status == LessonStatus.cancelled) lines.add('STATUS:CANCELLED');
     if (t.regular) {

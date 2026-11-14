@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -53,6 +54,12 @@ class AppDrawer extends StatelessWidget {
           subtitle: const Text('Classes, teachers, rooms'),
           onTap: () => go('/browse'),
         ),
+        if (!kIsWeb)
+          ListTile(
+            leading: const Icon(Icons.event_repeat),
+            title: const Text('Calendar sync'),
+            onTap: () => go('/calendar'),
+          ),
         ListTile(
           leading: const Icon(Icons.manage_accounts_outlined),
           title: const Text('Manage accounts'),
