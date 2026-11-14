@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../calendar/calendar_sync.dart';
 import '../../calendar/calendar_sync_service.dart';
@@ -28,10 +29,9 @@ bool get _android => defaultTargetPlatform == TargetPlatform.android;
 
 /// Where new calendars end up and how to make them visible.
 String get newCalendarHint => _android
-    ? 'New calendars are kept on this phone (account '
-          '"$kCalendarAccountName") and are not synced to your Google account. '
-          'In Google Calendar, open the menu and turn them on under '
-          '"$kCalendarAccountName" if they are not shown.'
+    ? 'A new calendar only exists on this phone (account '
+          '"$kCalendarAccountName"). In Google Calendar, open the menu and '
+          'turn it on under "$kCalendarAccountName" if it is not shown.'
     : 'New calendars are created in iCloud, or on this device without '
           'iCloud.';
 
@@ -59,7 +59,27 @@ class _CalendarSyncScreenState extends ConsumerState<CalendarSyncScreen> {
   late final CalendarSync? _existing = ref
       .read(calendarSyncsProvider.notifier)
       .forTarget(widget.args.accountId, widget.args.target);
-  late final Future<List<DeviceCalendarInfo>> _calendars = _loadCalendars();
+  late Future<List<DeviceCalendarInfo>> _calendars = _loadCalendars();
+
+  /// Back from creating a calendar on the web: list it.
+  late final _lifecycle = AppLifecycleListener(
+    onResume: () {
+      if (mounted) setState(() => _calendars = _loadCalendars());
+    },
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycle;
+  }
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
   late final Map<LessonStatus, CalendarChoice> _choices = {
     for (final s in LessonStatus.values)
       s: _existing == null
@@ -210,6 +230,10 @@ class _CalendarSyncScreenState extends ConsumerState<CalendarSyncScreen> {
                   'are updated whenever you open the app.',
                   style: theme.textTheme.bodyMedium,
                 ),
+                if (_android) ...[
+                  const SizedBox(height: 12),
+                  const GoogleCalendarInfo(),
+                ],
                 const SizedBox(height: 16),
                 for (final s in LessonStatus.values)
                   _StateRow(
@@ -375,6 +399,96 @@ class _StateRow extends StatelessWidget {
         onChanged: (v) {
           if (v != null) onChanged(v);
         },
+      ),
+    );
+  }
+}
+
+/// Google's page for creating a calendar (not possible in the Android app).
+final kGoogleCreateCalendarUrl = Uri.parse(
+  'https://calendar.google.com/calendar/r/settings/createcalendar',
+);
+
+/// Android: how to get calendars that sync with the Google account.
+class GoogleCalendarInfo extends StatelessWidget {
+  const GoogleCalendarInfo({super.key});
+
+  /// A browser tab, not the external handler: the Google Calendar app would
+  /// catch the link and can't create calendars.
+  static Future<void> _openCreatePage() async {
+    try {
+      if (await launchUrl(
+        kGoogleCreateCalendarUrl,
+        mode: LaunchMode.inAppBrowserView,
+      )) {
+        return;
+      }
+    } catch (_) {}
+    await launchUrl(
+      kGoogleCreateCalendarUrl,
+      mode: LaunchMode.externalApplication,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    Widget point(IconData icon, String text) => Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: theme.textTheme.bodySmall)),
+        ],
+      ),
+    );
+    return Card.outlined(
+      key: const ValueKey('google-calendar-info'),
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Sync with your Google account',
+              style: theme.textTheme.titleSmall,
+            ),
+            point(
+              Icons.phone_android,
+              '"New calendar" only creates a calendar on this phone. It is '
+              'not synced to your Google account or other devices.',
+            ),
+            point(
+              Icons.add_circle_outline,
+              'For synced calendars, create them in Google Calendar on the '
+              'web (this is not possible in the Google Calendar app), then '
+              'come back and choose them below.',
+            ),
+            point(
+              Icons.sync,
+              'Make sure sync is on: Google Calendar app → Settings → tap '
+              'the calendar → Sync.',
+            ),
+            point(
+              Icons.palette_outlined,
+              'Set the colours of Google calendars in Google Calendar. The '
+              'app can only colour calendars it created itself.',
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton.icon(
+                key: const ValueKey('google-create-calendar'),
+                onPressed: _openCreatePage,
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('Create calendar on the web'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

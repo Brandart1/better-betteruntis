@@ -11,3 +11,4 @@
 - "Browse timetables": the Classes / Teachers / Rooms tabs are centered again (#2).
 - Add to calendar: new calendars are grouped under "BetterBetterUntis" and checked after creating; the setup screen explains where to turn them on in Google Calendar.
 - Add to calendar: your own calendars inside a Google account (e.g. "Family", "School") are listed too, also when they are turned off in the calendar app; sorted by account.
+- Add to calendar (Android): a note explains that new calendars only exist on the phone, how to create synced calendars in Google Calendar on the web (button), how to turn on sync and that colours of Google calendars are set in Google Calendar. The list refreshes when you come back to the app.
