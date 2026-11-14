@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:better_betteruntis/calendar/calendar_sync_service.dart';
 import 'package:better_betteruntis/calendar/device_calendar.dart';
 import 'package:better_betteruntis/core/models.dart';
@@ -8,6 +10,7 @@ import 'package:better_betteruntis/dev/fake_timetable.dart';
 import 'package:better_betteruntis/ui/calendar/calendar_sync_screen.dart';
 import 'package:better_betteruntis/ui/calendar/calendar_syncs_screen.dart';
 import 'package:better_betteruntis/ui/export/export_sheet.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -128,6 +131,33 @@ void main() {
     );
     expect(api.eventsIn('personal'), isNotEmpty);
   });
+
+  for (final platform in TargetPlatform.values) {
+    testWidgets('Google sync note only on Android ($platform)', (tester) async {
+      debugDefaultTargetPlatformOverride = platform;
+      try {
+        await pump(tester);
+        unawaited(
+          GoRouter.of(tester.element(find.text('open'))).push(
+            '/calendar/setup',
+            extra: const CalendarSetupArgs(
+              accountId: 'a',
+              target: target,
+              elementName: '10a',
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('calendar-save')), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('google-calendar-info')),
+          platform == TargetPlatform.android ? findsOneWidget : findsNothing,
+        );
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  }
 
   testWidgets('no calendar access shows a message', (tester) async {
     await pump(tester);

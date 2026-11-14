@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform;
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -25,7 +25,8 @@ class CalendarSetupArgs {
   final String elementName;
 }
 
-bool get _android => defaultTargetPlatform == TargetPlatform.android;
+/// The Android app only (not the web app in an Android browser).
+bool get _android => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
 /// Where new calendars end up and how to make them visible.
 String get newCalendarHint => _android
