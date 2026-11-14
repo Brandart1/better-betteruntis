@@ -159,6 +159,36 @@ void main() {
     });
   }
 
+  testWidgets('refresh requests a sync and shows the debug report', (
+    tester,
+  ) async {
+    await pump(tester);
+    unawaited(
+      GoRouter.of(tester.element(find.text('open'))).push(
+        '/calendar/setup',
+        extra: const CalendarSetupArgs(
+          accountId: 'a',
+          target: target,
+          elementName: '10a',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final before = api.syncRequests;
+    await tester.tap(find.byKey(const ValueKey('calendar-refresh')));
+    await tester.pumpAndSettle();
+    expect(api.syncRequests, before + 1);
+    final text = tester
+        .widget<SelectableText>(
+          find.byKey(const ValueKey('calendar-debug-text')),
+        )
+        .data!;
+    expect(text, contains('all accounts: requested'));
+    expect(text, contains('"Personal"'));
+    // Let the delayed reload fire.
+    await tester.pump(const Duration(seconds: 7));
+  });
+
   testWidgets('delete calendars on this phone', (tester) async {
     await pump(tester);
     final local = await api.createCalendar('10a – Timetable', 0xFF3F6FD8);

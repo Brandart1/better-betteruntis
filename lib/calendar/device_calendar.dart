@@ -108,8 +108,13 @@ abstract interface class DeviceCalendarApi {
   Future<void> deleteEvent(String eventId);
 
   /// Asks the accounts on the device to sync their calendars now (Android),
-  /// so calendars created elsewhere show up. Best effort.
-  Future<void> requestSync();
+  /// so calendars created elsewhere show up. Best effort; returns a log of
+  /// the requests (empty where not supported).
+  Future<List<String>> requestSync();
+
+  /// Raw state for the debug report (Android): sync settings per account and
+  /// every calendar row with its flags. Empty where not supported.
+  Future<Map<String, Object?>> debugInfo();
 }
 
 /// Account the app's own calendars are created in (Android).
@@ -162,9 +167,10 @@ class PluginDeviceCalendar implements DeviceCalendarApi {
   @override
   Future<List<DeviceCalendarInfo>> calendars() async {
     final all = await _p.listCalendars();
+    final deleted = await _deletedIds();
     final out = [
       for (final c in all)
-        if (!c.readOnly)
+        if (!c.readOnly && !deleted.contains(c.id))
           DeviceCalendarInfo(
             id: c.id,
             name: c.name,
@@ -262,7 +268,37 @@ class PluginDeviceCalendar implements DeviceCalendarApi {
   }
 
   @override
-  Future<void> requestSync() => _requestSync();
+  Future<List<String>> requestSync() async {
+    if (!_androidApp) return const [];
+    try {
+      final log = await _channel.invokeListMethod<String>('requestSync');
+      return log ?? const [];
+    } catch (e) {
+      return ['failed: $e'];
+    }
+  }
+
+  @override
+  Future<Map<String, Object?>> debugInfo() async {
+    if (!_androidApp) return const {};
+    try {
+      final m = await _channel.invokeMapMethod<String, Object?>('debugInfo');
+      return m ?? const {};
+    } catch (e) {
+      return {'error': '$e'};
+    }
+  }
+
+  /// Calendars deleted elsewhere whose removal wasn't synced yet.
+  Future<Set<String>> _deletedIds() async {
+    if (!_androidApp) return const {};
+    try {
+      final ids = await _channel.invokeListMethod<String>('deletedCalendarIds');
+      return {...?ids};
+    } catch (_) {
+      return const {};
+    }
+  }
 
   @override
   Future<void> deleteEvent(String eventId) async {
@@ -276,12 +312,21 @@ class PluginDeviceCalendar implements DeviceCalendarApi {
 
 const _channel = MethodChannel('better_betteruntis/calendar');
 
-extension on PluginDeviceCalendar {
-  Future<void> _requestSync() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
-    try {
-      await _channel.invokeMethod<bool>('requestSync');
-    } catch (_) {}
+bool get _androidApp =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+/// Opens [url] in a web browser app, never in an app that claims the link
+/// (Android: Google Calendar catches calendar.google.com). False if no
+/// browser was found.
+Future<bool> openInBrowser(Uri url) async {
+  if (!_androidApp) return false;
+  try {
+    return await _channel.invokeMethod<String>('openInBrowser', {
+          'url': '$url',
+        }) !=
+        null;
+  } catch (_) {
+    return false;
   }
 }
 

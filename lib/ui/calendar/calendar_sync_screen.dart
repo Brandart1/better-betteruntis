@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -11,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../calendar/calendar_sync.dart';
 import '../../calendar/calendar_sync_service.dart';
 import '../../calendar/device_calendar.dart';
+import '../../core/build_channel.dart';
 import '../../core/models.dart';
 import '../../core/settings.dart';
 import '../../export/export_model.dart';
@@ -66,18 +68,41 @@ class _CalendarSyncScreenState extends ConsumerState<CalendarSyncScreen> {
   Timer? _reloadLater;
 
   /// Back from creating a calendar on the web: list it.
-  late final _lifecycle = AppLifecycleListener(onResume: _refresh);
+  late final _lifecycle = AppLifecycleListener(
+    onResume: () => unawaited(_refresh()),
+  );
 
   /// Asks the accounts to sync, lists the calendars now and again once the
   /// sync had a few seconds (calendars made on the web arrive late).
-  void _refresh() {
-    if (!mounted) return;
-    unawaited(ref.read(deviceCalendarProvider).requestSync());
-    setState(() => _calendars = _loadCalendars());
+  Future<List<String>> _refresh() async {
+    if (!mounted) return const [];
+    final log = ref.read(deviceCalendarProvider).requestSync();
+    setState(() {
+      _calendars = _loadCalendars();
+    });
     _reloadLater?.cancel();
     _reloadLater = Timer(const Duration(seconds: 6), () {
-      if (mounted) setState(() => _calendars = _loadCalendars());
+      if (!mounted) return;
+      setState(() {
+        _calendars = _loadCalendars();
+      });
     });
+    return log;
+  }
+
+  /// ↻: refresh; in dev/alpha builds also show what Android reports.
+  Future<void> _refreshPressed() async {
+    final log = await _refresh();
+    if (!mounted || !debugToolsEnabled) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => CalendarSyncDebugSheet(
+        api: ref.read(deviceCalendarProvider),
+        requests: log,
+      ),
+    );
   }
 
   @override
@@ -223,7 +248,7 @@ class _CalendarSyncScreenState extends ConsumerState<CalendarSyncScreen> {
             key: const ValueKey('calendar-refresh'),
             tooltip: 'Refresh calendars',
             icon: const Icon(Icons.refresh),
-            onPressed: _refresh,
+            onPressed: _refreshPressed,
           ),
         ],
       ),
@@ -439,17 +464,10 @@ final kGoogleCreateCalendarUrl = Uri.parse(
 class GoogleCalendarInfo extends StatelessWidget {
   const GoogleCalendarInfo({super.key});
 
-  /// A browser tab, not the external handler: the Google Calendar app would
-  /// catch the link and can't create calendars.
+  /// The browser app itself: the Google Calendar app would catch the link
+  /// (also from a browser tab inside the app) and can't create calendars.
   static Future<void> _openCreatePage() async {
-    try {
-      if (await launchUrl(
-        kGoogleCreateCalendarUrl,
-        mode: LaunchMode.inAppBrowserView,
-      )) {
-        return;
-      }
-    } catch (_) {}
+    if (await openInBrowser(kGoogleCreateCalendarUrl)) return;
     await launchUrl(
       kGoogleCreateCalendarUrl,
       mode: LaunchMode.externalApplication,
@@ -515,6 +533,140 @@ class GoogleCalendarInfo extends StatelessWidget {
                 icon: const Icon(Icons.open_in_new),
                 label: const Text('Create calendar on the web'),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Debug report for ↻ (dev/alpha builds): the sync requests, Android's sync
+/// settings per account and every calendar row with its flags.
+class CalendarSyncDebugSheet extends StatefulWidget {
+  const CalendarSyncDebugSheet({
+    super.key,
+    required this.api,
+    required this.requests,
+  });
+
+  final DeviceCalendarApi api;
+  final List<String> requests;
+
+  @override
+  State<CalendarSyncDebugSheet> createState() => _CalendarSyncDebugSheetState();
+}
+
+class _CalendarSyncDebugSheetState extends State<CalendarSyncDebugSheet> {
+  String? _text;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _text = null);
+    final info = await widget.api.debugInfo();
+    List<DeviceCalendarInfo> shown;
+    try {
+      shown = await widget.api.calendars();
+    } catch (_) {
+      shown = const [];
+    }
+    if (!mounted) return;
+    final b = StringBuffer()
+      ..writeln('Time: ${DateTime.now().toIso8601String()}')
+      ..writeln('Master sync: ${info['masterSync']}');
+    if (info['error'] != null) b.writeln('Error: ${info['error']}');
+    b.writeln('\nSync requests:');
+    for (final r in widget.requests) {
+      b.writeln('- $r');
+    }
+    b.writeln('\nAccounts:');
+    for (final a in (info['accounts'] as List?) ?? const []) {
+      if (a is! Map) continue;
+      b.writeln(
+        '- ${a['account']}: syncable=${a['syncable']} '
+        'autoSync=${a['autoSync']} active=${a['active']} '
+        'pending=${a['pending']}',
+      );
+    }
+    final rows = (info['calendars'] as List?) ?? const [];
+    b.writeln('\nCalendar rows (${rows.length}):');
+    for (final c in rows) {
+      if (c is! Map) continue;
+      b.writeln(
+        '- #${c['id']} "${c['name']}" · ${c['account']} (${c['type']}) · '
+        'access=${c['access']} visible=${c['visible']} '
+        'syncEvents=${c['syncEvents']} deleted=${c['deleted']}',
+      );
+    }
+    b.writeln('\nShown in the app (${shown.length}):');
+    for (final c in shown) {
+      b.writeln(
+        '- #${c.id} "${c.name}"${c.hidden ? ' (hidden)' : ''}'
+        '${c.local ? ' (local)' : ''}',
+      );
+    }
+    setState(() => _text = b.toString());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = _text;
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.7,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Calendar sync debug',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Reload',
+                    icon: const Icon(Icons.refresh),
+                    onPressed: _load,
+                  ),
+                  IconButton(
+                    key: const ValueKey('calendar-debug-copy'),
+                    tooltip: 'Copy',
+                    icon: const Icon(Icons.copy),
+                    onPressed: text == null
+                        ? null
+                        : () {
+                            Clipboard.setData(ClipboardData(text: text));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Copied.')),
+                            );
+                          },
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: text == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: SelectableText(
+                        text,
+                        key: const ValueKey('calendar-debug-text'),
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
             ),
           ],
         ),

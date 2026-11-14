@@ -118,5 +118,16 @@ class FakeDeviceCalendar implements DeviceCalendarApi {
   int syncRequests = 0;
 
   @override
-  Future<void> requestSync() async => syncRequests++;
+  Future<List<String>> requestSync() async {
+    syncRequests++;
+    return ['all accounts: requested'];
+  }
+
+  @override
+  Future<Map<String, Object?>> debugInfo() async => {
+    'masterSync': true,
+    'calendars': [
+      for (final e in cals.entries) {'id': e.key, 'name': e.value.name},
+    ],
+  };
 }
