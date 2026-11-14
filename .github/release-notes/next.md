@@ -15,3 +15,4 @@
 - Add to calendar (Android): the app asks your accounts to sync their calendars and has a refresh button, so calendars just created on the web show up sooner.
 - Calendar sync (Android): new button to delete calendars that only exist on this phone (they can't be deleted in Google Calendar). Syncs using them stop adding to them.
 - Add to calendar (Android): "Create calendar on the web" opens your browser app instead of the Google Calendar app. Calendars deleted on the web no longer show while the deletion waits for sync. The sync request now goes to each account too.
+- Add to calendar (Android): a note says that calendars created on the web can take a long time to reach the phone; tap Refresh after about 15 minutes.

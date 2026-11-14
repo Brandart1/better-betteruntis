@@ -510,9 +510,13 @@ class GoogleCalendarInfo extends StatelessWidget {
               Icons.add_circle_outline,
               'For synced calendars, create them in Google Calendar on the '
               'web (this is not possible in the Google Calendar app), then '
-              'come back and choose them below. New calendars can take a '
-              'minute to reach the phone: tap ↻ above, or refresh in the '
-              'Google Calendar app.',
+              'come back and choose them below.',
+            ),
+            point(
+              Icons.schedule,
+              'New calendars can take a long time to reach the phone. If one '
+              'is missing, wait about 15 minutes and tap ↻ (Refresh) at the '
+              'top. It should show up then.',
             ),
             point(
               Icons.sync,
