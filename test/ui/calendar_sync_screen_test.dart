@@ -94,6 +94,7 @@ void main() {
       expect(find.byKey(ValueKey('calendar-choice-$s')), findsOneWidget);
     }
     expect(find.text('New calendar "10a – Exams"'), findsOneWidget);
+    expect(find.byKey(const ValueKey('calendar-new-hint')), findsOneWidget);
 
     // Cancelled lessons into the personal calendar.
     await tester.tap(find.byKey(const ValueKey('calendar-choice-cancelled')));

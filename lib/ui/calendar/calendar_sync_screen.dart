@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -21,6 +23,17 @@ class CalendarSetupArgs {
   final TimetableTarget target;
   final String elementName;
 }
+
+bool get _android => defaultTargetPlatform == TargetPlatform.android;
+
+/// Where new calendars end up and how to make them visible.
+String get newCalendarHint => _android
+    ? 'New calendars are kept on this phone (account '
+          '"$kCalendarAccountName") and are not synced to your Google account. '
+          'In Google Calendar, open the menu and turn them on under '
+          '"$kCalendarAccountName" if they are not shown.'
+    : 'New calendars are created in iCloud, or on this device without '
+          'iCloud.';
 
 String calendarStateLabel(LessonStatus s) => switch (s) {
   LessonStatus.regular => 'Regular lessons',
@@ -107,7 +120,18 @@ class _CalendarSyncScreenState extends ConsumerState<CalendarSyncScreen> {
       final counts = await ref
           .read(calendarSyncsProvider.notifier)
           .save(draft, choices);
-      messenger.showSnackBar(SnackBar(content: Text('$counts.')));
+      final created = choices.values.any((c) => c is NewCalendar);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            created && _android
+                ? '$counts. If the new calendars are missing in Google '
+                      'Calendar, turn on "$kCalendarAccountName" in its menu.'
+                : '$counts.',
+          ),
+          duration: Duration(seconds: created ? 8 : 4),
+        ),
+      );
       if (mounted) router.pop();
     } catch (e) {
       if (mounted) {
@@ -196,6 +220,15 @@ class _CalendarSyncScreenState extends ConsumerState<CalendarSyncScreen> {
                     calendars: calendars,
                     value: _choices[s]!,
                     onChanged: (c) => setState(() => _choices[s] = c),
+                  ),
+                if (_choices.values.any((c) => c is NewCalendar))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      newCalendarHint,
+                      key: const ValueKey('calendar-new-hint'),
+                      style: theme.textTheme.bodySmall,
+                    ),
                   ),
                 const SizedBox(height: 16),
                 Text('Weeks ahead', style: theme.textTheme.titleSmall),

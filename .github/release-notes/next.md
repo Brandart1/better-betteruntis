@@ -9,3 +9,4 @@
 
 ### Fixed
 - "Browse timetables": the Classes / Teachers / Rooms tabs are centered again (#2).
+- Add to calendar: new calendars are grouped under "BetterBetterUntis" and checked after creating; the setup screen explains where to turn them on in Google Calendar.

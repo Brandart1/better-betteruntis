@@ -96,6 +96,9 @@ abstract interface class DeviceCalendarApi {
   Future<void> deleteEvent(String eventId);
 }
 
+/// Account the app's own calendars are created in (Android).
+const kCalendarAccountName = 'BetterBetterUntis';
+
 String _hex(int argb) =>
     '#${(argb & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
 
@@ -157,8 +160,21 @@ class PluginDeviceCalendar implements DeviceCalendarApi {
   }
 
   @override
-  Future<String> createCalendar(String name, int color) =>
-      _p.createCalendar(name: name, colorHex: _hex(color));
+  Future<String> createCalendar(String name, int color) async {
+    final id = await _p.createCalendar(
+      name: name,
+      colorHex: _hex(color),
+      // Groups the app's calendars under one account in calendar apps.
+      android: const dc.CalendarOptionsAndroid(
+        accountName: kCalendarAccountName,
+      ),
+    );
+    final all = await _p.listCalendars();
+    if (!all.any((c) => c.id == id)) {
+      throw CalendarAccessException('Could not create the calendar "$name".');
+    }
+    return id;
+  }
 
   @override
   Future<void> updateCalendar(String id, {String? name, int? color}) async {
