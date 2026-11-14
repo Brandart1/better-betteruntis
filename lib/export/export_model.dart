@@ -16,7 +16,8 @@ enum ExportFormat {
     'Excel (.xlsx)',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   ),
-  pdf('pdf', 'PDF', 'application/pdf');
+  pdf('pdf', 'PDF', 'application/pdf'),
+  ics('ics', 'Calendar (.ics)', 'text/calendar');
 
   const ExportFormat(this.extension, this.label, this.mimeType);
   final String extension;
@@ -116,6 +117,8 @@ class ExportTimetable {
     this.holidays = const {},
     this.locale,
     this.targetType = ElementType.klasse,
+    this.repeatUntil,
+    this.skipDays = const [],
   });
 
   final ExportKind kind;
@@ -145,6 +148,13 @@ class ExportTimetable {
   /// Type of the exported element; teacher and room timetables also show
   /// the classes of each lesson.
   final ElementType targetType;
+
+  /// Regular export: last day (inclusive) the weekly lessons repeat on in a
+  /// calendar export (end of the school year); null = open-ended.
+  final DateTime? repeatUntil;
+
+  /// Regular export: days without lessons (holidays) up to [repeatUntil].
+  final List<DateTime> skipDays;
 
   bool get regular => kind == ExportKind.regular;
 

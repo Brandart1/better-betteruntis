@@ -497,26 +497,17 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                 onPressed: _pickDate,
                 icon: const Icon(Icons.calendar_month),
               ),
-              PopupMenuButton<void>(
-                key: const ValueKey('timetable-menu'),
-                tooltip: 'More',
-                itemBuilder: (_) => [
-                  PopupMenuItem<void>(
-                    key: const ValueKey('export-action'),
-                    onTap: () => showExportSheet(
-                      context,
-                      account: account,
-                      target: target,
-                      initialWeek: day ?? ws,
-                      elementName: child?.displayName,
-                    ),
-                    child: const ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.ios_share),
-                      title: Text('Export…'),
-                    ),
-                  ),
-                ],
+              IconButton(
+                key: const ValueKey('export-action'),
+                tooltip: 'Export',
+                onPressed: () => showExportSheet(
+                  context,
+                  account: account,
+                  target: target,
+                  initialWeek: day ?? ws,
+                  elementName: child?.displayName,
+                ),
+                icon: const Icon(Icons.ios_share),
               ),
             ],
           ),

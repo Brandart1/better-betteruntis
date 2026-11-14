@@ -42,7 +42,6 @@ class _ElementPickerScreenState extends ConsumerState<ElementPickerScreen> {
             ),
           ),
           bottom: TabBar(
-            isScrollable: true,
             tabs: [for (final t in _tabs) Tab(icon: Icon(t.$3), text: t.$2)],
           ),
         ),

@@ -276,6 +276,20 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
                   ),
               ],
             ),
+            if (_format == ExportFormat.ics)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _kind == ExportKind.regular
+                      ? 'Weekly repeating events until the end of the school '
+                            'year, holidays left out.'
+                      : 'One event per lesson; cancelled lessons are marked '
+                            'as cancelled.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
             if (_format == ExportFormat.csv) ...[
               section('Separator'),
               SegmentedButton<String>(
@@ -287,7 +301,7 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
                 onSelectionChanged: (s) => setState(() => _separator = s.first),
               ),
             ],
-            if (_format != ExportFormat.csv)
+            if (_format == ExportFormat.xlsx || _format == ExportFormat.pdf)
               SwitchListTile(
                 key: const ValueKey('export-colors'),
                 contentPadding: EdgeInsets.zero,
@@ -298,7 +312,7 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
                 value: _colors,
                 onChanged: (v) => setState(() => _colors = v),
               ),
-            if (_format != ExportFormat.csv)
+            if (_format == ExportFormat.xlsx || _format == ExportFormat.pdf)
               SwitchListTile(
                 key: const ValueKey('export-text'),
                 contentPadding: EdgeInsets.zero,

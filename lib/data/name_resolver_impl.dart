@@ -8,6 +8,7 @@ class NameResolverImpl implements NameResolver {
   NameResolverImpl({
     required Iterable<MasterElement> elements,
     this.holidays = const [],
+    this.schoolYears = const [],
     TimeGrid? timeGrid,
   }) : timeGrid = (timeGrid == null || timeGrid.days.isEmpty)
            ? TimeGrid.fallback()
@@ -18,6 +19,9 @@ class NameResolverImpl implements NameResolver {
 
   @override
   final List<Holiday> holidays;
+
+  @override
+  final List<SchoolYear> schoolYears;
 
   @override
   final TimeGrid timeGrid;

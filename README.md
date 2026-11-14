@@ -72,7 +72,7 @@ timetables**.
 - Office hours of all teachers, A–Z, optionally only your class's
 
 **Export**
-- Export any timetable as **CSV**, **XLSX** or **PDF**, using your colours and text settings
+- Export any timetable as **CSV**, **XLSX**, **PDF** (using your colours and text settings) or as a **calendar file (.ics)**
 - Pick a specific week, or the *regular* timetable derived from the last few weeks
 
 **Web version**

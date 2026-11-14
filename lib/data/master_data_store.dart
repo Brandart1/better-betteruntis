@@ -193,7 +193,9 @@ class MasterDataStore {
     final grid = await (db.select(
       db.timeGrids,
     )..where((t) => t.accountId.equals(accountId))).getSingleOrNull();
+    final years = await schoolYears(accountId);
     return NameResolverImpl(
+      schoolYears: years,
       elements: [
         for (final r in elements)
           MasterElement(
@@ -243,7 +245,12 @@ class MasterDataStore {
   Stream<NameResolverImpl> watchResolver(String accountId) => db
       .customSelect(
         'SELECT 1',
-        readsFrom: {db.masterElements, db.holidays, db.timeGrids},
+        readsFrom: {
+          db.masterElements,
+          db.holidays,
+          db.schoolYears,
+          db.timeGrids,
+        },
       )
       .watch()
       .asyncMap((_) => loadResolver(accountId));

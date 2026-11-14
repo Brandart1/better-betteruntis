@@ -15,6 +15,7 @@ import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../export/csv_export.dart';
 import '../../export/export_model.dart';
+import '../../export/ics_export.dart';
 import '../../export/pdf_export.dart';
 import '../../export/pdf_fonts.dart';
 import '../../export/regular_timetable.dart';
@@ -194,7 +195,12 @@ Future<ExportTimetable> prepareExport({
           _addDays(ws, days.last - 1),
           locale,
         );
+  final until = regular ? schoolYearEnd(names.schoolYears, ws) : null;
   return ExportTimetable(
+    repeatUntil: until,
+    skipDays: regular && until != null
+        ? holidayDays(names.holidays, ws, until)
+        : const [],
     kind: options.kind,
     elementName: elementName,
     schoolName: account.school.displayName,
@@ -217,6 +223,7 @@ Future<Uint8List> generateExport(
   Future<PdfFonts?> Function()? fonts,
 }) async => switch (options.format) {
   ExportFormat.csv => buildCsv(t, separator: options.separator),
+  ExportFormat.ics => buildIcs(t),
   ExportFormat.xlsx => buildXlsx(t, colors: options.colors, text: options.text),
   ExportFormat.pdf => buildPdf(
     t,
@@ -247,4 +254,33 @@ Future<ExportedFile> writeExport(
   final file = File('${dir.path}/$name');
   await file.writeAsBytes(bytes, flush: true);
   return ExportedFile(file.path, name, options.format.mimeType, bytes);
+}
+
+/// End of the school year that contains [day] (or the next one); without
+/// school years from the server, 31 July of the school year (Aug – Jul).
+DateTime schoolYearEnd(List<SchoolYear> years, DateTime day) {
+  final d = DateTime(day.year, day.month, day.day);
+  for (final y in years) {
+    final end = DateTime(y.end.year, y.end.month, y.end.day);
+    if (!end.isBefore(d)) return end;
+  }
+  return DateTime(d.month >= 8 ? d.year + 1 : d.year, 7, 31);
+}
+
+/// Every day from [from] to [until] (inclusive) that lies in a holiday.
+List<DateTime> holidayDays(
+  List<Holiday> holidays,
+  DateTime from,
+  DateTime until,
+) {
+  final days = <DateTime>{};
+  for (final h in holidays) {
+    var d = DateTime(h.start.year, h.start.month, h.start.day);
+    final e = DateTime(h.end.year, h.end.month, h.end.day);
+    while (!d.isAfter(e)) {
+      if (!d.isBefore(from) && !d.isAfter(until)) days.add(d);
+      d = DateTime(d.year, d.month, d.day + 1);
+    }
+  }
+  return days.toList()..sort();
 }

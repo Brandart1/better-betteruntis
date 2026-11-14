@@ -164,6 +164,9 @@ abstract interface class NameResolver {
   MasterElement? element(ElementType type, int id);
   List<MasterElement> elementsOf(ElementType type, {bool onlyActive = true});
   List<Holiday> get holidays;
+
+  /// School years, oldest first (may be empty).
+  List<SchoolYear> get schoolYears;
   TimeGrid get timeGrid;
 }
 
