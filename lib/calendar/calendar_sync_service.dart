@@ -188,6 +188,54 @@ class CalendarSyncsNotifier extends Notifier<List<CalendarSync>> {
     }
   }
 
+  /// Deletes device calendars (with their events). Syncs stop using them;
+  /// a sync left without any calendar is removed. Returns how many syncs were
+  /// removed.
+  Future<int> deleteCalendars(Set<String> ids) async {
+    await _ready();
+    for (final id in [..._running.keys]) {
+      try {
+        await _running[id];
+      } catch (_) {}
+    }
+    await _api.requestAccess();
+    var removed = 0;
+    final next = <CalendarSync>[];
+    for (final s in state) {
+      if (!s.calendars.values.any(ids.contains) &&
+          !s.created.keys.any(ids.contains)) {
+        next.add(s);
+        continue;
+      }
+      final calendars = {
+        for (final e in s.calendars.entries)
+          if (!ids.contains(e.value)) e.key: e.value,
+      };
+      if (calendars.isEmpty) {
+        removed++;
+        continue;
+      }
+      next.add(
+        s.copyWith(
+          calendars: calendars,
+          created: {
+            for (final e in s.created.entries)
+              if (!ids.contains(e.key)) e.key: e.value,
+          },
+          events: {
+            for (final e in s.events.entries)
+              if (!ids.contains(e.value.calendarId)) e.key: e.value,
+          },
+        ),
+      );
+    }
+    _set(next);
+    for (final id in ids) {
+      await _api.deleteCalendar(id);
+    }
+    return removed;
+  }
+
   /// Runs every sync that has auto-update on and wasn't synced in the last
   /// [kAutoSyncInterval] (all of them with [force]).
   Future<void> syncDue({bool force = false, DateTime? now}) async {

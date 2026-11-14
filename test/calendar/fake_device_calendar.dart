@@ -1,17 +1,23 @@
 import 'package:better_betteruntis/calendar/device_calendar.dart';
 
 class FakeCalendar {
-  FakeCalendar(this.name, this.color, {this.own = false});
+  FakeCalendar(this.name, this.color, {this.own = false, this.local = true});
   String name;
   int color;
   final bool own;
+  final bool local;
   final events = <String, CalendarEventData>{};
 }
 
 /// In-memory [DeviceCalendarApi] that records every write.
 class FakeDeviceCalendar implements DeviceCalendarApi {
   FakeDeviceCalendar({this.granted = true}) {
-    cals['personal'] = FakeCalendar('Personal', 0xFF00AA00, own: true);
+    cals['personal'] = FakeCalendar(
+      'Personal',
+      0xFF00AA00,
+      own: true,
+      local: false,
+    );
   }
 
   bool granted;
@@ -46,7 +52,12 @@ class FakeDeviceCalendar implements DeviceCalendarApi {
   @override
   Future<List<DeviceCalendarInfo>> calendars() async => [
     for (final e in cals.entries)
-      DeviceCalendarInfo(id: e.key, name: e.value.name, color: e.value.color),
+      DeviceCalendarInfo(
+        id: e.key,
+        name: e.value.name,
+        color: e.value.color,
+        local: e.value.local,
+      ),
   ];
 
   @override
@@ -103,4 +114,9 @@ class FakeDeviceCalendar implements DeviceCalendarApi {
     }
     log.add('deleteEvent');
   }
+
+  int syncRequests = 0;
+
+  @override
+  Future<void> requestSync() async => syncRequests++;
 }

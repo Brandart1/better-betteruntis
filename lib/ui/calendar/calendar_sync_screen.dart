@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
@@ -61,22 +63,33 @@ class _CalendarSyncScreenState extends ConsumerState<CalendarSyncScreen> {
       .read(calendarSyncsProvider.notifier)
       .forTarget(widget.args.accountId, widget.args.target);
   late Future<List<DeviceCalendarInfo>> _calendars = _loadCalendars();
+  Timer? _reloadLater;
 
   /// Back from creating a calendar on the web: list it.
-  late final _lifecycle = AppLifecycleListener(
-    onResume: () {
+  late final _lifecycle = AppLifecycleListener(onResume: _refresh);
+
+  /// Asks the accounts to sync, lists the calendars now and again once the
+  /// sync had a few seconds (calendars made on the web arrive late).
+  void _refresh() {
+    if (!mounted) return;
+    unawaited(ref.read(deviceCalendarProvider).requestSync());
+    setState(() => _calendars = _loadCalendars());
+    _reloadLater?.cancel();
+    _reloadLater = Timer(const Duration(seconds: 6), () {
       if (mounted) setState(() => _calendars = _loadCalendars());
-    },
-  );
+    });
+  }
 
   @override
   void initState() {
     super.initState();
     _lifecycle;
+    unawaited(_requestSyncOnce());
   }
 
   @override
   void dispose() {
+    _reloadLater?.cancel();
     _lifecycle.dispose();
     super.dispose();
   }
@@ -99,6 +112,10 @@ class _CalendarSyncScreenState extends ConsumerState<CalendarSyncScreen> {
     final api = ref.read(deviceCalendarProvider);
     await api.requestAccess();
     return api.calendars();
+  }
+
+  Future<void> _requestSyncOnce() async {
+    await ref.read(deviceCalendarProvider).requestSync();
   }
 
   Future<void> _save(List<DeviceCalendarInfo> calendars) async {
@@ -201,6 +218,14 @@ class _CalendarSyncScreenState extends ConsumerState<CalendarSyncScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_existing == null ? 'Add to calendar' : 'Calendar sync'),
+        actions: [
+          IconButton(
+            key: const ValueKey('calendar-refresh'),
+            tooltip: 'Refresh calendars',
+            icon: const Icon(Icons.refresh),
+            onPressed: _refresh,
+          ),
+        ],
       ),
       body: FutureBuilder<List<DeviceCalendarInfo>>(
         future: _calendars,
@@ -460,13 +485,16 @@ class GoogleCalendarInfo extends StatelessWidget {
             point(
               Icons.phone_android,
               '"New calendar" only creates a calendar on this phone. It is '
-              'not synced to your Google account or other devices.',
+              'not synced to your Google account or other devices. Delete '
+              'such calendars under Menu → Calendar sync → bin icon.',
             ),
             point(
               Icons.add_circle_outline,
               'For synced calendars, create them in Google Calendar on the '
               'web (this is not possible in the Google Calendar app), then '
-              'come back and choose them below.',
+              'come back and choose them below. New calendars can take a '
+              'minute to reach the phone: tap ↻ above, or refresh in the '
+              'Google Calendar app.',
             ),
             point(
               Icons.sync,

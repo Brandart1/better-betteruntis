@@ -3,7 +3,9 @@
 library;
 
 import 'package:device_calendar_plus/device_calendar_plus.dart' as dc;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// A writable calendar on the device.
@@ -15,6 +17,7 @@ class DeviceCalendarInfo {
     this.account,
     this.primary = false,
     this.hidden = false,
+    this.local = false,
   });
 
   final String id;
@@ -30,6 +33,10 @@ class DeviceCalendarInfo {
   /// Not shown / not synced in the calendar app (Android VISIBLE = 0). Still
   /// writable, but its events only appear once it is turned on there.
   final bool hidden;
+
+  /// Exists only on this device (Android local account type): not synced
+  /// anywhere and not deletable in most calendar apps.
+  final bool local;
 }
 
 /// One timed event as the sync writes it.
@@ -99,6 +106,10 @@ abstract interface class DeviceCalendarApi {
 
   /// Ignores a missing event.
   Future<void> deleteEvent(String eventId);
+
+  /// Asks the accounts on the device to sync their calendars now (Android),
+  /// so calendars created elsewhere show up. Best effort.
+  Future<void> requestSync();
 }
 
 /// Account the app's own calendars are created in (Android).
@@ -161,6 +172,7 @@ class PluginDeviceCalendar implements DeviceCalendarApi {
             account: c.accountName,
             primary: c.isPrimary,
             hidden: c.hidden,
+            local: c.accountType == 'LOCAL',
           ),
     ];
     // Per account: the main calendar first, then the others by name.
@@ -250,12 +262,26 @@ class PluginDeviceCalendar implements DeviceCalendarApi {
   }
 
   @override
+  Future<void> requestSync() => _requestSync();
+
+  @override
   Future<void> deleteEvent(String eventId) async {
     try {
       await _p.deleteEvent(instanceId: eventId);
     } catch (e) {
       if (!_notFound(e)) rethrow;
     }
+  }
+}
+
+const _channel = MethodChannel('better_betteruntis/calendar');
+
+extension on PluginDeviceCalendar {
+  Future<void> _requestSync() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await _channel.invokeMethod<bool>('requestSync');
+    } catch (_) {}
   }
 }
 

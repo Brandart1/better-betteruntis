@@ -159,6 +159,34 @@ void main() {
     });
   }
 
+  testWidgets('delete calendars on this phone', (tester) async {
+    await pump(tester);
+    final local = await api.createCalendar('10a – Timetable', 0xFF3F6FD8);
+    unawaited(GoRouter.of(tester.element(find.text('open'))).push('/calendar'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.byKey(const ValueKey('calendar-delete-local')));
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await tester.pump();
+      }
+    });
+    await tester.pumpAndSettle();
+    // Only phone calendars are offered (not the account's "Personal").
+    expect(find.byKey(ValueKey('delete-local-$local')), findsOneWidget);
+    expect(find.byKey(const ValueKey('delete-local-personal')), findsNothing);
+    await tester.runAsync(() async {
+      await tester.tap(find.byKey(const ValueKey('delete-local-confirm')));
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await tester.pump();
+      }
+    });
+    await tester.pumpAndSettle();
+    expect(api.cals.keys, ['personal']);
+    expect(find.text('Deleted 1 calendar.'), findsOneWidget);
+  });
+
   testWidgets('no calendar access shows a message', (tester) async {
     await pump(tester);
     api.granted = false;

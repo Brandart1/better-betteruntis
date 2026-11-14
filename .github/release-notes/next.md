@@ -12,3 +12,5 @@
 - Add to calendar: new calendars are grouped under "BetterBetterUntis" and checked after creating; the setup screen explains where to turn them on in Google Calendar.
 - Add to calendar: your own calendars inside a Google account (e.g. "Family", "School") are listed too, also when they are turned off in the calendar app; sorted by account.
 - Add to calendar (Android): a note explains that new calendars only exist on the phone, how to create synced calendars in Google Calendar on the web (button), how to turn on sync and that colours of Google calendars are set in Google Calendar. The list refreshes when you come back to the app.
+- Add to calendar (Android): the app asks your accounts to sync their calendars and has a refresh button, so calendars just created on the web show up sooner.
+- Calendar sync (Android): new button to delete calendars that only exist on this phone (they can't be deleted in Google Calendar). Syncs using them stop adding to them.

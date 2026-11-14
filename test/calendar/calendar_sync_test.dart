@@ -308,6 +308,36 @@ void main() {
       expect(api.eventsIn(fresh), isNotEmpty);
     });
 
+    test(
+      'deleting phone calendars: syncs forget them, not recreated',
+      () async {
+        final n = c.read(calendarSyncsProvider.notifier);
+        await n.save(draft(), {
+          LessonStatus.regular: const NewCalendar(),
+          LessonStatus.substitution: const ExistingCalendar('personal'),
+          LessonStatus.exam: const SkipCalendar(),
+          LessonStatus.cancelled: const SkipCalendar(),
+        });
+        final own = c
+            .read(calendarSyncsProvider)
+            .single
+            .calendars[LessonStatus.regular]!;
+        expect(await n.deleteCalendars({own}), 0);
+        expect(api.cals.containsKey(own), isFalse);
+        final s = c.read(calendarSyncsProvider).single;
+        expect(s.calendars.keys, [LessonStatus.substitution]);
+        expect(s.created, isEmpty);
+        await n.run('sync');
+        expect(api.cals.keys, ['personal']);
+
+        // Last calendar gone: the sync is removed.
+        final other = await api.createCalendar('Other', 0xFF000000);
+        await n.save(draft(), {LessonStatus.regular: ExistingCalendar(other)});
+        expect(await n.deleteCalendars({other}), 1);
+        expect(c.read(calendarSyncsProvider), isEmpty);
+      },
+    );
+
     test('no calendar access is reported', () async {
       api.granted = false;
       final n = c.read(calendarSyncsProvider.notifier);
