@@ -210,11 +210,16 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
   }
 
   /// Web: changes how long the browser remembers the key.
+  /// Bumped when changing the retention fails, so the dropdown (which only
+  /// reads its initial value) shows the stored choice again.
+  var _retentionReset = 0;
+
   Future<void> _setRetention(WebKeyRetention r) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await _sync.setWebKeyRetention(_id, r);
     } catch (e) {
+      if (mounted) setState(() => _retentionReset++);
       messenger.showSnackBar(SnackBar(content: Text(syncErrorText(e))));
     }
   }
@@ -448,9 +453,12 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
       ),
       if (s.e2e && _sync.webKeyChoice) ...[
         const SizedBox(height: 8),
-        WebKeyRetentionField(
-          value: s.webKeyRetention,
-          onChanged: _setRetention,
+        KeyedSubtree(
+          key: ValueKey('${s.webKeyRetention.name}-$_retentionReset'),
+          child: WebKeyRetentionField(
+            value: s.webKeyRetention,
+            onChanged: _setRetention,
+          ),
         ),
       ],
       _buttons(
