@@ -133,10 +133,13 @@ class Device {
   Future<SyncAccountState> sync() => engine.syncNow(accountId);
 
   /// Turns sync on and waits for the follow-up upload.
-  Future<SyncEnableResult> enable([String? passphrase]) async {
+  Future<SyncEnableResult> enable([
+    String? passphrase,
+    WebKeyRetention retention = WebKeyRetention.standard,
+  ]) async {
     final r = await engine.enable(
       accountId,
-      SyncEnableOptions(passphrase: passphrase),
+      SyncEnableOptions(passphrase: passphrase, webKeyRetention: retention),
     );
     await idle();
     return r;
@@ -655,6 +658,154 @@ void main() {
     expect(secrets.values.keys.any((k) => k.startsWith('sync-dek')), false);
     await c.engine.unlock('acc1', 'web passphrase');
     expect(c.state.phase, SyncPhase.on);
+  });
+
+  group('web key retention', () {
+    late MemorySettingsStore store;
+    late MemorySecretStore secrets;
+    String? cookie;
+    setUp(() {
+      store = MemorySettingsStore();
+      secrets = MemorySecretStore();
+      cookie = null;
+    });
+
+    /// A browser tab (a new engine instance = a reload); shares storage
+    /// and the cookie with the earlier tabs.
+    Device tab() {
+      final d = Device(server, web: true, store: store, secrets: secrets);
+      addTearDown(d.dispose);
+      if (cookie != null) d.adapter.cookie = cookie;
+      return d;
+    }
+
+    Future<Device> enabled(WebKeyRetention r) async {
+      final d = tab();
+      d.write('1', 'one');
+      await d.enable('web passphrase', r);
+      expect(d.state.phase, SyncPhase.on);
+      expect(d.state.webKeyRetention, r);
+      cookie = d.adapter.cookie;
+      return d;
+    }
+
+    bool stored() => secrets.values.keys.any((k) => k.startsWith('sync-dek'));
+
+    for (final (r, ok, gone) in [
+      (WebKeyRetention.day, const Duration(hours: 23), const Duration(days: 2)),
+      (WebKeyRetention.week, const Duration(days: 6), const Duration(days: 8)),
+      (
+        WebKeyRetention.month,
+        const Duration(days: 29),
+        const Duration(days: 31),
+      ),
+    ]) {
+      test('${r.name}: kept within ${r.maxAge}, then asked again', () async {
+        final start = clock;
+        final a = await enabled(r);
+        expect(stored(), isTrue);
+        clock = start.add(ok);
+        expect((await a.sync()).phase, SyncPhase.on);
+        expect((await tab().sync()).phase, SyncPhase.on);
+        clock = start.add(gone);
+        // Also the key in memory (L7) and after a reload.
+        expect((await a.sync()).phase, SyncPhase.locked);
+        expect((await tab().sync()).phase, SyncPhase.locked);
+        expect(stored(), isFalse);
+      });
+    }
+
+    test('until sign out: no expiry; signing out removes it', () async {
+      final a = await enabled(WebKeyRetention.untilSignOut);
+      clock = clock.add(const Duration(days: 400));
+      expect((await a.sync()).phase, SyncPhase.on);
+      final b = tab();
+      expect((await b.sync()).phase, SyncPhase.on);
+      expect(b.state.webKeyRetention, WebKeyRetention.untilSignOut);
+      await b.engine.signOutDevice('acc1');
+      expect(stored(), isFalse);
+    });
+
+    test('only this tab: never stored, never expires in the tab, a reload '
+        'asks again', () async {
+      final a = await enabled(WebKeyRetention.tab);
+      expect(stored(), isFalse);
+      a.write('2', 'two');
+      clock = clock.add(const Duration(days: 400));
+      expect((await a.sync()).phase, SyncPhase.on);
+      expect(_ident(server)!.notes.length, 2);
+      expect(stored(), isFalse);
+
+      final b = tab();
+      expect((await b.sync()).phase, SyncPhase.locked);
+      expect(b.state.webKeyRetention, WebKeyRetention.tab);
+      // Unlocking keeps the persisted choice: still not stored.
+      await b.engine.unlock('acc1', 'web passphrase');
+      expect(b.state.phase, SyncPhase.on);
+      expect(stored(), isFalse);
+      // Unlocking with another choice stores it.
+      final c = tab();
+      expect((await c.sync()).phase, SyncPhase.locked);
+      await c.engine.unlock(
+        'acc1',
+        'web passphrase',
+        webKeyRetention: WebKeyRetention.week,
+      );
+      expect(c.state.webKeyRetention, WebKeyRetention.week);
+      expect(stored(), isTrue);
+      expect((await tab().sync()).phase, SyncPhase.on);
+    });
+
+    test('a shorter time drops an older stored key, the tab keeps '
+        'working', () async {
+      final a = await enabled(WebKeyRetention.month);
+      clock = clock.add(const Duration(days: 3));
+      await a.engine.setWebKeyRetention('acc1', WebKeyRetention.week);
+      expect(stored(), isTrue, reason: '3 days < 7 days');
+      await a.engine.setWebKeyRetention('acc1', WebKeyRetention.day);
+      expect(stored(), isFalse);
+      expect(a.state.webKeyRetention, WebKeyRetention.day);
+      a.write('2', 'two');
+      expect((await a.sync()).phase, SyncPhase.on);
+      expect(_ident(server)!.notes.length, 2);
+      // A reload asks again.
+      final b = tab();
+      expect(b.state.webKeyRetention, WebKeyRetention.day);
+      expect((await b.sync()).phase, SyncPhase.locked);
+    });
+
+    test('switching to this tab only removes the stored key now; back to '
+        'longer stores it again', () async {
+      final a = await enabled(WebKeyRetention.month);
+      expect(stored(), isTrue);
+      await a.engine.setWebKeyRetention('acc1', WebKeyRetention.tab);
+      expect(stored(), isFalse);
+      expect((await a.sync()).phase, SyncPhase.on);
+      await a.engine.setWebKeyRetention('acc1', WebKeyRetention.month);
+      expect(stored(), isTrue);
+      expect((await tab().sync()).phase, SyncPhase.on);
+    });
+
+    test('a longer time keeps the stored timestamp', () async {
+      final start = clock;
+      final a = await enabled(WebKeyRetention.day);
+      clock = start.add(const Duration(hours: 12));
+      await a.engine.setWebKeyRetention('acc1', WebKeyRetention.week);
+      clock = start.add(const Duration(days: 6));
+      expect((await tab().sync()).phase, SyncPhase.on);
+      clock = start.add(const Duration(days: 8));
+      expect((await tab().sync()).phase, SyncPhase.locked);
+    });
+
+    test('native apps keep the key in secure storage regardless', () async {
+      final a = Device(server, store: store, secrets: secrets);
+      addTearDown(a.dispose);
+      await a.enable('a passphrase', WebKeyRetention.tab);
+      expect(a.engine.webKeyChoice, isFalse);
+      expect(stored(), isTrue);
+      clock = clock.add(const Duration(days: 400));
+      expect((await a.sync()).phase, SyncPhase.on);
+    });
   });
 
   test('client batches by count and size', () {

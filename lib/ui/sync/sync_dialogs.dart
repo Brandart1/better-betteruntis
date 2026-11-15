@@ -1,5 +1,6 @@
 /// Dialogs of the sync settings: opt-in flow (disclaimer, encryption choice,
-/// passphrase, recovery code), unlock, confirmations and a progress dialog.
+/// passphrase, recovery code), unlock, confirmations and a progress dialog;
+/// the web version's choice how long the browser remembers the key.
 library;
 
 import 'package:flutter/material.dart';
@@ -57,9 +58,14 @@ Future<void> turnOnSync(
             'not even the developer, can recover it for you.',
         confirmLabel: 'Turn on sync',
         offerRecoveryCode: true,
-        action: (pass, recovery) => sync.enable(
+        offerWebKeyRetention: sync.webKeyChoice,
+        action: (pass, recovery, retention) => sync.enable(
           accountId,
-          SyncEnableOptions(passphrase: pass, withRecoveryCode: recovery),
+          SyncEnableOptions(
+            passphrase: pass,
+            withRecoveryCode: recovery,
+            webKeyRetention: retention,
+          ),
         ),
       ),
     );
@@ -87,20 +93,27 @@ Future<void> turnOnSync(
   }
 }
 
-/// Asks for the passphrase or recovery code and unlocks [accountId].
-/// Returns whether it worked.
+/// Asks for the passphrase or recovery code (web: also how long the
+/// browser remembers the key) and unlocks [accountId]. Returns whether it
+/// worked.
 Future<bool> unlockSync(
   BuildContext context,
   SyncController sync,
   String accountId, {
   bool alreadyEncrypted = false,
 }) async {
+  final choice = sync.webKeyChoice;
   final done = await showDialog<SyncDone<SyncAccountState>>(
     context: context,
     barrierDismissible: false,
     builder: (_) => UnlockDialog(
       alreadyEncrypted: alreadyEncrypted,
-      action: (secret) => sync.unlock(accountId, secret),
+      webKeyRetention: choice ? sync.stateOf(accountId).webKeyRetention : null,
+      action: (secret, retention) => sync.unlock(
+        accountId,
+        secret,
+        webKeyRetention: choice ? retention : null,
+      ),
     ),
   );
   return done != null;
@@ -423,6 +436,7 @@ class PassphraseDialog<T> extends StatefulWidget {
     required this.confirmLabel,
     required this.action,
     this.offerRecoveryCode = false,
+    this.offerWebKeyRetention = false,
   });
 
   final String title;
@@ -431,7 +445,16 @@ class PassphraseDialog<T> extends StatefulWidget {
 
   /// Shows "Create a recovery code" (passed to [action]).
   final bool offerRecoveryCode;
-  final Future<T> Function(String passphrase, bool withRecoveryCode) action;
+
+  /// Web: shows how long the browser remembers the key (passed to
+  /// [action]; [WebKeyRetention.standard] when not shown).
+  final bool offerWebKeyRetention;
+  final Future<T> Function(
+    String passphrase,
+    bool withRecoveryCode,
+    WebKeyRetention webKeyRetention,
+  )
+  action;
 
   @override
   State<PassphraseDialog<T>> createState() => _PassphraseDialogState<T>();
@@ -442,6 +465,7 @@ class _PassphraseDialogState<T> extends State<PassphraseDialog<T>> {
   final _second = TextEditingController();
   var _obscure = true;
   var _recovery = true;
+  var _retention = WebKeyRetention.standard;
   var _busy = false;
   var _submitted = false;
   String? _error;
@@ -468,7 +492,7 @@ class _PassphraseDialogState<T> extends State<PassphraseDialog<T>> {
     if (_firstError != null || _secondError != null) return;
     setState(() => _busy = true);
     try {
-      final value = await widget.action(_first.text, _recovery);
+      final value = await widget.action(_first.text, _recovery, _retention);
       if (mounted) Navigator.of(context).pop((value: value));
     } catch (e) {
       if (mounted) {
@@ -547,6 +571,13 @@ class _PassphraseDialogState<T> extends State<PassphraseDialog<T>> {
                     'Unlocks sync if you forget the passphrase.',
                   ),
                 ),
+              if (widget.offerWebKeyRetention)
+                WebKeyRetentionField(
+                  value: _retention,
+                  onChanged: _busy
+                      ? null
+                      : (v) => setState(() => _retention = v),
+                ),
               if (_error case final error?)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
@@ -590,9 +621,20 @@ class UnlockDialog extends StatefulWidget {
     super.key,
     required this.action,
     this.alreadyEncrypted = false,
+    this.webKeyRetention,
   });
 
-  final Future<SyncAccountState> Function(String secret) action;
+  /// Runs with the secret and the chosen retention ([webKeyRetention], or
+  /// [WebKeyRetention.standard] when not shown).
+  final Future<SyncAccountState> Function(
+    String secret,
+    WebKeyRetention webKeyRetention,
+  )
+  action;
+
+  /// Web: non-null shows how long the browser remembers the key, starting
+  /// with this choice.
+  final WebKeyRetention? webKeyRetention;
 
   /// Shown right after turning sync on: the server already had encryption.
   final bool alreadyEncrypted;
@@ -603,6 +645,7 @@ class UnlockDialog extends StatefulWidget {
 
 class _UnlockDialogState extends State<UnlockDialog> {
   final _field = TextEditingController();
+  late var _retention = widget.webKeyRetention ?? WebKeyRetention.standard;
   var _recovery = false;
   var _obscure = true;
   var _busy = false;
@@ -631,7 +674,10 @@ class _UnlockDialogState extends State<UnlockDialog> {
       _error = null;
     });
     try {
-      final state = await widget.action(_recovery ? secret : _field.text);
+      final state = await widget.action(
+        _recovery ? secret : _field.text,
+        _retention,
+      );
       if (mounted) Navigator.of(context).pop((value: state));
     } on SyncException catch (e) {
       if (!mounted) return;
@@ -729,6 +775,13 @@ class _UnlockDialogState extends State<UnlockDialog> {
                   ),
                 ),
               ),
+              if (widget.webKeyRetention != null)
+                WebKeyRetentionField(
+                  value: _retention,
+                  onChanged: _busy
+                      ? null
+                      : (v) => setState(() => _retention = v),
+                ),
               if (_error case final error?)
                 Text(
                   error,
@@ -850,6 +903,55 @@ class _RecoveryCodeDialogState extends State<RecoveryCodeDialog> {
             child: const Text('Done'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Web version: how long the browser remembers the encryption key
+/// ([WebKeyRetention]), with a short explanation. [onChanged] null:
+/// disabled.
+class WebKeyRetentionField extends StatelessWidget {
+  const WebKeyRetentionField({
+    super.key = const ValueKey('sync-key-retention'),
+    required this.value,
+    required this.onChanged,
+  });
+
+  final WebKeyRetention value;
+  final ValueChanged<WebKeyRetention>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final change = onChanged;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: DropdownButtonFormField<WebKeyRetention>(
+        // Rebuilt with the new value when it changes elsewhere.
+        key: ValueKey('sync-key-retention-${value.name}'),
+        initialValue: value,
+        isExpanded: true,
+        decoration: const InputDecoration(
+          labelText: 'Remember key in this browser',
+          border: OutlineInputBorder(),
+          helperText:
+              'Shorter is safer if others use this browser or you have '
+              'browser extensions; longer means entering the passphrase '
+              'less often.',
+          helperMaxLines: 4,
+        ),
+        items: [
+          for (final r in WebKeyRetention.values)
+            DropdownMenuItem(
+              value: r,
+              child: Text(r.label, overflow: TextOverflow.ellipsis),
+            ),
+        ],
+        onChanged: change == null
+            ? null
+            : (v) {
+                if (v != null && v != value) change(v);
+              },
       ),
     );
   }

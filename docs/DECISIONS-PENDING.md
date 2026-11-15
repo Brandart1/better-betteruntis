@@ -339,3 +339,29 @@ once confirmed.
   tabs' changes are seen and not overwritten (two tabs writing the same key
   at the same moment: last one wins).
 - **Switch:** `_clampLead` / `_resetMessage` in lib/sync/sync_engine.dart.
+
+## R8. Web: how long the browser remembers the E2E key (user-chosen)
+
+- **Decided by the maintainer:** instead of the fixed 30 days, the web
+  version lets the user choose (`WebKeyRetention`, persisted per account
+  in the sync state as `webKeyRetention`; omitted = 30 days): "Only while
+  this tab is open" (memory only, never written; a reload asks for the
+  passphrase), 1 day, 7 days, **30 days (default)**, "Until I turn off sync
+  or sign out on this device" (no expiry). The phone apps keep the key in
+  secure storage and show no choice.
+- **Where:** passphrase dialog (opt-in with encryption, "Turn on
+  encryption") and unlock dialog on the web (dropdown, default the
+  account's current choice), and the sync screen's encryption section
+  ("Remember key in this browser", `setWebKeyRetention`).
+- **Chosen details:** expiry uses the stored timestamp as before, also for
+  the key in memory (L7); a memory-only key never expires within its tab.
+  A shorter choice applies at once: a stored key older than the new limit
+  (any stored key for "only this tab") is removed from storage, but the
+  key in memory stays for this tab (no lock-out mid-session; the next
+  reload asks). Switching from "only this tab" (or from such a kept
+  in-memory key) to a stored duration stores the key again, stamped now.
+  Other tabs re-read storage at each operation, so they lock once the
+  stored copy is gone.
+- **Switch:** `WebKeyRetention` in lib/sync/sync_controller.dart
+  (options, default `standard`), `_expired` / `_cacheKeys` /
+  `setWebKeyRetention` in lib/sync/sync_engine.dart.

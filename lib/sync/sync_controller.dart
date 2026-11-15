@@ -47,6 +47,32 @@ class SyncIdentity {
   String toString() => '$school · $userId · $host';
 }
 
+/// How long the web version keeps the end-to-end encryption key in the
+/// browser (localStorage, readable by anything running on the page, e.g.
+/// extensions, or by others using this browser). The phone apps keep it in
+/// the system's secure storage and ignore this.
+enum WebKeyRetention {
+  /// Only in memory: never written to storage; a reload asks again.
+  tab('Only while this tab is open'),
+  day('1 day', Duration(days: 1)),
+  week('7 days', Duration(days: 7)),
+  month('30 days', Duration(days: 30)),
+
+  /// No expiry: until sync is turned off or signed out on this device.
+  untilSignOut('Until I turn off sync or sign out on this device');
+
+  const WebKeyRetention(this.label, [this.maxAge]);
+
+  /// User-facing name.
+  final String label;
+
+  /// How long the stored key is used (null: [tab], or no expiry).
+  final Duration? maxAge;
+
+  /// The default (the behaviour before the choice existed).
+  static const standard = month;
+}
+
 /// State of sync for one app account.
 class SyncAccountState {
   const SyncAccountState({
@@ -59,6 +85,7 @@ class SyncAccountState {
     this.syncing = false,
     this.error,
     this.e2eSetupPending = false,
+    this.webKeyRetention = WebKeyRetention.standard,
   });
 
   final String accountId;
@@ -83,18 +110,29 @@ class SyncAccountState {
   /// (the UI doesn't offer to turn it on again meanwhile).
   final bool e2eSetupPending;
 
+  /// Web version: how long the browser remembers the E2E key (persisted per
+  /// account; ignored by the phone apps).
+  final WebKeyRetention webKeyRetention;
+
   bool get enabled => phase != SyncPhase.off;
 }
 
 /// What the user chose when turning sync on.
 class SyncEnableOptions {
-  const SyncEnableOptions({this.passphrase, this.withRecoveryCode = true});
+  const SyncEnableOptions({
+    this.passphrase,
+    this.withRecoveryCode = true,
+    this.webKeyRetention = WebKeyRetention.standard,
+  });
 
   /// Non-null: turn on end-to-end encryption with this passphrase
   /// (min. 8 characters). Ignored if the server already has E2E for this
   /// identity (then [SyncController.unlock] is needed instead).
   final String? passphrase;
   final bool withRecoveryCode;
+
+  /// Web version: how long the browser remembers the E2E key.
+  final WebKeyRetention webKeyRetention;
 }
 
 /// Result of turning sync or E2E on.
@@ -145,6 +183,10 @@ abstract class SyncController extends Notifier<Map<String, SyncAccountState>> {
   /// Only one account can sync at a time (web version: one browser cookie).
   bool get singleAccountOnly => false;
 
+  /// The E2E key is cached in browser storage (web version): the UI lets
+  /// the user choose [SyncAccountState.webKeyRetention].
+  bool get webKeyChoice => false;
+
   /// Turns sync on for [accountId]: logs in to the sync server with the
   /// account's WebUntis token, optionally sets up E2E, then syncs.
   /// If the server already has E2E for this identity, the result's phase is
@@ -152,7 +194,12 @@ abstract class SyncController extends Notifier<Map<String, SyncAccountState>> {
   Future<SyncEnableResult> enable(String accountId, SyncEnableOptions options);
 
   /// Unlocks E2E on this device with the passphrase or the recovery code.
-  Future<SyncAccountState> unlock(String accountId, String passphraseOrCode);
+  /// [webKeyRetention] (web): also sets how long the key is remembered.
+  Future<SyncAccountState> unlock(
+    String accountId,
+    String passphraseOrCode, {
+    WebKeyRetention? webKeyRetention,
+  });
 
   /// Syncs now (pull then push). Never throws (errors end up in the
   /// state). No-op when off or signed out; when locked it only checks
@@ -168,11 +215,13 @@ abstract class SyncController extends Notifier<Map<String, SyncAccountState>> {
   Future<void> signOutDevice(String accountId);
 
   /// Turns E2E on for an account that syncs in plaintext: resets the server
-  /// data and uploads everything encrypted.
+  /// data and uploads everything encrypted. [webKeyRetention] (web): also
+  /// sets how long the key is remembered.
   Future<SyncEnableResult> enableE2e(
     String accountId,
     String passphrase, {
     bool withRecoveryCode = true,
+    WebKeyRetention? webKeyRetention,
   });
 
   /// Turns E2E off (needs the key on this device): the server deletes the
@@ -190,6 +239,13 @@ abstract class SyncController extends Notifier<Map<String, SyncAccountState>> {
   /// [enableE2e] or [regenerateRecoveryCode] ("I saved it"). Until then the
   /// engine keeps reminding that the code may not be known.
   Future<void> acknowledgeRecoveryCode(String accountId);
+
+  /// Web version: changes how long the browser remembers the E2E key of
+  /// [accountId] (sync must be on or locked). Applies right away: a stored
+  /// key older than the new limit (or any stored key, for
+  /// [WebKeyRetention.tab]) is removed from storage; the key in memory stays
+  /// usable in this tab until it is reloaded.
+  Future<void> setWebKeyRetention(String accountId, WebKeyRetention retention);
 }
 
 /// The app-wide sync controller. The real engine is installed by overriding
@@ -218,8 +274,11 @@ class UnavailableSyncController extends SyncController {
     SyncEnableOptions o,
   ) async => _unavailable();
   @override
-  Future<SyncAccountState> unlock(String accountId, String s) async =>
-      _unavailable();
+  Future<SyncAccountState> unlock(
+    String accountId,
+    String s, {
+    WebKeyRetention? webKeyRetention,
+  }) async => _unavailable();
   @override
   Future<SyncAccountState> syncNow(String accountId) async => _unavailable();
   @override
@@ -231,6 +290,7 @@ class UnavailableSyncController extends SyncController {
     String accountId,
     String passphrase, {
     bool withRecoveryCode = true,
+    WebKeyRetention? webKeyRetention,
   }) async => _unavailable();
   @override
   Future<void> disableE2e(String accountId) async => _unavailable();
@@ -242,4 +302,7 @@ class UnavailableSyncController extends SyncController {
       _unavailable();
   @override
   Future<void> acknowledgeRecoveryCode(String accountId) async {}
+  @override
+  Future<void> setWebKeyRetention(String accountId, WebKeyRetention r) async =>
+      _unavailable();
 }

@@ -7,7 +7,9 @@
 ///   [SyncEngine.storeKey];
 /// * secrets in the [SecretStore]: the session token (native only; the web
 ///   app uses the HttpOnly cookie) and the cached E2E data key (on the web
-///   dropped after [SyncEngine.webDekMaxAge], also from memory).
+///   kept as long as the account's [WebKeyRetention] says, judged by the
+///   stored timestamp, also for the copy in memory; with
+///   [WebKeyRetention.tab] only in memory).
 ///
 /// A sync is pull (`GET /notes?since=lastSeq`, paged, last-write-wins into
 /// the local store) then push (local notes changed since they were last
@@ -127,7 +129,6 @@ class SyncEngine extends SyncController {
   SyncEngine({
     this.debounce = const Duration(seconds: 3),
     bool? web,
-    this.webDekMaxAge = const Duration(days: 30),
     this.resumeInterval = const Duration(minutes: 1),
     this.maxRateLimitWait = const Duration(seconds: 65),
     this.maxPushWait = const Duration(minutes: 10),
@@ -139,11 +140,9 @@ class SyncEngine extends SyncController {
   final Duration debounce;
 
   /// Web mode: cookie auth (no stored token), one syncing account at a time
-  /// (the browser has a single `bbu_sync` cookie), cached keys expire.
+  /// (the browser has a single `bbu_sync` cookie), cached keys expire
+  /// ([SyncAccountState.webKeyRetention]).
   final bool web;
-
-  /// On the web the cached E2E key is dropped after this long.
-  final Duration webDekMaxAge;
 
   /// [syncAll] skips accounts synced more recently than this.
   final Duration resumeInterval;
@@ -162,6 +161,11 @@ class SyncEngine extends SyncController {
   final Map<String, _Meta> _meta = {};
   final Map<String, E2eKeys> _keys = {};
   final Map<String, DateTime> _keysAt = {};
+
+  /// Web: accounts whose key in [_keys] is only in memory, for this tab
+  /// ([WebKeyRetention.tab], or a stored copy removed by a shorter
+  /// retention): never expires, kept by [_reload] (nothing to re-read).
+  final Set<String> _tabOnly = {};
   final Map<String, Future<void>> _locks = {};
   final Map<String, Future<SyncAccountState>> _queued = {};
 
@@ -196,6 +200,9 @@ class SyncEngine extends SyncController {
   bool get singleAccountOnly => web;
 
   @override
+  bool get webKeyChoice => web;
+
+  @override
   Map<String, SyncAccountState> build() {
     ref.listen(lessonNotesProvider, (_, _) => _onNotesChanged());
     ref.onDispose(() => _debounceTimer?.cancel());
@@ -218,6 +225,7 @@ class SyncEngine extends SyncController {
     final seq = v['lastSeq'];
     final header = v['pendingHeader'];
     final unsendable = v['unsendable'];
+    final retention = v['webKeyRetention'];
     final meta = _Meta(
       lastSeq: seq is num ? seq.toInt() : 0,
       fullPush: v['fullPush'] == true,
@@ -244,6 +252,9 @@ class SyncEngine extends SyncController {
           : null,
       error: v['error'] is String ? v['error'] as String : null,
       e2eSetupPending: _setupPending(e2eOn, meta),
+      webKeyRetention:
+          WebKeyRetention.values.asNameMap()[retention] ??
+          WebKeyRetention.standard,
     );
     return (state, meta);
   }
@@ -296,6 +307,8 @@ class SyncEngine extends SyncController {
       'pendingHeader': ?m?.pendingHeader,
       if (m?.recoveryUnseen ?? false) 'recoveryUnseen': true,
       if (m != null && m.unsendable.isNotEmpty) 'unsendable': {...m.unsendable},
+      if (s.webKeyRetention != WebKeyRetention.standard)
+        'webKeyRetention': s.webKeyRetention.name,
     };
   }
 
@@ -328,20 +341,29 @@ class SyncEngine extends SyncController {
 
   /// Web: replaces the in-memory state of [accountId] with the persisted
   /// one (another tab may have changed it; also drops the key from memory
-  /// so it is read again from the secret store).
+  /// so it is read again from the secret store, except a key that is only
+  /// in memory ([_tabOnly]) while the account still uses E2E and no other
+  /// tab stored a key meanwhile).
   Future<void> _reload(String accountId) async {
     if (!web || !ref.mounted) return;
     await _saving;
     final Object? raw;
+    var stored = false;
     try {
       raw = await _store.read(storeKey);
+      if (_tabOnly.contains(accountId)) {
+        stored = await _secrets.read(_dekId(accountId)) != null;
+      }
     } catch (_) {
       return;
     }
     if (!ref.mounted) return;
-    _keys.remove(accountId);
-    _keysAt.remove(accountId);
     final d = _decodeOne(accountId, raw is Map ? raw[accountId] : null);
+    if (stored || d == null || !d.$1.e2e || !_tabOnly.contains(accountId)) {
+      _keys.remove(accountId);
+      _keysAt.remove(accountId);
+      _tabOnly.remove(accountId);
+    }
     _changed = true;
     if (d == null) {
       _meta.remove(accountId);
@@ -363,6 +385,7 @@ class SyncEngine extends SyncController {
     Object? lastSync = _keep,
     bool? syncing,
     Object? error = _keep,
+    WebKeyRetention? webKeyRetention,
   }) {
     final s = stateOf(accountId);
     final next = SyncAccountState(
@@ -379,6 +402,7 @@ class SyncEngine extends SyncController {
       syncing: syncing ?? s.syncing,
       error: identical(error, _keep) ? s.error : error as String?,
       e2eSetupPending: _setupPending(e2e ?? s.e2e, _meta[accountId]),
+      webKeyRetention: webKeyRetention ?? s.webKeyRetention,
     );
     if (ref.mounted) {
       _changed = true;
@@ -392,6 +416,7 @@ class SyncEngine extends SyncController {
     _meta.remove(accountId);
     _keys.remove(accountId);
     _keysAt.remove(accountId);
+    _tabOnly.remove(accountId);
     if (ref.mounted) {
       _changed = true;
       state = {...state}..remove(accountId);
@@ -427,13 +452,41 @@ class SyncEngine extends SyncController {
     return token;
   }
 
-  bool _expired(DateTime? at) =>
-      web && (at == null || _now().difference(at) > webDekMaxAge);
+  WebKeyRetention _retention(String accountId) =>
+      stateOf(accountId).webKeyRetention;
+
+  /// Web: whether a key stored at [at] may no longer be used under
+  /// [retention] (a stored key is always too old for [WebKeyRetention.tab]).
+  bool _expired(DateTime? at, WebKeyRetention retention) {
+    if (!web || retention == WebKeyRetention.untilSignOut) return false;
+    final max = retention.maxAge;
+    return max == null || at == null || _now().difference(at) > max;
+  }
+
+  /// Web: when the stored key of [accountId] was cached (null: none, or
+  /// without a timestamp).
+  Future<(bool, DateTime?)> _storedKeyAt(String accountId) async {
+    final raw = await _secrets.read(_dekId(accountId));
+    if (raw == null) return (false, null);
+    try {
+      final j = jsonDecode(raw);
+      final at = j is Map ? j['at'] : null;
+      return (
+        true,
+        at is num ? DateTime.fromMillisecondsSinceEpoch(at.toInt()) : null,
+      );
+    } catch (_) {
+      return (true, null);
+    }
+  }
 
   Future<E2eKeys?> _cachedKeys(String accountId) async {
     final mem = _keys[accountId];
     if (mem != null) {
-      if (!_expired(_keysAt[accountId])) return mem;
+      if (_tabOnly.contains(accountId) ||
+          !_expired(_keysAt[accountId], _retention(accountId))) {
+        return mem;
+      }
       await _dropKeys(accountId);
       return null;
     }
@@ -446,7 +499,7 @@ class SyncEngine extends SyncController {
       final cachedAt = at is num
           ? DateTime.fromMillisecondsSinceEpoch(at.toInt())
           : null;
-      if (_expired(cachedAt)) {
+      if (_expired(cachedAt, _retention(accountId))) {
         await _dropKeys(accountId);
         return null;
       }
@@ -458,10 +511,18 @@ class SyncEngine extends SyncController {
     }
   }
 
+  /// Keeps [keys] in memory and (unless the web retention is
+  /// [WebKeyRetention.tab]) in the secret store, stamped now.
   Future<void> _cacheKeys(String accountId, E2eKeys keys) async {
     final now = _now();
     _keys[accountId] = keys;
     _keysAt[accountId] = now;
+    if (web && _retention(accountId) == WebKeyRetention.tab) {
+      _tabOnly.add(accountId);
+      await _secrets.delete(_dekId(accountId)).catchError((_) {});
+      return;
+    }
+    _tabOnly.remove(accountId);
     await _secrets.write(
       _dekId(accountId),
       jsonEncode({
@@ -474,6 +535,7 @@ class SyncEngine extends SyncController {
   Future<void> _dropKeys(String accountId) async {
     _keys.remove(accountId);
     _keysAt.remove(accountId);
+    _tabOnly.remove(accountId);
     await _secrets.delete(_dekId(accountId)).catchError((_) {});
   }
 
@@ -1627,6 +1689,7 @@ class SyncEngine extends SyncController {
           identity: session.identity,
           e2e: session.e2e,
           error: null,
+          webKeyRetention: options.webKeyRetention,
         );
         await _save(accountId);
         var setUpE2e = passphrase != null && !session.e2e;
@@ -1719,12 +1782,16 @@ class SyncEngine extends SyncController {
   @override
   Future<SyncAccountState> unlock(
     String accountId,
-    String passphraseOrCode,
-  ) async {
+    String passphraseOrCode, {
+    WebKeyRetention? webKeyRetention,
+  }) async {
     return _userOp(accountId, () async {
       final s = stateOf(accountId);
       if (s.phase == SyncPhase.off || s.phase == SyncPhase.signedOut) {
         throw const SyncException('Sync is not on for this account.');
+      }
+      if (webKeyRetention != null) {
+        _update(accountId, webKeyRetention: webKeyRetention);
       }
       try {
         await _authed(accountId, () async {
@@ -1839,6 +1906,7 @@ class SyncEngine extends SyncController {
     String accountId,
     String passphrase, {
     bool withRecoveryCode = true,
+    WebKeyRetention? webKeyRetention,
   }) async {
     return _userOp(accountId, () async {
       final s = stateOf(accountId);
@@ -1847,6 +1915,9 @@ class SyncEngine extends SyncController {
       }
       if (s.e2e) {
         throw const SyncException('End-to-end encryption is already on.');
+      }
+      if (webKeyRetention != null) {
+        _update(accountId, webKeyRetention: webKeyRetention);
       }
       final meta = _metaOf(accountId);
       if (meta.pendingHeader != null) {
@@ -1981,6 +2052,40 @@ class SyncEngine extends SyncController {
       error: err != null && err.contains('recovery code') ? null : _keep,
     );
     await _save(accountId);
+  }
+
+  /// Persists the choice; on the web applies it to the key right away:
+  /// * [WebKeyRetention.tab]: the stored copy is removed now, the key in
+  ///   memory stays for this tab;
+  /// * a stored copy older than the new limit is removed, the key in memory
+  ///   stays for this tab (not locked out mid-session; a reload asks for
+  ///   the passphrase);
+  /// * a key that was only in memory is stored from now on (stamped now).
+  @override
+  Future<void> setWebKeyRetention(
+    String accountId,
+    WebKeyRetention retention,
+  ) async {
+    await _userOp(accountId, () async {
+      if (!stateOf(accountId).enabled) {
+        throw const SyncException('Sync is not on for this account.');
+      }
+      // Loaded under the old retention (the reload at the start of the
+      // operation dropped a stored key from memory).
+      final mem = stateOf(accountId).e2e ? await _cachedKeys(accountId) : null;
+      _update(accountId, webKeyRetention: retention);
+      await _save(accountId);
+      if (!web) return;
+      if (mem != null && _tabOnly.contains(accountId)) {
+        if (retention != WebKeyRetention.tab) await _cacheKeys(accountId, mem);
+        return;
+      }
+      final (stored, at) = await _storedKeyAt(accountId);
+      if (stored && _expired(at, retention)) {
+        await _secrets.delete(_dekId(accountId)).catchError((_) {});
+        if (mem != null) _tabOnly.add(accountId);
+      }
+    });
   }
 
   /// Unlocked keys and the current header, for header changes.

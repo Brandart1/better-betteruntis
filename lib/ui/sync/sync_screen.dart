@@ -128,8 +128,13 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
             'Your other devices then need this passphrase once.',
         confirmLabel: 'Turn on',
         offerRecoveryCode: true,
-        action: (pass, recovery) =>
-            _sync.enableE2e(_id, pass, withRecoveryCode: recovery),
+        offerWebKeyRetention: _sync.webKeyChoice,
+        action: (pass, recovery, retention) => _sync.enableE2e(
+          _id,
+          pass,
+          withRecoveryCode: recovery,
+          webKeyRetention: _sync.webKeyChoice ? retention : null,
+        ),
       ),
     );
     final code = done?.value.recoveryCode;
@@ -151,7 +156,7 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
           'Your other devices stay unlocked. Use the new passphrase on new '
           'devices.',
       confirmLabel: 'Change',
-      action: (pass, _) => _sync.changePassphrase(_id, pass),
+      action: (pass, _, _) => _sync.changePassphrase(_id, pass),
     ),
   );
 
@@ -202,6 +207,16 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
       title: 'Forgetting sync',
       action: () => _sync.signOutDevice(_id),
     );
+  }
+
+  /// Web: changes how long the browser remembers the key.
+  Future<void> _setRetention(WebKeyRetention r) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _sync.setWebKeyRetention(_id, r);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(syncErrorText(e))));
+    }
   }
 
   Future<void> _turnOffE2e() async {
@@ -431,6 +446,13 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
             : 'The server can read your synced notes. With encryption, it '
                   'only stores a copy it can\'t read.',
       ),
+      if (s.e2e && _sync.webKeyChoice) ...[
+        const SizedBox(height: 8),
+        WebKeyRetentionField(
+          value: s.webKeyRetention,
+          onChanged: _setRetention,
+        ),
+      ],
       _buttons(
         s.e2e
             ? [

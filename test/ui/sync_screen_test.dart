@@ -43,6 +43,12 @@ class FakeSync extends SyncController {
   @override
   bool get singleAccountOnly => singleAccount;
 
+  /// Web version: the key retention choice is shown.
+  static bool webKeys = false;
+
+  @override
+  bool get webKeyChoice => webKeys;
+
   /// Runs inside enableE2e before it returns.
   static Future<void> Function()? duringEnableE2e;
 
@@ -66,7 +72,10 @@ class FakeSync extends SyncController {
 
   @override
   Future<SyncEnableResult> enable(String id, SyncEnableOptions o) async {
-    calls.add('enable:${o.passphrase}:${o.withRecoveryCode}');
+    calls.add(
+      'enable:${o.passphrase}:${o.withRecoveryCode}'
+      '${webKeys ? ':${o.webKeyRetention.name}' : ''}',
+    );
     if (serverHasE2e) {
       final s = SyncAccountState(
         accountId: id,
@@ -87,8 +96,14 @@ class FakeSync extends SyncController {
   }
 
   @override
-  Future<SyncAccountState> unlock(String id, String secret) async {
-    calls.add('unlock:$secret');
+  Future<SyncAccountState> unlock(
+    String id,
+    String secret, {
+    WebKeyRetention? webKeyRetention,
+  }) async {
+    calls.add(
+      'unlock:$secret${webKeyRetention == null ? '' : ':${webKeyRetention.name}'}',
+    );
     if (secret != _passphrase && secret != _code) {
       throw const SyncException('Wrong passphrase.', wrongSecret: true);
     }
@@ -134,8 +149,12 @@ class FakeSync extends SyncController {
     String id,
     String passphrase, {
     bool withRecoveryCode = true,
+    WebKeyRetention? webKeyRetention,
   }) async {
-    calls.add('enableE2e:$passphrase:$withRecoveryCode');
+    calls.add(
+      'enableE2e:$passphrase:$withRecoveryCode'
+      '${webKeyRetention == null ? '' : ':${webKeyRetention.name}'}',
+    );
     await duringEnableE2e?.call();
     final s = _on(id, e2e: true, recovery: withRecoveryCode);
     _set(s);
@@ -164,6 +183,23 @@ class FakeSync extends SyncController {
   @override
   Future<void> acknowledgeRecoveryCode(String id) async =>
       calls.add('acknowledgeRecoveryCode');
+
+  @override
+  Future<void> setWebKeyRetention(String id, WebKeyRetention r) async {
+    calls.add('setWebKeyRetention:${r.name}');
+    final s = stateOf(id);
+    _set(
+      SyncAccountState(
+        accountId: id,
+        phase: s.phase,
+        identity: s.identity,
+        e2e: s.e2e,
+        hasRecoveryCode: s.hasRecoveryCode,
+        lastSync: s.lastSync,
+        webKeyRetention: r,
+      ),
+    );
+  }
 }
 
 void main() {
@@ -174,6 +210,7 @@ void main() {
     FakeSync.serverHasE2e = false;
     FakeSync.isAvailable = true;
     FakeSync.singleAccount = false;
+    FakeSync.webKeys = false;
     FakeSync.duringEnableE2e = null;
   });
 
@@ -604,5 +641,124 @@ void main() {
     expect(find.byKey(const ValueKey('sync-get-apps')), findsOneWidget);
     // Only the synced account's section offers sync actions.
     expect(find.byKey(const ValueKey('sync-turn-on')), findsNothing);
+  });
+
+  group('web key retention', () {
+    const e2eOn = SyncAccountState(
+      accountId: 'demo',
+      phase: SyncPhase.on,
+      identity: _identity,
+      e2e: true,
+    );
+
+    Future<void> choose(WidgetTester tester, WebKeyRetention r) async {
+      await tap(tester, key('sync-key-retention'));
+      await tester.tap(find.text(r.label).last);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('phone apps: no choice anywhere', (tester) async {
+      FakeSync.initial = {'demo': e2eOn};
+      await pump(tester);
+      expect(find.text('End-to-end encryption is on'), findsOneWidget);
+      expect(key('sync-key-retention'), findsNothing);
+    });
+
+    testWidgets('web: the encryption section shows and changes it', (
+      tester,
+    ) async {
+      FakeSync.webKeys = true;
+      FakeSync.initial = {'demo': e2eOn};
+      final sync = await pump(tester);
+      expect(key('sync-key-retention'), findsOneWidget);
+      expect(find.text('Remember key in this browser'), findsOneWidget);
+      expect(find.text('30 days'), findsOneWidget);
+      expect(find.textContaining('Shorter is safer'), findsOneWidget);
+      await choose(tester, WebKeyRetention.tab);
+      expect(sync.calls, ['setWebKeyRetention:tab']);
+      expect(sync.stateOf('demo').webKeyRetention, WebKeyRetention.tab);
+      expect(find.text(WebKeyRetention.tab.label), findsOneWidget);
+    });
+
+    testWidgets('web: not shown without encryption', (tester) async {
+      FakeSync.webKeys = true;
+      FakeSync.initial = {
+        'demo': const SyncAccountState(
+          accountId: 'demo',
+          phase: SyncPhase.on,
+          identity: _identity,
+        ),
+      };
+      await pump(tester);
+      expect(key('sync-key-retention'), findsNothing);
+    });
+
+    testWidgets('web: chosen in the opt-in passphrase dialog', (tester) async {
+      FakeSync.webKeys = true;
+      final sync = await pump(tester);
+      await agreeAndChoose(tester, 'sync-choose-e2e');
+      expect(key('sync-key-retention'), findsOneWidget);
+      await choose(tester, WebKeyRetention.day);
+      await tester.enterText(key('sync-passphrase'), _passphrase);
+      await tester.enterText(key('sync-passphrase-repeat'), _passphrase);
+      await tap(tester, key('sync-passphrase-submit'));
+      expect(sync.calls, ['enable:$_passphrase:true:day']);
+    });
+
+    testWidgets('phone apps: the opt-in has no choice', (tester) async {
+      await pump(tester);
+      await agreeAndChoose(tester, 'sync-choose-e2e');
+      expect(key('sync-passphrase-dialog'), findsOneWidget);
+      expect(key('sync-key-retention'), findsNothing);
+    });
+
+    testWidgets('web: chosen when unlocking (default 30 days)', (tester) async {
+      FakeSync.webKeys = true;
+      FakeSync.initial = {
+        'demo': const SyncAccountState(
+          accountId: 'demo',
+          phase: SyncPhase.locked,
+          identity: _identity,
+          e2e: true,
+        ),
+      };
+      final sync = await pump(tester);
+      await tap(tester, key('sync-unlock'));
+      expect(key('sync-key-retention'), findsOneWidget);
+      expect(find.text('30 days'), findsOneWidget);
+      await choose(tester, WebKeyRetention.untilSignOut);
+      await tester.enterText(key('sync-unlock-field'), _passphrase);
+      await tap(tester, key('sync-unlock-submit'));
+      expect(sync.calls, ['unlock:$_passphrase:untilSignOut']);
+    });
+
+    testWidgets('web: chosen when turning on encryption later', (tester) async {
+      FakeSync.webKeys = true;
+      FakeSync.initial = {
+        'demo': const SyncAccountState(
+          accountId: 'demo',
+          phase: SyncPhase.on,
+          identity: _identity,
+        ),
+      };
+      final sync = await pump(tester);
+      await tap(tester, key('sync-e2e-on'));
+      await choose(tester, WebKeyRetention.week);
+      await tester.enterText(key('sync-passphrase'), _passphrase);
+      await tester.enterText(key('sync-passphrase-repeat'), _passphrase);
+      await tap(tester, key('sync-passphrase-submit'));
+      expect(sync.calls.first, 'enableE2e:$_passphrase:true:week');
+    });
+
+    testWidgets('web: narrow screen, large text: no overflow', (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      FakeSync.webKeys = true;
+      FakeSync.initial = {'demo': e2eOn};
+      await pump(tester, size: const Size(360, 2400));
+      expect(tester.takeException(), isNull);
+      await choose(tester, WebKeyRetention.untilSignOut);
+      expect(tester.takeException(), isNull);
+    });
   });
 }

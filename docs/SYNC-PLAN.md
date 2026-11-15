@@ -181,8 +181,15 @@ read note texts, exam marks or which lessons they belong to.
 - **Changing the passphrase** only re-wraps the DEK; notes are not
   re-encrypted.
 - On each device the unwrapped DEK is cached in secure storage (Android
-  Keystore / iOS Keychain via flutter_secure_storage; on the web
-  localStorage, which is weaker, so the web asks again after 30 days).
+  Keystore / iOS Keychain via flutter_secure_storage). On the web it is
+  localStorage, which is weaker (readable by page scripts and extensions,
+  and by others using the browser), so the user chooses per account how
+  long the browser remembers it: only while the tab is open (memory only,
+  never stored; a reload asks again), 1 day, 7 days, **30 days (default)**
+  or until sync is turned off / signed out on this device. The age is
+  judged by the stored timestamp, also for the copy in memory; a shorter
+  choice applies at once (a stored key older than the new limit is
+  removed, the tab keeps its key in memory until it is reloaded).
 
 ### E2E header (server, readable by the server)
 
