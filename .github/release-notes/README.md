@@ -14,8 +14,11 @@
 
 The app bundles the notes of every released version (tag-named files only:
 `vX.Y.Z.md`, `vX.Y.Z-beta.md`, `vX.Y.Z-alpha[.N].md`; not `next*.md`,
-`default.md` or this README) and shows the ones a user missed after an
-update, plus a "What's new" entry in the menu. Asset bundles can't read this
+`default.md` or this README). Beta and stable builds show the ones a user
+missed after an update in a dialog (never alpha notes); alpha and dev builds
+never show that dialog and don't record the version, so a later beta still
+shows everything since the last beta/stable version opened. Every build has
+a "What's new" entry in the menu. Asset bundles can't read this
 dot-directory reliably, so the notes are copied to `assets/release_notes/`
 (with an `index.json`):
 
@@ -27,6 +30,7 @@ renaming `next.md`) and commit `assets/release_notes/` together with the notes.
 the release workflow regenerates it before building. Never edit the copies.
 
 In the app, `## New in this release` and `## Install` sections are left out;
-headings, lists, **bold**, *italic*, `code` and links are rendered. Alpha
-builds show alpha, beta and stable notes; beta and stable builds skip alpha
-notes, so a beta's notes must cover everything since the previous beta.
+headings, lists, **bold**, *italic*, `code` and links are rendered. In alpha
+builds the menu entry lists alpha, beta and stable notes (alpha notes are
+only visible there); beta and stable builds skip alpha notes everywhere, so a
+beta's notes must cover everything since the previous beta.

@@ -19,11 +19,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 const _tags = [
+  'v0.5.0',
+  'v0.4.9-beta',
   'v0.4.8-alpha.3',
   'v0.4.8-alpha.2',
   'v0.4.8-alpha',
   'v0.4.7-beta',
   'v0.4.7-alpha',
+  'v0.4.6-beta',
 ];
 
 /// Fake asset bundle: an index plus one note per tag.
@@ -100,94 +103,126 @@ void main() {
   final dialog = find.byKey(const ValueKey('whats-new-dialog'));
 
   testWidgets('fresh install: stores the version silently', (tester) async {
-    await pump(tester);
+    await pump(tester, current: '0.4.9-beta', channel: 'beta');
     expect(dialog, findsNothing);
-    expect(store.values[lastVersionOpenedKey], '0.4.8-alpha.3');
+    expect(store.values[lastVersionOpenedKey], '0.4.9-beta');
   });
 
   testWidgets('no account yet (login screen): nothing happens', (tester) async {
     store.values[lastVersionOpenedKey] = '0.4.7-beta';
-    await pump(tester, accounts: const []);
+    await pump(
+      tester,
+      current: '0.4.9-beta',
+      channel: 'beta',
+      accounts: const [],
+    );
     expect(dialog, findsNothing);
     expect(store.values[lastVersionOpenedKey], '0.4.7-beta');
   });
 
   testWidgets('same version: no dialog', (tester) async {
-    store.values[lastVersionOpenedKey] = '0.4.8-alpha.3';
-    await pump(tester);
+    store.values[lastVersionOpenedKey] = '0.4.9-beta';
+    await pump(tester, current: '0.4.9-beta', channel: 'beta');
     expect(dialog, findsNothing);
-    expect(store.values[lastVersionOpenedKey], '0.4.8-alpha.3');
+    expect(store.values[lastVersionOpenedKey], '0.4.9-beta');
   });
 
   testWidgets('downgrade: no dialog, stored version kept', (tester) async {
     store.values[lastVersionOpenedKey] = '0.5.0';
-    await pump(tester);
+    await pump(tester, current: '0.4.9-beta', channel: 'beta');
     expect(dialog, findsNothing);
     expect(store.values[lastVersionOpenedKey], '0.5.0');
   });
 
   testWidgets(
-    'missed releases: newest expanded, older collapsed; stored after Close',
+    'missed releases: newest expanded, older collapsed, no alphas; stored after Close',
     (tester) async {
-      store.values[lastVersionOpenedKey] = '0.4.7-beta';
-      await pump(tester);
+      store.values[lastVersionOpenedKey] = '0.4.6-beta';
+      await pump(tester, current: '0.5.0', channel: 'stable');
       expect(dialog, findsOneWidget);
       expect(find.text("What's new"), findsOneWidget);
-      // Newest first, every missed release, nothing older.
-      expect(find.text('Version 0.4.8-alpha.3'), findsOneWidget);
-      expect(find.text('Version 0.4.8-alpha.2'), findsOneWidget);
-      expect(find.text('Version 0.4.8-alpha.1'), findsOneWidget);
-      expect(find.text('Version 0.4.7-beta'), findsNothing);
+      // Newest first, every missed beta/stable release, nothing older.
+      expect(find.text('Version 0.5.0'), findsOneWidget);
+      expect(find.text('Version 0.4.9-beta'), findsOneWidget);
+      expect(find.text('Version 0.4.7-beta'), findsOneWidget);
+      expect(find.text('Version 0.4.6-beta'), findsNothing);
+      expect(find.textContaining('alpha'), findsNothing);
       expect(
-        tester.getTopLeft(find.text('Version 0.4.8-alpha.3')).dy,
-        lessThan(tester.getTopLeft(find.text('Version 0.4.8-alpha.2')).dy),
+        tester.getTopLeft(find.text('Version 0.5.0')).dy,
+        lessThan(tester.getTopLeft(find.text('Version 0.4.9-beta')).dy),
       );
       // Only the newest is expanded; the intro heading and Install are gone.
-      expect(find.textContaining('of v0.4.8-alpha.3'), findsOneWidget);
-      expect(find.textContaining('of v0.4.8-alpha.2'), findsNothing);
+      expect(find.textContaining('of v0.5.0'), findsOneWidget);
+      expect(find.textContaining('of v0.4.9-beta'), findsNothing);
       expect(find.text('New in this release'), findsNothing);
       expect(find.textContaining('Download it'), findsNothing);
       // Not stored while the dialog is open.
-      expect(store.values[lastVersionOpenedKey], '0.4.7-beta');
+      expect(store.values[lastVersionOpenedKey], '0.4.6-beta');
 
-      await tester.tap(find.text('Version 0.4.8-alpha.2'));
+      await tester.tap(find.text('Version 0.4.9-beta'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('of v0.4.8-alpha.2'), findsOneWidget);
+      expect(find.textContaining('of v0.4.9-beta'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('whats-new-close')));
       await tester.pumpAndSettle();
       expect(dialog, findsNothing);
-      expect(store.values[lastVersionOpenedKey], '0.4.8-alpha.3');
+      expect(store.values[lastVersionOpenedKey], '0.5.0');
     },
   );
 
   testWidgets('beta channel skips alpha notes', (tester) async {
     store.values[lastVersionOpenedKey] = '0.4.6-beta';
-    await pump(tester, current: '0.4.7-beta', channel: 'beta');
+    await pump(tester, current: '0.4.9-beta', channel: 'beta');
+    expect(find.text('Version 0.4.9-beta'), findsOneWidget);
     expect(find.text('Version 0.4.7-beta'), findsOneWidget);
+    expect(find.text('Version 0.4.8-alpha.3'), findsNothing);
     expect(find.text('Version 0.4.7-alpha.1'), findsNothing);
   });
+
+  for (final channel in ['alpha', 'dev']) {
+    group('$channel build: never a dialog, nothing stored', () {
+      testWidgets('fresh install', (tester) async {
+        await pump(tester, channel: channel);
+        expect(dialog, findsNothing);
+        expect(store.values.containsKey(lastVersionOpenedKey), isFalse);
+      });
+
+      testWidgets('missed releases', (tester) async {
+        store.values[lastVersionOpenedKey] = '0.4.6-beta';
+        await pump(tester, channel: channel);
+        expect(dialog, findsNothing);
+        expect(store.values[lastVersionOpenedKey], '0.4.6-beta');
+      });
+
+      testWidgets('downgrade', (tester) async {
+        store.values[lastVersionOpenedKey] = '0.5.0';
+        await pump(tester, channel: channel);
+        expect(dialog, findsNothing);
+        expect(store.values[lastVersionOpenedKey], '0.5.0');
+      });
+    });
+  }
 
   testWidgets('dismissing by tapping outside also stores the version', (
     tester,
   ) async {
-    store.values[lastVersionOpenedKey] = '0.4.8-alpha.2';
-    await pump(tester);
+    store.values[lastVersionOpenedKey] = '0.4.7-beta';
+    await pump(tester, current: '0.4.9-beta', channel: 'beta');
     expect(dialog, findsOneWidget);
     await tester.tapAt(const Offset(5, 5));
     await tester.pumpAndSettle();
     expect(dialog, findsNothing);
-    expect(store.values[lastVersionOpenedKey], '0.4.8-alpha.3');
+    expect(store.values[lastVersionOpenedKey], '0.4.9-beta');
   });
 
   testWidgets('links in the notes open via the URL opener', (tester) async {
-    store.values[lastVersionOpenedKey] = '0.4.8-alpha.2';
-    await pump(tester);
+    store.values[lastVersionOpenedKey] = '0.4.7-beta';
+    await pump(tester, current: '0.4.9-beta', channel: 'beta');
     final text = find.textContaining('the docs', findRichText: true);
     expect(text, findsOneWidget);
     await tester.tapOnText(find.textRange.ofSubstring('the docs'));
     await tester.pump();
-    expect(opened, [Uri.parse('https://example.com/v0.4.8-alpha.3')]);
+    expect(opened, [Uri.parse('https://example.com/v0.4.9-beta')]);
   });
 
   testWidgets('disabled: nothing is read or stored', (tester) async {
@@ -260,7 +295,10 @@ void main() {
       expect(find.text('Version 0.4.8-alpha.1'), findsOneWidget);
       expect(find.text('Version 0.4.7-beta'), findsOneWidget);
       expect(find.text('Version 0.4.7-alpha.1'), findsOneWidget);
+      expect(find.text('Version 0.4.9-beta'), findsNothing);
       expect(find.textContaining('of v0.4.8-alpha.2'), findsOneWidget);
+      // The automatic check never runs in alpha builds.
+      expect(store.values.containsKey(lastVersionOpenedKey), isFalse);
     });
 
     testWidgets('beta channel: no alpha notes', (tester) async {

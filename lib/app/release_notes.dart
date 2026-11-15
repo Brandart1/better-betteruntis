@@ -92,7 +92,8 @@ sealed class WhatsNewDecision {
   const WhatsNewDecision();
 }
 
-/// Same version, or a downgrade: nothing to show, nothing to store.
+/// Alpha/dev build, same version, or a downgrade: nothing to show, nothing
+/// to store.
 class WhatsNewNothing extends WhatsNewDecision {
   const WhatsNewNothing();
 }
@@ -109,12 +110,24 @@ class WhatsNewShow extends WhatsNewDecision {
   final List<ReleaseNote> notes;
 }
 
+/// The automatic "What's new" dialog at start. It only runs in beta and
+/// stable builds: alpha and dev builds (and unknown channels, which behave
+/// like dev) get [WhatsNewNothing] right away and don't store the version,
+/// so a user who later installs a beta sees every beta/stable note since the
+/// last beta/stable version they opened. Because only beta and stable get
+/// here, the dialog never contains alpha notes ([noteVisibleIn]). The menu's
+/// "What's new" screen doesn't use this and lists alpha notes in alpha
+/// builds.
 WhatsNewDecision decideWhatsNew({
   required Object? stored,
   required ReleaseVersion current,
   required List<ReleaseNote> all,
   required String channel,
 }) {
+  final ch = ReleaseChannel.tryParse(channel);
+  if (ch != ReleaseChannel.beta && ch != ReleaseChannel.stable) {
+    return const WhatsNewNothing();
+  }
   final last = stored is String ? ReleaseVersion.tryParse(stored) : null;
   if (last == null) return const WhatsNewStoreSilently();
   if (last >= current) return const WhatsNewNothing();

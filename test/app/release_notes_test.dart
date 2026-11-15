@@ -42,65 +42,84 @@ List<String>? shown(Object? stored, String current, String channel) {
 void main() {
   group('decideWhatsNew', () {
     test('fresh install / first run of the feature: store silently', () {
-      expect(shown(null, '0.4.8-alpha.3', 'alpha'), ['<store>']);
-      expect(shown('garbage', '0.4.8-alpha.3', 'alpha'), ['<store>']);
-      expect(shown(42, '0.4.8-alpha.3', 'alpha'), ['<store>']);
+      expect(shown(null, '0.4.7-beta', 'beta'), ['<store>']);
+      expect(shown('garbage', '0.5.0', 'stable'), ['<store>']);
+      expect(shown(42, '0.4.7-beta', 'beta'), ['<store>']);
     });
 
     test('same version: nothing', () {
-      expect(shown('0.4.8-alpha.3', '0.4.8-alpha.3', 'alpha'), isNull);
-      // A plain -alpha equals alpha.1.
-      expect(shown('0.4.8-alpha', '0.4.8-alpha.1', 'alpha'), isNull);
+      expect(shown('0.4.7-beta', '0.4.7-beta', 'beta'), isNull);
+      expect(shown('0.5.0', '0.5.0', 'stable'), isNull);
     });
 
     test('downgrade: nothing', () {
-      expect(shown('0.5.0', '0.4.8-alpha.3', 'alpha'), isNull);
-      expect(shown('0.4.8-alpha.3', '0.4.8-alpha.2', 'alpha'), isNull);
+      expect(shown('0.5.0', '0.4.7-beta', 'beta'), isNull);
       expect(shown('0.4.7', '0.4.7-beta', 'beta'), isNull);
     });
 
-    test('one missed alpha', () {
-      expect(shown('0.4.8-alpha.2', '0.4.8-alpha.3', 'alpha'), [
-        'v0.4.8-alpha.3',
-      ]);
+    test('one missed beta', () {
+      expect(shown('0.4.6-beta', '0.4.7-beta', 'beta'), ['v0.4.7-beta']);
     });
 
     test(
-      'many missed: every release > stored and <= current, newest first',
+      'many missed: every beta/stable > stored and <= current, no alphas',
       () {
-        expect(shown('0.4.6-beta', '0.4.8-alpha.3', 'alpha'), [
+        expect(shown('0.4.6-beta', '0.5.0', 'stable'), [
+          'v0.5.0',
+          'v0.4.7-beta',
+        ]);
+        // Coming from an alpha onto the beta channel.
+        expect(shown('0.4.7-alpha', '0.4.7-beta', 'beta'), ['v0.4.7-beta']);
+        expect(shown('0.4.6-alpha', '0.5.0', 'stable'), [
+          'v0.5.0',
+          'v0.4.7-beta',
+          'v0.4.6-beta',
+        ]);
+      },
+    );
+
+    test(
+      'newer than stored but only alpha notes in between: store silently',
+      () {
+        expect(shown('0.4.7-beta', '0.4.8-beta', 'beta'), ['<store>']);
+      },
+    );
+
+    for (final channel in ['alpha', 'dev', 'something']) {
+      test('$channel builds never show the dialog nor store anything', () {
+        // Fresh install.
+        expect(shown(null, '0.4.8-alpha.3', channel), isNull);
+        // Missed releases.
+        expect(shown('0.4.6-beta', '0.4.8-alpha.3', channel), isNull);
+        expect(shown('0.4.8-alpha.2', '0.4.8-alpha.3', channel), isNull);
+        // Same version and downgrade.
+        expect(shown('0.4.8-alpha.3', '0.4.8-alpha.3', channel), isNull);
+        expect(shown('0.5.0', '0.4.8-alpha.3', channel), isNull);
+      });
+    }
+  });
+
+  test('selectReleaseNotes: alpha and dev show every note in range', () {
+    for (final ch in ['alpha', 'dev']) {
+      expect(
+        tags(
+          selectReleaseNotes(
+            all,
+            after: v('0.4.6-beta'),
+            upTo: v('0.4.8-alpha.3'),
+            channel: ch,
+          ),
+        ),
+        [
           'v0.4.8-alpha.3',
           'v0.4.8-alpha.2',
           'v0.4.8-alpha',
           'v0.4.7-beta',
           'v0.4.7-alpha.2',
           'v0.4.7-alpha',
-        ]);
-      },
-    );
-
-    test('beta and stable builds skip alpha notes', () {
-      expect(shown('0.4.6-beta', '0.4.7-beta', 'beta'), ['v0.4.7-beta']);
-      expect(shown('0.4.6-beta', '0.5.0', 'stable'), ['v0.5.0', 'v0.4.7-beta']);
-      // Coming from an alpha onto the beta channel.
-      expect(shown('0.4.7-alpha', '0.4.7-beta', 'beta'), ['v0.4.7-beta']);
-    });
-
-    test('dev builds show everything like alpha', () {
-      expect(shown('0.4.8-alpha', '0.4.8-alpha.3', 'dev'), [
-        'v0.4.8-alpha.3',
-        'v0.4.8-alpha.2',
-      ]);
-    });
-
-    test(
-      'newer than stored but no bundled notes in between: store silently',
-      () {
-        expect(shown('0.4.7-alpha.2', '0.4.7-alpha.3', 'alpha'), ['<store>']);
-        // Only alpha notes in between, on the beta channel.
-        expect(shown('0.4.7-beta', '0.4.8-beta', 'beta'), ['<store>']);
-      },
-    );
+        ],
+      );
+    }
   });
 
   test('selectReleaseNotes without a lower bound', () {
