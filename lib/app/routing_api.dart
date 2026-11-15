@@ -66,6 +66,13 @@ class RoutingUntisApi implements FullUntisApi {
           .messagesOfDay(host: host, school: school, auth: auth, date: date);
 
   @override
+  Future<String> restAuthToken({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) => _for(host).restAuthToken(host: host, school: school, auth: auth);
+
+  @override
   Future<void> probeTeacherSources({
     required String host,
     required String school,

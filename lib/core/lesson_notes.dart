@@ -12,8 +12,25 @@ import 'models.dart';
 import 'settings.dart';
 
 /// What the user added to one lesson.
+///
+/// For the optional sync (lib/sync/) every note carries [updatedAt] and
+/// deletions are kept as tombstones ([deleted]) so they reach other devices.
+/// Equality compares the content ([exam], [text], [deleted]) only, not the
+/// sync metadata.
 class LessonNote {
-  const LessonNote({this.exam = false, this.text = ''});
+  const LessonNote({
+    this.exam = false,
+    this.text = '',
+    this.updatedAt = 0,
+    this.deleted = false,
+    this.dirty = false,
+  });
+
+  /// A deleted note, kept so the deletion can be synced.
+  const LessonNote.tombstone(this.updatedAt, {this.dirty = false})
+    : exam = false,
+      text = '',
+      deleted = true;
 
   /// Marked as an exam by the user.
   final bool exam;
@@ -21,25 +38,58 @@ class LessonNote {
   /// Lesson details entered by the user.
   final String text;
 
-  bool get isEmpty => !exam && text.trim().isEmpty;
+  /// Last change, in milliseconds since the epoch (UTC). 0 for notes stored
+  /// before sync existed (older than anything synced).
+  final int updatedAt;
 
-  LessonNote copyWith({bool? exam, String? text}) =>
-      LessonNote(exam: exam ?? this.exam, text: text ?? this.text);
+  /// Tombstone: the note was removed at [updatedAt].
+  final bool deleted;
+
+  /// Changed on this device and not yet acknowledged by the sync server.
+  final bool dirty;
+
+  bool get isEmpty => deleted || (!exam && text.trim().isEmpty);
+
+  LessonNote copyWith({bool? exam, String? text}) => LessonNote(
+    exam: exam ?? this.exam,
+    text: text ?? this.text,
+    updatedAt: updatedAt,
+    dirty: dirty,
+  );
 
   Map<String, Object?> toJson() => {
     if (exam) 'exam': true,
     if (text.isNotEmpty) 'text': text,
+    if (updatedAt != 0) 'updatedAt': updatedAt,
+    if (deleted) 'deleted': true,
+    if (dirty) 'dirty': true,
   };
 
-  factory LessonNote.fromJson(Map<String, Object?> j) =>
-      LessonNote(exam: j['exam'] == true, text: '${j['text'] ?? ''}');
+  factory LessonNote.fromJson(Map<String, Object?> j) {
+    final at = j['updatedAt'];
+    return LessonNote(
+      exam: j['exam'] == true,
+      text: '${j['text'] ?? ''}',
+      updatedAt: at is num ? at.toInt() : 0,
+      deleted: j['deleted'] == true,
+      dirty: j['dirty'] == true,
+    );
+  }
 
   @override
   bool operator ==(Object other) =>
-      other is LessonNote && other.exam == exam && other.text == text;
+      other is LessonNote &&
+      other.exam == exam &&
+      other.text == text &&
+      other.deleted == deleted;
 
   @override
-  int get hashCode => Object.hash(exam, text);
+  int get hashCode => Object.hash(exam, text, deleted);
+
+  @override
+  String toString() =>
+      'LessonNote(exam: $exam, text: $text, updatedAt: $updatedAt'
+      '${deleted ? ', deleted' : ''}${dirty ? ', dirty' : ''})';
 }
 
 String _two(int v) => v.toString().padLeft(2, '0');
@@ -63,8 +113,9 @@ String lessonNoteKey(String accountId, Period p) {
   ].join('|');
 }
 
-/// [periods] with the user's notes of [accountId] applied. Every period gets
-/// its [Period.noteKey], so the lesson details can add a note later.
+/// [periods] with the user's notes of [accountId] applied (tombstones are
+/// ignored). Every period gets its [Period.noteKey], so the lesson details
+/// can add a note later.
 List<Period> applyLessonNotes(
   List<Period> periods,
   String accountId,
@@ -73,7 +124,8 @@ List<Period> applyLessonNotes(
   for (final p in periods)
     () {
       final key = lessonNoteKey(accountId, p);
-      final n = notes[key];
+      final found = notes[key];
+      final n = found == null || found.isEmpty ? null : found;
       return p.withUserNote(
         noteKey: key,
         userExam: n?.exam ?? false,
@@ -82,6 +134,13 @@ List<Period> applyLessonNotes(
     }(),
 ];
 
+/// Clock for [LessonNote.updatedAt] (overridden in tests).
+final lessonNotesClockProvider = Provider<DateTime Function()>(
+  (ref) => DateTime.now,
+);
+
+/// All notes of all accounts by [lessonNoteKey], including tombstones (use
+/// [LessonNote.isEmpty] or [applyLessonNotes] to skip them).
 final lessonNotesProvider =
     NotifierProvider<LessonNotesNotifier, Map<String, LessonNote>>(
       LessonNotesNotifier.new,
@@ -89,16 +148,27 @@ final lessonNotesProvider =
 
 class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
   static const storeKey = 'lessonNotes';
+
+  /// Tombstones of accounts that don't sync are dropped after this long.
+  static const tombstoneMaxAge = Duration(days: 180);
+
   bool _changed = false;
+  Future<void> _loading = Future.value();
 
   @override
   Map<String, LessonNote> build() {
     final store = ref.watch(settingsStoreProvider);
     final cached = store.peek(storeKey);
-    if (cached != null) return _decode(cached);
-    unawaited(_load(store));
+    if (cached != null) {
+      _loading = Future.value();
+      return _decode(cached);
+    }
+    _loading = _load(store);
     return const {};
   }
+
+  /// Completes once the stored notes are loaded.
+  Future<void> get ready => _loading;
 
   static Map<String, LessonNote> _decode(Object? raw) {
     if (raw is! Map) return const {};
@@ -109,7 +179,8 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
       final n = LessonNote.fromJson({
         for (final f in v.entries) '${f.key}': f.value,
       });
-      if (!n.isEmpty) out['${e.key}'] = n;
+      // Tombstones are kept; empty legacy entries are dropped.
+      if (!n.isEmpty || n.deleted) out['${e.key}'] = n;
     }
     return out;
   }
@@ -122,17 +193,7 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
     } catch (_) {}
   }
 
-  /// Sets the note of each of [keys] (all periods of a merged lesson);
-  /// an empty note removes it.
-  void set(Iterable<String> keys, LessonNote note) {
-    final next = {...state};
-    for (final k in keys) {
-      if (note.isEmpty) {
-        next.remove(k);
-      } else {
-        next[k] = LessonNote(exam: note.exam, text: note.text.trim());
-      }
-    }
+  void _commit(Map<String, LessonNote> next) {
     _changed = true;
     state = next;
     unawaited(
@@ -143,5 +204,103 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
           })
           .catchError((_) {}),
     );
+  }
+
+  /// Sets the note of each of [keys] (all periods of a merged lesson);
+  /// an empty note removes it (leaving a tombstone for sync).
+  void set(Iterable<String> keys, LessonNote note) {
+    final now = ref.read(lessonNotesClockProvider)().millisecondsSinceEpoch;
+    final next = {...state};
+    for (final k in keys) {
+      final old = next[k];
+      // A change always wins over the version it replaces.
+      final at = old == null || now > old.updatedAt ? now : old.updatedAt + 1;
+      if (note.isEmpty) {
+        if (old != null && !old.deleted) {
+          next[k] = LessonNote.tombstone(at, dirty: true);
+        }
+      } else {
+        next[k] = LessonNote(
+          exam: note.exam,
+          text: note.text.trim(),
+          updatedAt: at,
+          dirty: true,
+        );
+      }
+    }
+    _commit(next);
+  }
+
+  // ---- Sync (lib/sync/sync_engine.dart) ----------------------------------
+
+  /// All notes of [accountId] (including tombstones) by full key.
+  Map<String, LessonNote> notesOf(String accountId) {
+    final prefix = '$accountId|';
+    return {
+      for (final e in state.entries)
+        if (e.key.startsWith(prefix)) e.key: e.value,
+    };
+  }
+
+  /// Whether [accountId] has local changes not yet acknowledged by the sync
+  /// server.
+  bool hasDirty(String accountId) {
+    final prefix = '$accountId|';
+    return state.entries.any((e) => e.value.dirty && e.key.startsWith(prefix));
+  }
+
+  /// Applies notes from the sync server (by full local key) with
+  /// last-write-wins: a remote note replaces the local one only if it is
+  /// newer. A remote note with the same [LessonNote.updatedAt] as the local
+  /// one acknowledges it (clears [LessonNote.dirty]). Returns the keys whose
+  /// content changed.
+  Set<String> applyRemote(Map<String, LessonNote> remote) {
+    final next = {...state};
+    final changed = <String>{};
+    var touched = false;
+    for (final e in remote.entries) {
+      final r = e.value;
+      final local = next[e.key];
+      if (local == null) {
+        if (r.isEmpty) continue; // nothing to delete
+      } else if (r.updatedAt < local.updatedAt) {
+        continue;
+      } else if (r.updatedAt == local.updatedAt) {
+        if (local.dirty) {
+          next[e.key] = _clean(local);
+          touched = true;
+        }
+        continue;
+      }
+      final n = r.isEmpty
+          ? LessonNote.tombstone(r.updatedAt)
+          : LessonNote(exam: r.exam, text: r.text, updatedAt: r.updatedAt);
+      if (local == null || local != n) changed.add(e.key);
+      next[e.key] = n;
+      touched = true;
+    }
+    if (touched) _commit(next);
+    return changed;
+  }
+
+  static LessonNote _clean(LessonNote n) => n.deleted
+      ? LessonNote.tombstone(n.updatedAt)
+      : LessonNote(exam: n.exam, text: n.text, updatedAt: n.updatedAt);
+
+  /// Drops tombstones older than [maxAge] of accounts for which [keep] is
+  /// false (accounts that don't sync).
+  void pruneTombstones(
+    bool Function(String accountId) keep, {
+    Duration maxAge = tombstoneMaxAge,
+  }) {
+    final now = ref.read(lessonNotesClockProvider)();
+    final limit = now.subtract(maxAge).millisecondsSinceEpoch;
+    final next = {...state};
+    next.removeWhere((k, n) {
+      if (!n.deleted || n.updatedAt >= limit) return false;
+      final i = k.indexOf('|');
+      return !keep(i < 0 ? k : k.substring(0, i));
+    });
+    if (next.length != state.length) _commit(next);
   }
 }

@@ -9,6 +9,9 @@ import 'core/providers.dart';
 import 'core/settings.dart';
 import 'data/data_providers.dart';
 import 'dev/fake_accounts.dart';
+import 'sync/sync_auto_trigger.dart';
+import 'sync/sync_controller.dart';
+import 'sync/sync_engine.dart';
 import 'ui/export/export_service.dart';
 import 'ui/shell/app.dart';
 
@@ -29,6 +32,7 @@ Future<void> main() async {
         untisApiProvider.overrideWithValue(api),
         settingsStoreProvider.overrideWithValue(settings),
         ...dataOverrides(secrets: createSecretStore()),
+        syncControllerProvider.overrideWith(SyncEngine.new),
         if (supportsDirectDownload) ...[
           exportDirectoryProvider.overrideWithValue(() async => null),
           exportShareProvider.overrideWithValue(
@@ -37,7 +41,7 @@ Future<void> main() async {
           ),
         ],
       ],
-      child: const BetterUntisApp(),
+      child: const SyncAutoTrigger(child: BetterUntisApp()),
     ),
   );
 }

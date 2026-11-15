@@ -398,6 +398,18 @@ class FakeUntisApi implements FullUntisApi {
   @override
   List<({String method, DateTime at, String json})> get debugLog => const [];
 
+  /// Demo accounts can't sync (the sync server checks the token with
+  /// WebUntis).
+  @override
+  Future<String> restAuthToken({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async => throw const UntisException(
+    0,
+    'Demo accounts have no WebUntis token.',
+  );
+
   @override
   Future<void> probeTeacherSources({
     required String host,

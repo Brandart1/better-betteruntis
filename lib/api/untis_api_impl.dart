@@ -177,6 +177,13 @@ class UntisApiImpl implements FullUntisApi {
 
   final _tokens = <String, ({String token, DateTime at})>{};
 
+  @override
+  Future<String> restAuthToken({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) => _token(host, school, auth);
+
   /// Bearer token for REST calls, cached for a few minutes per account.
   Future<String> _token(
     String host,
