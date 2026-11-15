@@ -1,4 +1,4 @@
-# Teacher features (0.5.0, branch `teacher`)
+# Teacher features (0.6.0, branch `teacher`)
 
 ## Wishes from teachers
 <!-- Paste what the teacher asked for below, one bullet per wish, as written.
@@ -46,7 +46,7 @@ Untis' feature list for teachers with the class register module ("WebUntis Klass
 - Class teachers: overview of their class(es) — all absences, edit excuse status, all class register entries, time filter
 Basic package (no class register needed): enter notes for pupils ("Info zur Stunde") and notes for teachers, link a video conference to a lesson.
 
-## Built (0.5.0 alphas)
+## Built (0.6.0 alphas)
 - [x] **Absences & lesson topic per lesson** ("Abwesenheiten" + "Lehrstoff"): tap a lesson in your own timetable → "Absences & lesson topic". Tap pupils to mark them absent, type the topic, save. Saving also confirms the attendance check. Double lessons are saved for both periods.
 - [x] **Open lessons** (drawer): past lessons of the last 7 / 14 / 30 days that still miss the attendance check or the topic; tap one to fill it in.
 - [x] Demo: log in with user `teacher` at the demo school to try it without a real account.
