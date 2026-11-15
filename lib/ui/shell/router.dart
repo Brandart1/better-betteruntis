@@ -16,6 +16,7 @@ import '../login/login_screen.dart';
 import '../login/id_austria_screen.dart';
 import '../login/qr_scan_screen.dart';
 import '../settings/timetable_settings_screen.dart';
+import '../sync/sync_screen.dart';
 import '../timetable/timetable_screen.dart';
 import 'app_drawer.dart';
 import 'debug_screen.dart';
@@ -34,6 +35,7 @@ import 'element_picker_screen.dart';
 ///   /settings              timetable look (colors, text, cancelled)
 ///   /calendar              calendar syncs; /calendar/setup (extra:
 ///                          CalendarSetupArgs) adds or edits one
+///   /sync                  sync of lesson notes (all platforms)
 ///   /debug                 raw API responses
 final routerProvider = Provider<GoRouter>((ref) {
   // null = still loading, otherwise whether any account exists.
@@ -115,6 +117,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, s) =>
             CalendarSyncScreen(args: s.extra! as CalendarSetupArgs),
       ),
+      GoRoute(path: '/sync', builder: (_, _) => const SyncScreen()),
       GoRoute(
         path: '/settings',
         builder: (_, _) => const TimetableSettingsScreen(),

@@ -60,6 +60,14 @@ class AppDrawer extends StatelessWidget {
             title: const Text('Calendar sync'),
             onTap: () => go('/calendar'),
           ),
+        // Also on the web: the web version syncs too.
+        ListTile(
+          key: const ValueKey('drawer-sync'),
+          leading: const Icon(Icons.cloud_sync_outlined),
+          title: const Text('Sync'),
+          subtitle: const Text('Notes on all your devices'),
+          onTap: () => go('/sync'),
+        ),
         ListTile(
           leading: const Icon(Icons.manage_accounts_outlined),
           title: const Text('Manage accounts'),
