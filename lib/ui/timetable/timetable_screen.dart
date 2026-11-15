@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/accessibility.dart';
 import '../../core/interfaces.dart';
+import '../../core/lesson_notes.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/settings.dart';
@@ -195,9 +196,13 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
             : addDays(weekStart, weekdays.first - 1));
     final List<Period> periods;
     try {
-      periods = await ref.read(
-        weekPeriodsProvider(WeekRequest(account, target, mondayOf(date)))
-            .future,
+      periods = applyLessonNotes(
+        await ref.read(
+          rawWeekPeriodsProvider(WeekRequest(account, target, mondayOf(date)))
+              .future,
+        ),
+        account.id,
+        ref.read(lessonNotesProvider),
       );
     } catch (_) {
       return;

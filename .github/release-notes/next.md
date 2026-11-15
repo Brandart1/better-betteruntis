@@ -18,3 +18,5 @@
 - Add to calendar (Android): a note says that calendars created on the web can take a long time to reach the phone; tap Refresh after about 15 minutes.
 - Past days, the part of today that is over and lessons that have ended are greyed out much more clearly.
 - Lessons without a subject but with a custom title (e.g. "E-Theater") are exported with that title instead of "Lesson" (calendar, .ics, CSV, Excel, PDF) (#3).
+- **Custom exams:** in a lesson's details, tap *Mark as exam* to turn it into an exam (on your device only), then optionally enter details such as "mündliche Wiederholung" or the exam topics. *Remove custom exam* undoes it.
+- **Your lesson details:** add or edit your own details for any lesson (*Add details*). They show in the timetable's detailed view, the lesson details, exports and synced calendars.

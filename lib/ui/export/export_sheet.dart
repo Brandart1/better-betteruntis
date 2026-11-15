@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/lesson_notes.dart';
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
@@ -159,6 +160,7 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
         options: options,
         palette: ExportPalette.fromSettings(settings),
         locale: _locale,
+        notes: ref.read(lessonNotesProvider),
         onProgress: (m) {
           if (mounted) setState(() => _progress = m);
         },

@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../calendar/calendar_sync_service.dart';
 import '../../core/accessibility.dart';
 import '../../core/interfaces.dart';
+import '../../core/lesson_notes.dart';
 import '../../core/models.dart';
 import '../../core/settings.dart';
 import 'lesson_layout.dart';
@@ -121,6 +125,21 @@ class LessonDetailsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // The sheet stays open while the user edits their notes: apply the
+    // current ones instead of those the block was built with.
+    final notes = ref.watch(lessonNotesProvider);
+    final block = LessonBlock([
+      for (final q in this.block.periods)
+        if (q.noteKey case final key?)
+          q.withUserNote(
+            noteKey: key,
+            userExam: notes[key]?.exam ?? false,
+            userNote: notes[key]?.text ?? '',
+          )
+        else
+          q,
+    ]);
+    final noteKeys = [for (final q in block.periods) ?q.noteKey];
     final theme = Theme.of(context);
     final settings = ref.watch(timetableSettingsProvider);
     final accent = LessonStyle.of(
@@ -196,6 +215,8 @@ class LessonDetailsPage extends ConsumerWidget {
           ),
         ),
         _StatusChips(block: block, settings: settings),
+        if (noteKeys.isNotEmpty)
+          _UserNoteSection(block: block, noteKeys: noteKeys),
         _ElementSection(
           'Teachers',
           ElementType.teacher,
@@ -287,7 +308,13 @@ class _StatusChips extends StatelessWidget {
     );
     final chips = <Widget>[
       if (block.isCancelled) _chip(Icons.block, 'Cancelled', cBg, cFg),
-      if (block.isExam) _chip(Icons.assignment_outlined, 'Exam', eBg, eFg),
+      if (block.isExam)
+        _chip(
+          Icons.assignment_outlined,
+          block.periods.any((p) => p.isSchoolExam) ? 'Exam' : 'Custom exam',
+          eBg,
+          eFg,
+        ),
       if (!block.isCancelled && block.isIrregular)
         _chip(Icons.swap_horiz, 'Substitution', iBg, iFg),
     ];
@@ -394,6 +421,186 @@ class ElementChip extends StatelessWidget {
       onPressed: onOpen == null || id == 0
           ? null
           : () => onOpen!(TimetableTarget(r.type, id)),
+    );
+  }
+}
+
+/// Asks for lesson details (e.g. "mündliche Wiederholung", exam topics).
+/// Returns the text, or null when cancelled/skipped.
+Future<String?> askLessonDetails(
+  BuildContext context, {
+  required String title,
+  String initial = '',
+  String dismissLabel = 'Cancel',
+}) => showDialog<String>(
+  context: context,
+  builder: (_) => _LessonDetailsDialog(
+    title: title,
+    initial: initial,
+    dismissLabel: dismissLabel,
+  ),
+);
+
+class _LessonDetailsDialog extends StatefulWidget {
+  const _LessonDetailsDialog({
+    required this.title,
+    required this.initial,
+    required this.dismissLabel,
+  });
+  final String title;
+  final String initial;
+  final String dismissLabel;
+
+  @override
+  State<_LessonDetailsDialog> createState() => _LessonDetailsDialogState();
+}
+
+class _LessonDetailsDialogState extends State<_LessonDetailsDialog> {
+  late final _text = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        key: const ValueKey('lesson-details-field'),
+        controller: _text,
+        autofocus: true,
+        minLines: 2,
+        maxLines: 6,
+        textCapitalization: TextCapitalization.sentences,
+        decoration: const InputDecoration(
+          hintText: 'e.g. mündliche Wiederholung, topics, pages',
+          helperText: 'Only saved on this device.',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          key: const ValueKey('lesson-details-dismiss'),
+          onPressed: () => Navigator.pop(context),
+          child: Text(widget.dismissLabel),
+        ),
+        FilledButton(
+          key: const ValueKey('lesson-details-save'),
+          onPressed: () => Navigator.pop(context, _text.text.trim()),
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+/// The user's own additions: lesson details and the custom exam mark.
+class _UserNoteSection extends ConsumerWidget {
+  const _UserNoteSection({required this.block, required this.noteKeys});
+  final LessonBlock block;
+  final List<String> noteKeys;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final p = block.first;
+    final note = LessonNote(exam: p.userExam, text: p.userNote);
+    final notes = ref.read(lessonNotesProvider.notifier);
+    final schoolExam = block.periods.any((q) => q.isSchoolExam);
+
+    // Saves and brings calendars synced from the app up to date.
+    void save(LessonNote n) {
+      notes.set(noteKeys, n);
+      unawaited(
+        ref
+            .read(calendarSyncsProvider.notifier)
+            .syncDue(force: true)
+            .catchError((_) {}),
+      );
+    }
+
+    Future<void> editDetails() async {
+      final text = await askLessonDetails(
+        context,
+        title: note.text.isEmpty ? 'Add lesson details' : 'Edit lesson details',
+        initial: note.text,
+      );
+      if (text == null) return;
+      save(note.copyWith(text: text));
+    }
+
+    Future<void> markExam() async {
+      save(note.copyWith(exam: true));
+      final text = await askLessonDetails(
+        context,
+        title: 'Exam details',
+        initial: note.text,
+        dismissLabel: 'Skip',
+      );
+      if (text == null) return;
+      save(note.copyWith(exam: true, text: text));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (note.text.isNotEmpty)
+            Card.outlined(
+              key: const ValueKey('lesson-user-note'),
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.edit_note),
+                title: Text(note.text),
+                subtitle: const Text('Your details'),
+                trailing: IconButton(
+                  key: const ValueKey('lesson-details-remove'),
+                  tooltip: 'Remove details',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => save(note.copyWith(text: '')),
+                ),
+                onTap: editDetails,
+              ),
+            ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              TextButton.icon(
+                key: const ValueKey('lesson-details-edit'),
+                onPressed: editDetails,
+                icon: Icon(note.text.isEmpty ? Icons.add : Icons.edit_outlined),
+                label: Text(note.text.isEmpty ? 'Add details' : 'Edit details'),
+              ),
+              if (note.exam)
+                TextButton.icon(
+                  key: const ValueKey('lesson-exam-remove'),
+                  onPressed: () => save(note.copyWith(exam: false)),
+                  icon: Icon(
+                    Icons.assignment_late_outlined,
+                    color: theme.colorScheme.error,
+                  ),
+                  label: Text(
+                    'Remove custom exam',
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
+                )
+              else if (!schoolExam)
+                TextButton.icon(
+                  key: const ValueKey('lesson-exam-add'),
+                  onPressed: markExam,
+                  icon: const Icon(Icons.assignment_outlined),
+                  label: const Text('Mark as exam'),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

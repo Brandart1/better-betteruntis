@@ -8,6 +8,7 @@ import 'package:flutter/material.dart' show ColorScheme, Color;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/interfaces.dart';
+import '../core/lesson_notes.dart';
 import '../core/models.dart';
 import '../core/providers.dart';
 import '../core/settings.dart';
@@ -301,7 +302,15 @@ class CalendarSyncsNotifier extends Notifier<List<CalendarSync>> {
           // Offline: the cache below may still have it.
         }
         try {
-          periods.addAll(await loadWeek(repo, account, sync.target, w));
+          periods.addAll(
+            await loadWeek(
+              repo,
+              account,
+              sync.target,
+              w,
+              notes: ref.read(lessonNotesProvider),
+            ),
+          );
           loaded.add(w);
         } catch (e) {
           lastError = e;

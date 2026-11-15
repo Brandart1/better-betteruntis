@@ -180,6 +180,7 @@ class LessonCard extends ConsumerWidget {
           q.substitutionText,
           q.lessonText,
           q.infoText,
+          q.userNote,
         ],
       }.where((t) => t.trim().isNotEmpty);
       for (final t in texts) {

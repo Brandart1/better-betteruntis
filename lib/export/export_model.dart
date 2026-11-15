@@ -563,6 +563,7 @@ List<ExportLesson> buildExportLessons(
         p.substitutionText,
         p.infoText,
         if (p.exam case final x?) ...[x.name, x.text],
+        p.userNote,
       ],
     ].map((t) => t.trim()).where((t) => t.isNotEmpty).toSet().join(' · ');
 

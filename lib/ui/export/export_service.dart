@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/interfaces.dart';
+import '../../core/lesson_notes.dart';
 import '../../core/models.dart';
 import '../../export/csv_export.dart';
 import '../../export/export_model.dart';
@@ -102,7 +103,8 @@ class ExportException implements Exception {
   String toString() => message;
 }
 
-/// Loads one week cache-first: the first emission of [TimetableRepository.watchWeek]
+/// Loads one week cache-first, with the user's lesson [notes] applied: the
+/// first emission of [TimetableRepository.watchWeek]
 /// (cached data, or fresh data once fetched).
 Future<List<Period>> loadWeek(
   TimetableRepository repo,
@@ -110,7 +112,12 @@ Future<List<Period>> loadWeek(
   TimetableTarget target,
   DateTime weekStart, {
   Duration timeout = const Duration(seconds: 90),
-}) => repo.watchWeek(account, target, weekStart).first.timeout(timeout);
+  Map<String, LessonNote> notes = const {},
+}) async => applyLessonNotes(
+  await repo.watchWeek(account, target, weekStart).first.timeout(timeout),
+  account.id,
+  notes,
+);
 
 DateTime _addDays(DateTime d, int n) => DateTime(d.year, d.month, d.day + n);
 
@@ -127,6 +134,7 @@ Future<ExportTimetable> prepareExport({
   String? locale,
   DateTime? now,
   void Function(String message)? onProgress,
+  Map<String, LessonNote> notes = const {},
 }) async {
   final grid = names.timeGrid;
   final ws = options.weekStart;
@@ -136,7 +144,7 @@ Future<ExportTimetable> prepareExport({
   final Map<int, String> holidays = {};
   if (options.kind == ExportKind.week) {
     onProgress?.call('Loading week…');
-    periods = await loadWeek(repo, account, target, ws);
+    periods = await loadWeek(repo, account, target, ws, notes: notes);
     for (var d = 1; d <= 7; d++) {
       final day = _addDays(ws, d - 1);
       for (final h in names.holidays) {
@@ -155,7 +163,9 @@ Future<ExportTimetable> prepareExport({
       final w = _addDays(ws, 7 * i);
       onProgress?.call('Loading week ${i + 1} of $kRegularSampleWeeks…');
       try {
-        samples.add(SampleWeek(w, await loadWeek(repo, account, target, w)));
+        samples.add(
+          SampleWeek(w, await loadWeek(repo, account, target, w, notes: notes)),
+        );
       } catch (e) {
         lastError = e;
       }

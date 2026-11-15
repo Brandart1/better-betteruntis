@@ -1,3 +1,4 @@
+import 'package:better_betteruntis/core/lesson_notes.dart';
 import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/core/settings.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
@@ -84,6 +85,20 @@ void main() {
     final m = buildExportLessons([withSubject], names, regular: false).single;
     expect(m.title, isEmpty);
     expect(m.subjectLabel, 'M');
+  });
+
+  test('custom exam and details are exported (not in the regular plan)', () {
+    final p = applyLessonNotes([period(mon, 1)], 'acc', const {}).single;
+    final marked = p.withUserNote(
+      noteKey: p.noteKey!,
+      userExam: true,
+      userNote: 'mündliche Wiederholung',
+    );
+    final l = buildExportLessons([marked], names, regular: false).single;
+    expect(l.status, LessonStatus.exam);
+    expect(l.info, contains('mündliche Wiederholung'));
+    final r = buildExportLessons([marked], names, regular: true).single;
+    expect(r.info, isNot(contains('mündliche Wiederholung')));
   });
 
   test('regular mode reports everything as regular, no one-off texts', () {

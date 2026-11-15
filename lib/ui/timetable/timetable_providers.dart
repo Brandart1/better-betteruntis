@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/lesson_notes.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 
@@ -23,12 +24,23 @@ class WeekRequest {
   int get hashCode => Object.hash(account.id, target, weekStart);
 }
 
-/// Periods of one week, cache-first via [TimetableRepository.watchWeek].
-/// No automatic retry: the UI shows an error with a retry button instead.
-final weekPeriodsProvider = StreamProvider.autoDispose
+/// Periods of one week as loaded, cache-first via
+/// [TimetableRepository.watchWeek]. No automatic retry: the UI shows an error
+/// with a retry button instead.
+final rawWeekPeriodsProvider = StreamProvider.autoDispose
     .family<List<Period>, WeekRequest>(
       (ref, req) => ref
           .watch(timetableRepositoryProvider)
           .watchWeek(req.account, req.target, req.weekStart),
       retry: (_, _) => null,
     );
+
+/// [rawWeekPeriodsProvider] with the user's lesson notes (own exams and
+/// details) applied.
+final weekPeriodsProvider = Provider.autoDispose
+    .family<AsyncValue<List<Period>>, WeekRequest>((ref, req) {
+      final notes = ref.watch(lessonNotesProvider);
+      return ref
+          .watch(rawWeekPeriodsProvider(req))
+          .whenData((p) => applyLessonNotes(p, req.account.id, notes));
+    });
