@@ -39,3 +39,145 @@ verified with WebUntis `app/data` on an allowlisted host (`ALLOWED_HOSTS`).
 Modules: `router.ts` (routes), `auth.ts` (sessions, cookie, CSRF, rate limits),
 `identity.ts` (WebUntis check), `notes.ts` / `e2e.ts` (validation, handlers),
 `db.ts` (all SQL), `http.ts` (JSON helpers). Schema: `migrations/0001_init.sql`.
+
+## Operations (maintainer)
+
+### One-time Cloudflare setup
+
+1. **Account:** create a Cloudflare account and turn on **2FA** (also on
+   GitHub). Whoever controls either account can deploy a Worker that steals
+   WebUntis passwords; this is the biggest single risk (SYNC-PLAN.md,
+   security item 8).
+2. **workers.dev subdomain:** Workers & Pages → pick a subdomain once. The
+   Worker is then at `https://better-betteruntis.<subdomain>.workers.dev`,
+   alphas at `https://alpha-better-betteruntis.<subdomain>.workers.dev`.
+3. **Database** (from `worker/`, after `npx wrangler login`):
+
+   ```sh
+   npx wrangler d1 create bbu-sync --location weur   # or --jurisdiction eu
+   ```
+
+   Note the `database_id` it prints. `--jurisdiction eu` keeps the data in
+   the EU (stronger than a location hint); it can't be changed later. Update
+   the database location in `docs/PRIVACY.md` accordingly.
+4. **API token:** My Profile → API Tokens → Create Token → template **Edit
+   Cloudflare Workers**, then add **Account → D1 → Edit**. Account
+   resources: only your account. Zone resources: only the zone of your
+   custom domain (or none without one). Give it an expiry date and rotate
+   it.
+5. **GitHub** (Settings → Secrets and variables → Actions):
+   - secret `CLOUDFLARE_API_TOKEN`: the token,
+   - secret `CLOUDFLARE_ACCOUNT_ID`: the account id (dashboard sidebar /
+     `npx wrangler whoami`),
+   - **variable** `CLOUDFLARE_D1_ID`: the `database_id` from step 3. CI
+     writes it into `wrangler.jsonc` in place of the placeholder
+     `00000000-…`; the repository keeps the placeholder so local dev and
+     tests never touch the real database.
+6. **First deploy** (once, by hand, so the Worker exists before an alpha
+   tries to upload a preview version to it):
+
+   ```sh
+   flutter build web --release --no-web-resources-cdn   # repo root
+   cp -R ../build/web/. public/                          # keeps public/_headers
+   sed -i "s/00000000-0000-0000-0000-000000000000/<database_id>/" wrangler.jsonc
+   npx wrangler d1 migrations apply bbu-sync --remote
+   npx wrangler deploy
+   git checkout wrangler.jsonc                            # back to the placeholder
+   ```
+
+7. **Custom domain (optional):** Worker → Settings → Domains & Routes → Add
+   → Custom domain (the zone must be on Cloudflare). Then set
+   `PUBLIC_ORIGIN` in `wrangler.jsonc` to `https://<domain>` and add Zone →
+   Workers Routes → Edit for that zone to the API token if the domain is
+   configured in `wrangler.jsonc` (`routes`). Fill in the URL in
+   `docs/WEB.md` and `docs/PRIVACY.md`.
+8. **WAF rate limit (recommended, on the custom domain's zone):** Security
+   → WAF → Rate limiting rules: *URI Path equals `/api/sync/session`*,
+   10 requests per 10 seconds per IP, action Block for 10 seconds. This
+   stops floods before they reach the Worker (and its
+   `RL_SESSION`/`RL_PROXY`/`RL_SYNC` limits, which are per Cloudflare
+   location). The free plan allows one such rule.
+9. **Bot Fight Mode: leave it off** (Security → Bots). It challenges
+   non-browser clients and can't be skipped per path on the free plan, so
+   the phone apps' calls to `/api/*` would fail. If you use Super Bot Fight
+   Mode (paid), add a skip rule for `/api/*` and `/proxy/*`.
+10. **Usage limits:** on the free Workers plan requests beyond the daily
+    limit fail instead of being billed. Keep request logging
+    (`observability`) off, as configured.
+
+### How releases deploy
+
+`.github/workflows/release.yml`, on a pushed `v*` tag:
+
+- `web` builds the Flutter web app and uploads it as the `web-build`
+  artifact.
+- `cloudflare` checks that both secrets are set; if not (or for a manual
+  `workflow_dispatch` rebuild of an old tag), `deploy-worker` is skipped.
+- `deploy-worker` puts the web build into `public/` (next to `_headers`),
+  substitutes `CLOUDFLARE_D1_ID`, runs `npm ci --strict-allow-scripts`, the
+  typecheck and the tests, applies D1 migrations
+  (`wrangler d1 migrations apply bbu-sync --remote`) and then:
+  - **alpha** tags: `wrangler versions upload --preview-alias alpha` → new
+    version at the `alpha-…workers.dev` preview URL, no production traffic;
+  - **beta / stable** tags: `wrangler deploy` → production.
+
+  Every version is tagged with the release tag (`--tag`, `--message`).
+  Alphas use the **production database**, and migrations run before the
+  code switches, so migrations must be additive (new tables/columns with
+  defaults) and work with the version that is live.
+
+The CI workflow (`ci.yml`) runs `npm ci`, `tsc --noEmit` and `vitest run`
+for every push to `main` and every pull request.
+
+### Rollback
+
+- Dashboard: Worker → Deployments → pick an earlier version → Deploy.
+- CLI: `npx wrangler deployments list`, then
+  `npx wrangler rollback <version-id> -m "why"`.
+- To promote an alpha preview to production without a new tag:
+  `npx wrangler versions deploy <version-id>@100%`.
+
+A rollback doesn't undo D1 migrations (another reason to keep them
+additive).
+
+### Restoring the database (D1 Time Travel)
+
+D1 keeps a point-in-time history: **7 days on the free plan, 30 days on
+Workers Paid**. This is the only backup; it is also the retention window
+stated in `docs/PRIVACY.md`.
+
+```sh
+npx wrangler d1 time-travel info bbu-sync --timestamp 2026-11-15T12:00:00Z   # bookmark for a time
+npx wrangler d1 time-travel restore bbu-sync --timestamp 2026-11-15T12:00:00Z
+```
+
+A restore replaces the **whole** database (the restore itself can be undone
+with the bookmark it prints). Afterwards, delete again every account that was
+deleted after the restore point (deletion requests you handled by hand, see
+below; opt-outs from the app since then can't be listed, so announce the
+restore or restore only to just before the fault).
+
+### Deleting a user on request
+
+Users can delete everything themselves by turning sync off. For a request by
+e-mail, ask for the sync identity shown in the app (WebUntis host, school,
+user id), then:
+
+```sh
+# find the identity (values are lower case; user_id is a string)
+npx wrangler d1 execute bbu-sync --remote --command \
+  "SELECT id, host, school, user_id, created_at FROM identities WHERE school = 'example-school' AND user_id = '1234'"
+
+# delete it (replace 42 with the id from above)
+npx wrangler d1 execute bbu-sync --remote --command \
+  "DELETE FROM notes WHERE identity_id = 42; DELETE FROM e2e_headers WHERE identity_id = 42; DELETE FROM sessions WHERE identity_id = 42; DELETE FROM identities WHERE id = 42"
+```
+
+Foreign keys cascade anyway; the explicit deletes match what
+`DELETE /api/sync/account` does. Only paste the values the user gave you
+(no quotes inside them). The data stays in the Time Travel history until
+that window has passed.
+
+For an access request, the same `SELECT` plus
+`SELECT key, exam, text, blob, updated_at, deleted FROM notes WHERE identity_id = 42`
+shows everything stored (E2E notes are ciphertext).

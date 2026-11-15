@@ -77,8 +77,13 @@ timetables**.
 - **Your own exams and notes:** mark any lesson as an exam and add details like topics or "mündliche Wiederholung"; saved on your device only, shown in the timetable and exports
 - Pick a specific week, or the *regular* timetable derived from the last few weeks
 
+**Sync (optional)**
+- Sync your custom exams and lesson details between your devices. Off by default; turning it off deletes everything on the server
+- Optional **end-to-end encryption** with a sync passphrase, so the server only stores data it can't read
+- What is stored and why: [docs/PRIVACY.md](docs/PRIVACY.md)
+
 **Web version**
-- Self-host it on your homelab with Docker or a single binary. Your data stays in your browser
+- Hosted on Cloudflare, nothing to install. Your logins stay in your browser
 
 ## 🐞 Known issues
 
@@ -90,21 +95,19 @@ timetables**.
 | --- | --- |
 | **Android** | Download the `.apk` from the [latest release](https://github.com/Brandart1/better-betteruntis/releases) and install it. |
 | **iOS / iPadOS** | The release contains an **unsigned** `.ipa`. Sign it yourself with [Sideloadly](https://sideloadly.io), [AltStore](https://altstore.io) or your own developer account. With a free Apple ID, apps have to be re-signed every 7 days. |
-| **Web** | Self-host it, see below. |
+| **Web** | Open `[PRODUCTION URL]` in your browser. |
 
-### 🏠 Self-hosting the web app
+### 🌐 The web version
 
-Browsers can't talk to WebUntis directly, so the web build ships with a tiny
-server. It serves the app and forwards requests to `*.webuntis.com`, and only there.
-Your login data is stored in your browser, never on the server.
+Browsers can't talk to WebUntis directly, so the web version runs on a
+Cloudflare Worker that serves the app and forwards requests to
+`*.webuntis.com`, and only there. Your login data is stored in your browser,
+never on the server. The same Worker hosts the optional sync. It is deployed
+automatically with every release; [docs/WEB.md](docs/WEB.md) and
+[worker/README.md](worker/README.md) have the details.
 
-```sh
-docker compose up -d   # then open http://localhost:8080
-```
-
-Put it behind HTTPS (Caddy, Traefik or nginx) and don't expose it publicly
-without basic auth or a VPN. [docs/WEB.md](docs/WEB.md) covers configuration,
-running without Docker, and security notes.
+Self-hosting (Docker / `bbu_server`) was removed in 0.5.0; it is still in
+the 0.4.x releases.
 
 ## 🛠️ Building from source
 
@@ -115,7 +118,7 @@ flutter pub get
 flutter test
 flutter run                                         # device or emulator
 flutter build apk --release                         # Android
-flutter build web --release --no-web-resources-cdn  # web (serve with server/)
+flutter build web --release --no-web-resources-cdn  # web (served by worker/)
 ```
 
 iOS builds run on GitHub Actions macOS runners (see `.github/workflows/`), so
@@ -126,7 +129,10 @@ no Mac is needed.
 - [docs/FEATURES.md](docs/FEATURES.md): feature parity checklist
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the code is organised
 - [docs/API.md](docs/API.md): notes on the WebUntis protocol
-- [docs/WEB.md](docs/WEB.md): self-hosting the web version
+- [docs/WEB.md](docs/WEB.md): the hosted web version and its WebUntis relay
+- [docs/SYNC-PLAN.md](docs/SYNC-PLAN.md): sync design, security and end-to-end encryption
+- [docs/PRIVACY.md](docs/PRIVACY.md): privacy notice for the web version and sync (draft)
+- [worker/README.md](worker/README.md): the Cloudflare Worker: API, local dev, deployment and operations
 
 ## ⚖️ License & disclaimer
 

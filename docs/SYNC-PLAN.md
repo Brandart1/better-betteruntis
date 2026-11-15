@@ -17,7 +17,8 @@ before the teacher release (now 0.6.0; numbers swapped 2026-11-15).
 - **Optional end-to-end encryption** (sync passphrase): the server then only
   stores encrypted notes it can't read.
 - No self-hosting (dropped 2026-11-15). The old `server/` folder and Docker
-  files are removed or kept for existing users; decide before release.
+  files were removed in 0.5.0 (recoverable from tag `v0.4.8-alpha.7`; see
+  docs/DECISIONS-PENDING.md D4).
 
 ## Architecture
 

@@ -118,7 +118,7 @@ jobs:
           path: better-betteruntis-*-unsigned.ipa
 
   web:
-    name: Web build + server binary
+    name: Web build
     needs: version
     runs-on: ubuntu-latest
     steps:
@@ -133,36 +133,105 @@ jobs:
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
       - run: flutter build web --release --no-web-resources-cdn --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }}
-      - name: Server binary (linux x64)
-        working-directory: server
-        run: |
-          dart pub get
-          dart test
-          dart compile exe bin/server.dart -o bbu_server
-      - name: Package
-        run: |
-          mkdir -p pkg/better-betteruntis-web
-          cp -R build/web pkg/better-betteruntis-web/web
-          cp server/bbu_server pkg/better-betteruntis-web/
-          cp docs/WEB.md LICENSE pkg/better-betteruntis-web/
-          tar -C pkg -czf "better-betteruntis-${TAG}-web-linux-x64.tar.gz" better-betteruntis-web
+      # Not a release asset (the web version is hosted on Cloudflare, see
+      # deploy-worker); only handed to the deploy job.
       - uses: actions/upload-artifact@v4
         with:
-          name: web
-          path: better-betteruntis-*-web-linux-x64.tar.gz
+          name: web-build
+          path: build/web
+          retention-days: 7
 
-  # Checks that the self-hosting image still builds (not published). Not a
-  # dependency of the release, so a Docker problem doesn't hold back the
-  # app; it still turns the run red.
-  docker:
-    name: Docker image builds
+  # Decides whether the Cloudflare deploy runs. Secrets can't be used in a
+  # job's `if:`, so this job checks them and deploy-worker is skipped (shown
+  # as skipped, not failed) when they are missing, e.g. on forks or before
+  # the maintainer has set up Cloudflare. Manual rebuilds of old tags
+  # (workflow_dispatch) never deploy, so they can't roll production back.
+  cloudflare:
+    name: Cloudflare deploy enabled?
     needs: version
     runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ "${{ github.event_name }}" != push ]; then
+            echo "Manual rebuild: not deploying to Cloudflare."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ]; then
+            echo "::notice::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set: skipping the Worker deploy."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Web app + WebUntis relay + sync API on Cloudflare (worker/README.md).
+  # Alphas upload a new Worker version under the preview alias "alpha"
+  # (https://alpha-<worker>.<subdomain>.workers.dev) without production
+  # traffic; betas and stable releases deploy to production. Both share the
+  # production D1 database, so migrations must stay backwards compatible
+  # (additive) with the version that is live.
+  deploy-worker:
+    name: Deploy Cloudflare Worker
+    needs: [web, cloudflare]
+    if: needs.cloudflare.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-worker
+      cancel-in-progress: false
+    env:
+      D1_ID: ${{ vars.CLOUDFLARE_D1_ID }}
+      WRANGLER_SEND_METRICS: "false"
+    defaults:
+      run:
+        working-directory: worker
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
-      - run: docker build --build-arg BBU_CHANNEL=${{ env.BBU_CHANNEL }} -t better-betteruntis-web .
+      - name: Use the real D1 database id
+        # wrangler.jsonc keeps a placeholder (local dev and tests don't need
+        # a real database); the id lives in the repository variable
+        # CLOUDFLARE_D1_ID (Settings > Secrets and variables > Actions > Variables).
+        run: |
+          if ! printf '%s' "$D1_ID" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+            echo "::error::Repository variable CLOUDFLARE_D1_ID is missing or not a UUID (see worker/README.md)."; exit 1
+          fi
+          sed -i "s/00000000-0000-0000-0000-000000000000/$D1_ID/" wrangler.jsonc
+          grep -q "\"database_id\": \"$D1_ID\"" wrangler.jsonc
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-build
+          path: worker/public
+      - name: Check the web build and _headers
+        run: |
+          test -f public/index.html
+          test -f public/main.dart.js
+          test -f public/_headers || { echo "::error::worker/public/_headers missing"; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: npm 11 (install-script allowlist in package.json "allowScripts")
+        run: npm install -g npm@11.19.1
+      # --strict-allow-scripts: a new dependency with install scripts that
+      # isn't reviewed in "allowScripts" fails the install.
+      - run: npm ci --strict-allow-scripts
+      - run: npx tsc --noEmit
+      - run: npx vitest run
+      - name: Migrate D1 and deploy
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          packageManager: npm
+          # wrangler comes from worker/package-lock.json (installed above).
+          command: |
+            d1 migrations apply bbu-sync --remote
+            ${{ env.BBU_CHANNEL == 'alpha' && format('versions upload --preview-alias alpha --tag {0} --message "{0}"', env.TAG) || format('deploy --tag {0} --message "{0}"', env.TAG) }}
 
   release:
     name: GitHub release
@@ -174,8 +243,12 @@ jobs:
           ref: ${{ env.TAG }}
       - uses: actions/download-artifact@v4
         with:
+          name: apk
           path: dist
-          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: ipa
+          path: dist
       - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}

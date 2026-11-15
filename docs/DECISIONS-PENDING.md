@@ -40,3 +40,74 @@ once confirmed.
   300/min per IP, other sync calls 120/min per session.
 - **Switch:** values in worker/src/sync/notes.ts (`LIMITS`), db.ts
   (`MAX_SESSIONS_PER_IDENTITY`), wrangler.jsonc.
+
+## D1. D1 database id: repository variable, substituted in CI
+- **Chosen:** `worker/wrangler.jsonc` keeps the placeholder
+  `00000000-0000-0000-0000-000000000000`; the deploy job replaces it with the
+  repository **variable** `CLOUDFLARE_D1_ID` (fails with an error if it is
+  set up for deploys but the variable is missing). Keeps account-specific ids
+  out of the repo, local dev/tests never point at the real database, forks
+  can deploy to their own account.
+- **Alternative:** commit the real `database_id` (it isn't a secret; this is
+  Cloudflare's default workflow) and drop the substitution step.
+- **Switch:** put the id into `wrangler.jsonc`, delete the "Use the real D1
+  database id" step in `.github/workflows/release.yml`.
+
+## D2. Alpha = preview version under alias `alpha`, shared production D1
+- **Chosen:** alpha tags run `wrangler versions upload --preview-alias alpha
+  --tag <tag>` (stable URL `alpha-better-betteruntis.<sub>.workers.dev`, no
+  production traffic); beta/stable run `wrangler deploy --tag <tag>`.
+  Added `"preview_urls": true` to `wrangler.jsonc`. Previews share the
+  production D1 database and migrations run on every deploy, so migrations
+  must be additive. The new `wrangler preview` command (open beta) was not
+  used.
+- **Alternative:** a separate `alpha` wrangler environment with its own
+  Worker and D1 database (`env.alpha` in wrangler.jsonc, second
+  `CLOUDFLARE_D1_ID_ALPHA` variable): fully isolated test data, but alpha
+  testers' synced notes don't carry over, and twice the setup.
+- **Switch:** add `env.alpha` to wrangler.jsonc and use
+  `deploy --env alpha` + `d1 migrations apply ... --env alpha` for alphas.
+
+## D3. Deploy only on tag pushes, not on manual rebuilds
+- **Chosen:** the `cloudflare` gate job disables the deploy for
+  `workflow_dispatch` runs, so rebuilding an old tag can't put old code in
+  production. Missing secrets → job shown as *skipped*, run stays green.
+  The GitHub release doesn't wait for the deploy (a Cloudflare problem
+  doesn't hold back the APK/IPA); a failed deploy still turns the run red.
+- **Alternative:** add a `deploy: true/false` input to workflow_dispatch;
+  make `release` depend on `deploy-worker`.
+- **Switch:** edit the `cloudflare` job's check in release.yml.
+
+## D4. Self-hosting removed completely
+- **Chosen:** deleted `server/`, `Dockerfile`, `docker-compose.yml`,
+  `.dockerignore`, the release's Docker job and the
+  `…-web-linux-x64.tar.gz` asset, the server tests in ci.yml and the
+  `server/**` analyzer exclude. docs/WEB.md now describes the Cloudflare
+  version and points to 0.4.x tags for the old server. The release's `web`
+  job now only builds the app and passes it to `deploy-worker` as an
+  artifact (`web-build`, 7 days).
+- **Alternative:** keep the server for existing self-hosters for one more
+  release (deprecated), or keep only the web tarball (static files without
+  a relay are useless because of CORS).
+- **Switch:** `git checkout v0.4.8-alpha.7 -- server Dockerfile
+  docker-compose.yml .dockerignore` and restore the jobs from that tag's
+  release.yml.
+
+## D5. npm pinned to 11.19.1 in CI, `npm ci --strict-allow-scripts`
+- **Chosen:** CI installs npm 11.19.1 (same as the dev container) so the
+  `allowScripts` policy in `worker/package.json` is honoured, and uses
+  `--strict-allow-scripts` so a new dependency with unreviewed install
+  scripts fails the build instead of running them. Verified locally: both
+  `workerd` and `esbuild` postinstalls run under the strict flag.
+- **Alternative:** plain `npm ci` with the runner's bundled npm (unreviewed
+  scripts would only warn).
+- **Switch:** drop the `npm install -g` step / the flag.
+
+## D6. Privacy notice: backup retention = D1 Time Travel window
+- **Chosen:** docs/PRIVACY.md (draft) names Time Travel as the only backup,
+  7 days (free) / 30 days (paid) as a placeholder to pick, and says the
+  relay writes no logs. Legal basis for sync: consent (Art. 6(1)(a)); for
+  the relay left as a placeholder (6(1)(b) or (f)).
+- **Alternative:** a separate exported backup (e.g. `wrangler d1 export`
+  to R2) with its own retention: longer safety net, but then deletions
+  linger longer and the notice must say so.
