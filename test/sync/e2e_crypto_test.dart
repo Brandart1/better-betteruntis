@@ -32,7 +32,7 @@ String flip(String b64, int index) {
 
 void main() {
   final v = jsonDecode(
-    File('test/sync/e2e_vectors_v1.json').readAsStringSync(),
+    File('test/sync/e2e_vectors_v2.json').readAsStringSync(),
   ) as Map<String, dynamic>;
   final setupV = v['setup'] as Map<String, dynamic>;
   final rnd = setupV['random'] as Map<String, dynamic>;
@@ -93,6 +93,17 @@ void main() {
       expect(h2.toJson(), c['header']);
     });
 
+    test('auth key and hash', () async {
+      final sub = setupV['subkeys'] as Map<String, dynamic>;
+      expect(toHex(keys.authKey), sub['authKey']);
+      expect(keys.authKeyB64, setupV['authKeyB64']);
+      expect(keys.authKeyB64.length, 43);
+      expect(keys.authHashB64, setupV['authHashB64']);
+      expect(keys.authHashB64, headerJson['authHash']);
+      final h = await Sha256().hash(keys.authKey);
+      expect(keys.authHashB64, b64uEncode(h.bytes));
+    });
+
     test('server keys', () async {
       for (final s in (v['serverKeys'] as List).cast<Map<String, dynamic>>()) {
         expect(await serverKey(keys, s['noteKey'] as String), s['serverKey']);
@@ -104,6 +115,13 @@ void main() {
         final key = n['noteKey'] as String;
         final exam = n['exam'] as bool;
         final text = n['text'] as String;
+        final updatedAt = n['updatedAt'] as int;
+        final deleted = n['deleted'] as bool;
+        final sk = n['serverKey'] as String;
+        expect(
+          toHex(noteAad(serverKey: sk, updatedAt: updatedAt, deleted: deleted)),
+          n['aad'],
+        );
         final plain = encodeNotePlaintext(noteKey: key, exam: exam, text: text);
         expect(toHex(plain), n['plaintext']);
         expect(plain.length, n['paddedLength']);
@@ -112,10 +130,18 @@ void main() {
           noteKey: key,
           exam: exam,
           text: text,
+          updatedAt: updatedAt,
+          deleted: deleted,
           random: queue([n['nonce'] as String]),
         );
         expect(blob, n['blob']);
-        final note = await decryptNote(keys, n['serverKey'] as String, blob);
+        final note = await decryptNote(
+          keys,
+          sk,
+          blob,
+          updatedAt: updatedAt,
+          deleted: deleted,
+        );
         expect(note.noteKey, key);
         expect(note.exam, exam);
         expect(note.text, text);
@@ -144,9 +170,17 @@ void main() {
         noteKey: 'k1',
         exam: true,
         text: 'Hallo 👋',
+        updatedAt: 1763370000000,
+        deleted: false,
       );
       final sk = await serverKey(k, 'k1');
-      final note = await decryptNote(k, sk, blob);
+      final note = await decryptNote(
+        k,
+        sk,
+        blob,
+        updatedAt: 1763370000000,
+        deleted: false,
+      );
       expect((note.noteKey, note.exam, note.text), ('k1', true, 'Hallo 👋'));
       // Same note encrypts differently each time (random nonce).
       final blob2 = await encryptNote(
@@ -154,9 +188,72 @@ void main() {
         noteKey: 'k1',
         exam: true,
         text: 'Hallo 👋',
+        updatedAt: 1763370000000,
+        deleted: false,
       );
       expect(blob2, isNot(blob));
       expect(await serverKey(setup.keys, 'k1'), sk);
+      expect(k.authKeyB64, setup.keys.authKeyB64);
+      expect(h.toJson()['authHash'], setup.keys.authHashB64);
+    });
+
+    test('tombstone round trip', () async {
+      final sk = await serverKey(keys, 'gone');
+      final blob = await encryptNote(
+        keys,
+        noteKey: 'gone',
+        exam: false,
+        text: '',
+        updatedAt: 1763456400000,
+        deleted: true,
+      );
+      final note = await decryptNote(
+        keys,
+        sk,
+        blob,
+        updatedAt: 1763456400000,
+        deleted: true,
+      );
+      expect((note.noteKey, note.exam, note.text), ('gone', false, ''));
+      // A server can't turn the tombstone back into a live note.
+      await expectLater(
+        decryptNote(keys, sk, blob, updatedAt: 1763456400000, deleted: false),
+        throwsA(isA<E2eCorrupt>()),
+      );
+    });
+
+    test('updatedAt range', () async {
+      for (final t in [-1, 9007199254740992]) {
+        expect(
+          () => encryptNote(
+            keys,
+            noteKey: 'k',
+            exam: false,
+            text: '',
+            updatedAt: t,
+            deleted: false,
+          ),
+          throwsArgumentError,
+        );
+      }
+      final blob = await encryptNote(
+        keys,
+        noteKey: 'k',
+        exam: false,
+        text: '',
+        updatedAt: 0,
+        deleted: false,
+      );
+      await expectLater(
+        decryptNote(
+          keys,
+          await serverKey(keys, 'k'),
+          blob,
+          updatedAt: -1,
+          deleted: false,
+        ),
+        throwsA(isA<E2eCorrupt>()),
+      );
     });
 
     test('without recovery', () async {
@@ -177,15 +274,24 @@ void main() {
         noteKey: 'n',
         exam: false,
         text: 't',
+        updatedAt: 5,
+        deleted: false,
       );
       final h2 = await changePassphrase(header, keys, 'new passphrase 123');
       expect(h2.kdf.salt, isNot(header.kdf.salt));
+      expect(h2.authHash, header.authHash);
       await expectLater(
         unlockWithPassphrase(h2, passphrase),
         throwsA(isA<E2eWrongSecret>()),
       );
       final k2 = await unlockWithPassphrase(h2, 'new passphrase 123');
-      expect((await decryptNote(k2, sk, blob)).text, 't');
+      expect(
+        (await decryptNote(k2, sk, blob, updatedAt: 5, deleted: false)).text,
+        't',
+      );
+      // The auth key is a function of the DEK only.
+      expect(k2.authKeyB64, keys.authKeyB64);
+      expect(await k2.matchesHeader(h2), isTrue);
       // Recovery code still works on the new header.
       final k3 = await unlockWithRecoveryCode(h2, recoveryCode);
       expect(k3.dekBytes, keys.dekBytes);
@@ -194,6 +300,7 @@ void main() {
     test('regenerating the recovery code', () async {
       final (h2, code) = await regenerateRecoveryCode(header, keys);
       expect(code, isNot(recoveryCode));
+      expect(h2.toJson()['authHash'], headerJson['authHash']);
       expect((await unlockWithRecoveryCode(h2, code)).dekBytes, keys.dekBytes);
       await expectLater(
         unlockWithRecoveryCode(h2, recoveryCode),
@@ -248,9 +355,46 @@ void main() {
     });
   });
 
+  group('auth hash', () {
+    test('matchesHeader rejects a wrong authHash', () async {
+      expect(await keys.matchesHeader(header), isTrue);
+      final wrong = E2eHeader.fromJson({
+        ...headerJson,
+        'authHash': flip(headerJson['authHash'] as String, 0),
+      });
+      expect(await keys.matchesHeader(wrong), isFalse);
+      await expectLater(
+        unlockWithPassphrase(wrong, passphrase),
+        throwsA(isA<E2eCorrupt>()),
+      );
+      await expectLater(
+        changePassphrase(wrong, keys, 'whatever123'),
+        throwsA(isA<E2eCorrupt>()),
+      );
+      await expectLater(
+        regenerateRecoveryCode(wrong, keys),
+        throwsA(isA<E2eCorrupt>()),
+      );
+    });
+  });
+
   group('tampering', () {
+    const t = 1763370000123;
     late String sk;
     late String blob;
+    Future<E2eNote> dec(
+      String b, {
+      String? key,
+      int updatedAt = t,
+      bool deleted = false,
+      E2eKeys? k,
+    }) => decryptNote(
+      k ?? keys,
+      key ?? sk,
+      b,
+      updatedAt: updatedAt,
+      deleted: deleted,
+    );
     setUpAll(() async {
       sk = await serverKey(keys, '2026-11-17|3|MATH');
       blob = await encryptNote(
@@ -258,32 +402,61 @@ void main() {
         noteKey: '2026-11-17|3|MATH',
         exam: true,
         text: 'SA',
+        updatedAt: t,
+        deleted: false,
       );
     });
 
     test('flipped bits anywhere', () async {
       final len = b64uDecode(blob).length;
-      for (final i in [0, 1, 24, 25, 100, len - 17, len - 1]) {
+      for (final i in [1, 24, 25, 100, len - 17, len - 1]) {
         await expectLater(
-          decryptNote(keys, sk, flip(blob, i)),
+          dec(flip(blob, i)),
           throwsA(isA<E2eCorrupt>()),
           reason: 'byte $i',
         );
       }
+      // Version byte 0x02 -> 0x03.
+      await expectLater(dec(flip(blob, 0)), throwsA(isA<E2eUnsupported>()));
     });
 
     test('truncated / garbage blobs', () async {
-      for (final b in ['', 'AQ', blob.substring(0, 50), '!!!!', '$blob=']) {
-        await expectLater(decryptNote(keys, sk, b), throwsA(isA<E2eCorrupt>()));
+      for (final b in ['', 'Ag', blob.substring(0, 50), '!!!!', '$blob=']) {
+        await expectLater(dec(b), throwsA(isA<E2eCorrupt>()), reason: b);
       }
     });
 
     test('blob moved to another server key (AAD)', () async {
       final other = await serverKey(keys, 'other');
-      await expectLater(
-        decryptNote(keys, other, blob),
-        throwsA(isA<E2eCorrupt>()),
+      await expectLater(dec(blob, key: other), throwsA(isA<E2eCorrupt>()));
+    });
+
+    test('server-reported updatedAt / deleted must match (AAD)', () async {
+      expect((await dec(blob)).text, 'SA');
+      for (final u in [t - 1, t + 1, 0, t + 0x100000000]) {
+        await expectLater(
+          dec(blob, updatedAt: u),
+          throwsA(isA<E2eCorrupt>()),
+          reason: '$u',
+        );
+      }
+      await expectLater(dec(blob, deleted: true), throwsA(isA<E2eCorrupt>()));
+    });
+
+    test('v1 blobs are rejected', () async {
+      // A well-formed v1 blob (version 0x01, AAD 0x01 | server key).
+      final kEnc = hex(
+        (setupV['subkeys'] as Map<String, dynamic>)['noteEnc'] as String,
       );
+      final nonce = Uint8List(24);
+      final box = await Xchacha20.poly1305Aead().encrypt(
+        encodeNotePlaintext(noteKey: '2026-11-17|3|MATH', exam: true, text: ''),
+        secretKey: SecretKey(kEnc),
+        nonce: nonce,
+        aad: [1, ...utf8.encode(sk)],
+      );
+      final v1 = b64uEncode([1, ...nonce, ...box.cipherText, ...box.mac.bytes]);
+      await expectLater(dec(v1), throwsA(isA<E2eUnsupported>()));
     });
 
     test('valid AEAD for server key A but note key B inside', () async {
@@ -300,10 +473,10 @@ void main() {
         plain,
         secretKey: SecretKey(kEnc),
         nonce: nonce,
-        aad: [1, ...utf8.encode(fake)],
+        aad: noteAad(serverKey: fake, updatedAt: t, deleted: false),
       );
       final blobFake = b64uEncode([
-        1,
+        2,
         ...nonce,
         ...box.cipherText,
         ...box.mac.bytes,
@@ -313,27 +486,21 @@ void main() {
         encodeNotePlaintext(noteKey: 'fake', exam: false, text: ''),
         secretKey: SecretKey(kEnc),
         nonce: nonce,
-        aad: [1, ...utf8.encode(fake)],
+        aad: noteAad(serverKey: fake, updatedAt: t, deleted: false),
       );
       final blobGood = b64uEncode([
-        1,
+        2,
         ...nonce,
         ...good.cipherText,
         ...good.mac.bytes,
       ]);
-      expect((await decryptNote(keys, fake, blobGood)).noteKey, 'fake');
-      await expectLater(
-        decryptNote(keys, fake, blobFake),
-        throwsA(isA<E2eCorrupt>()),
-      );
+      expect((await dec(blobGood, key: fake)).noteKey, 'fake');
+      await expectLater(dec(blobFake, key: fake), throwsA(isA<E2eCorrupt>()));
     });
 
     test('another DEK', () async {
       final other = await E2eKeys.fromDek(List.filled(32, 7));
-      await expectLater(
-        decryptNote(other, sk, blob),
-        throwsA(isA<E2eCorrupt>()),
-      );
+      await expectLater(dec(blob, k: other), throwsA(isA<E2eCorrupt>()));
     });
 
     test('plaintext layout validation', () {
@@ -478,6 +645,10 @@ void main() {
         {...headerJson, 'version': '1'},
         {...headerJson}..remove('wrappedDek'),
         {...headerJson}..remove('check'),
+        {...headerJson}..remove('authHash'),
+        {...headerJson, 'authHash': 5},
+        {...headerJson, 'authHash': b64uEncode(Uint8List(31))},
+        {...headerJson, 'authHash': '${headerJson['authHash']}A'},
         {...headerJson}..remove('kdf'),
         {...headerJson, 'wrappedDek': 'not base64!'},
         {...headerJson, 'wrappedDek': '${headerJson['wrappedDek']}='},
@@ -506,6 +677,7 @@ void main() {
         ),
         wrappedDek: header.wrappedDek,
         check: header.check,
+        authHash: header.authHash,
       );
       await expectLater(
         unlockWithPassphrase(weak, passphrase),

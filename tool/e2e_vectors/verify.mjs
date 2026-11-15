@@ -1,4 +1,4 @@
-// Independent cross-check of test/sync/e2e_vectors_v1.json using @noble
+// Independent cross-check of test/sync/e2e_vectors_v2.json using @noble
 // (not package:cryptography). Re-derives every value from the inputs, decrypts
 // and re-encrypts every box, and parses the note plaintext with its own code.
 //
@@ -11,7 +11,7 @@ import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 
-const path = fileURLToPath(new URL('../../test/sync/e2e_vectors_v1.json', import.meta.url));
+const path = fileURLToPath(new URL('../../test/sync/e2e_vectors_v2.json', import.meta.url));
 const v = JSON.parse(readFileSync(path, 'utf8'));
 
 const enc = new TextEncoder();
@@ -38,12 +38,15 @@ function eq(label, got, want) {
 }
 
 const C = v.constants;
-const VERSION = 1;
+const VERSION = 1; // header boxes
+const NOTE_VERSION = 2; // note blobs
+eq('constants.headerBoxVersion', C.headerBoxVersion, VERSION);
+eq('constants.noteBlobVersion', C.noteBlobVersion, NOTE_VERSION);
 const sub = (ikm, info) => hkdf(sha256, ikm, undefined, enc.encode(info), 32);
-const seal = (key, nonce, plain, aad) =>
-  concat(Uint8Array.of(VERSION), nonce, xchacha20poly1305(key, nonce, aad).encrypt(plain));
-function open(key, box, aad) {
-  if (box[0] !== VERSION) throw new Error('box version');
+const seal = (key, nonce, plain, aad, version = VERSION) =>
+  concat(Uint8Array.of(version), nonce, xchacha20poly1305(key, nonce, aad).encrypt(plain));
+function open(key, box, aad, version = VERSION) {
+  if (box[0] !== version) throw new Error('box version');
   const nonce = box.subarray(1, 25);
   return xchacha20poly1305(key, nonce, aad).decrypt(box.subarray(25));
 }
@@ -79,9 +82,16 @@ eq('subkeys.noteKey', toHex(kNoteKey), s.subkeys.noteKey);
 eq('subkeys.noteEnc', toHex(kNoteEnc), s.subkeys.noteEnc);
 eq('subkeys.check', toHex(kCheck), s.subkeys.check);
 eq('subkeys.recoveryKek', toHex(recKek), s.subkeys.recoveryKek);
+const authKey = sub(dek, C.infoHeaderAuth);
+eq('subkeys.authKey', toHex(authKey), s.subkeys.authKey);
+eq('authKeyB64', b64u(authKey), s.authKeyB64);
+eq('authKeyB64.length', s.authKeyB64.length, 43);
+eq('authHashB64', b64u(sha256(authKey)), s.authHashB64);
 
 const h = s.header;
 eq('header.version', h.version, 1);
+eq('header.authHash', h.authHash, b64u(sha256(authKey)));
+eq('header.authHash.length', h.authHash.length, 43);
 eq('header.kdf', JSON.stringify(h.kdf), JSON.stringify({ alg: 'argon2id', m: 19456, t: 2, p: 1, salt: b64u(hex(r.salt)) }));
 eq('header.wrappedDek', h.wrappedDek, b64u(seal(kek, hex(r.wrapNonce), dek, enc.encode(C.aadDekWrap))));
 eq('header.wrappedDek opens', toHex(open(kek, unb64u(h.wrappedDek), enc.encode(C.aadDekWrap))), r.dek);
@@ -109,6 +119,7 @@ eq('recoveryCode', recoveryCode(hex(r.recoveryKey)), s.recoveryCode);
   eq('change.wrappedDek', c.header.wrappedDek, b64u(seal(kek2, hex(c.random.wrapNonce), dek, enc.encode(C.aadDekWrap))));
   eq('change.check kept', c.header.check, h.check);
   eq('change.recovery kept', c.header.wrappedDekRecovery, h.wrappedDekRecovery);
+  eq('change.authHash kept', c.header.authHash, h.authHash);
 }
 
 // --- server keys
@@ -148,21 +159,50 @@ function decodePlain(p) {
     text: dec.decode(p.subarray(8 + kLen, used)),
   };
 }
+// AAD v2: 0x02 | u64 BE updatedAt | u8 deleted | UTF-8 server key
+function noteAad(sk, updatedAt, deleted) {
+  const k = enc.encode(sk);
+  const out = new Uint8Array(10 + k.length);
+  out[0] = NOTE_VERSION;
+  new DataView(out.buffer).setBigUint64(1, BigInt(updatedAt), false);
+  out[9] = deleted ? 1 : 0;
+  out.set(k, 10);
+  return out;
+}
+function mustFail(label, f) {
+  checks++;
+  let threw = false;
+  try { f(); } catch { threw = true; }
+  if (!threw) { failures++; console.error(`FAIL ${label} did not fail`); }
+}
 for (const [i, n] of v.notes.entries()) {
   const sk = serverKey(n.noteKey);
   eq(`notes[${i}].serverKey`, n.serverKey, sk);
   const plain = encodePlain(n.noteKey, n.exam, n.text);
   eq(`notes[${i}].plaintext`, toHex(plain), n.plaintext);
   eq(`notes[${i}].paddedLength`, plain.length, n.paddedLength);
-  const aad = concat(Uint8Array.of(VERSION), enc.encode(sk));
-  eq(`notes[${i}].blob`, b64u(seal(kNoteEnc, hex(n.nonce), plain, aad)), n.blob);
-  const got = decodePlain(open(kNoteEnc, unb64u(n.blob), aad));
+  const aad = noteAad(sk, n.updatedAt, n.deleted);
+  eq(`notes[${i}].aad`, toHex(aad), n.aad);
+  eq(`notes[${i}].blob`, b64u(seal(kNoteEnc, hex(n.nonce), plain, aad, NOTE_VERSION)), n.blob);
+  const blob = unb64u(n.blob);
+  eq(`notes[${i}].blob version`, blob[0], NOTE_VERSION);
+  const got = decodePlain(open(kNoteEnc, blob, aad, NOTE_VERSION));
   eq(`notes[${i}].decrypt`, JSON.stringify(got), JSON.stringify({ noteKey: n.noteKey, exam: n.exam, text: n.text }));
-  // AAD binding: another server key must fail
-  checks++;
-  let threw = false;
-  try { open(kNoteEnc, unb64u(n.blob), concat(Uint8Array.of(VERSION), enc.encode(serverKey(n.noteKey + '!')))); } catch { threw = true; }
-  if (!threw) { failures++; console.error(`FAIL notes[${i}] opened with another AAD`); }
+  if (n.deleted) eq(`notes[${i}].tombstone`, JSON.stringify([got.exam, got.text]), JSON.stringify([false, '']));
+  // AAD binding: another server key, updatedAt or deleted flag must fail
+  mustFail(`notes[${i}] other server key`, () =>
+    open(kNoteEnc, blob, noteAad(serverKey(n.noteKey + '!'), n.updatedAt, n.deleted), NOTE_VERSION));
+  mustFail(`notes[${i}] updatedAt+1`, () =>
+    open(kNoteEnc, blob, noteAad(sk, n.updatedAt + 1, n.deleted), NOTE_VERSION));
+  if (n.updatedAt > 0) {
+    mustFail(`notes[${i}] updatedAt-1`, () =>
+      open(kNoteEnc, blob, noteAad(sk, n.updatedAt - 1, n.deleted), NOTE_VERSION));
+  }
+  mustFail(`notes[${i}] deleted flipped`, () =>
+    open(kNoteEnc, blob, noteAad(sk, n.updatedAt, !n.deleted), NOTE_VERSION));
+  // v1 AAD (0x01 | server key) must not open a v2 blob
+  mustFail(`notes[${i}] v1 AAD`, () =>
+    open(kNoteEnc, blob, concat(Uint8Array.of(1), enc.encode(sk)), NOTE_VERSION));
 }
 
 console.log(`${checks - failures}/${checks} checks passed`);

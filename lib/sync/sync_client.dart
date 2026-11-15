@@ -16,15 +16,14 @@ import 'e2e_crypto.dart';
 import 'sync_controller.dart';
 
 /// Sync server for the phone apps (compile-time, `--dart-define
-/// BBU_SYNC_URL=...`). The web app always uses its own origin.
-const String kSyncServerUrl = String.fromEnvironment(
-  'BBU_SYNC_URL',
-  defaultValue: 'https://better-betteruntis.workers.dev',
-);
+/// BBU_SYNC_URL=...`, set from the repository variable `BBU_SYNC_URL` in
+/// release builds). Empty (the default): sync is unavailable in the phone
+/// apps of this build. The web app always uses its own origin.
+const String kSyncServerUrl = String.fromEnvironment('BBU_SYNC_URL');
 
-/// The sync server's base URL for this platform.
+/// The sync server's base URL for this platform (empty if unavailable).
 Uri defaultSyncBaseUrl() =>
-    kIsWeb ? Uri.parse(Uri.base.origin) : Uri.parse(kSyncServerUrl);
+    kIsWeb ? Uri.parse(Uri.base.origin) : Uri.parse(kSyncServerUrl.trim());
 
 /// Kinds of sync API failures.
 enum SyncErrorKind {
@@ -51,8 +50,9 @@ enum SyncErrorKind {
   /// 409 e2e_exists (PUT /e2e).
   e2eExists,
 
-  /// 409 e2e_check_mismatch (PATCH /e2e).
-  e2eCheckMismatch,
+  /// 403 e2e_auth_failed (PATCH/DELETE /e2e): the auth key doesn't match
+  /// the server's header (this device's data key is outdated).
+  e2eAuthFailed,
   network,
   server,
   badRequest,
@@ -60,9 +60,28 @@ enum SyncErrorKind {
 
 /// A failed sync API request with a user-facing [message].
 class SyncApiException implements Exception {
-  const SyncApiException(this.kind, this.message, {this.code, this.status});
+  const SyncApiException(
+    this.kind,
+    this.message, {
+    this.code,
+    this.status,
+    this.serverTime,
+    this.retryAfter,
+  });
   final SyncErrorKind kind;
   final String message;
+
+  /// The server's clock (ms since the epoch) of a `clock_skew` answer.
+  final int? serverTime;
+
+  /// `retry-after` of a 429 answer.
+  final Duration? retryAfter;
+
+  /// The request may have been carried out although no answer arrived
+  /// (connection lost, timeout, 5xx).
+  bool get outcomeUnknown =>
+      kind == SyncErrorKind.network ||
+      (kind == SyncErrorKind.server && (status == null || status! >= 500));
 
   /// Server error code (`{"error": code}`), if any.
   final String? code;
@@ -135,7 +154,9 @@ class SyncSession {
     required this.identity,
     required this.e2e,
   });
-  final String token;
+
+  /// Bearer token; null for browsers (the server only sets the cookie).
+  final String? token;
   final DateTime? expiresAt;
   final SyncIdentity identity;
   final bool e2e;
@@ -148,6 +169,7 @@ class NotesPage {
     required this.latestSeq,
     required this.more,
     required this.e2e,
+    this.identity,
   });
   final List<RemoteNote> notes;
   final int latestSeq;
@@ -155,6 +177,9 @@ class NotesPage {
 
   /// Whether the identity has E2E on (null if the server didn't say).
   final bool? e2e;
+
+  /// The identity of the session the server answered for.
+  final SyncIdentity? identity;
 }
 
 class SyncClient {
@@ -172,6 +197,9 @@ class SyncClient {
 
   final Uri baseUrl;
   final Dio _dio;
+
+  /// Whether this build has a sync server.
+  bool get available => baseUrl.hasScheme && baseUrl.host.isNotEmpty;
 
   /// Max notes per PUT (server limit).
   static const maxNotesPerRequest = 500;
@@ -229,7 +257,13 @@ class SyncClient {
       }
     }
     if (status >= 200 && status < 300) return (status, json);
-    throw errorFor(status, json, login: path == '/api/sync/session');
+    final retry = int.tryParse(resp.headers.value('retry-after') ?? '');
+    throw errorFor(
+      status,
+      json,
+      login: path == '/api/sync/session',
+      retryAfter: retry == null ? null : Duration(seconds: retry),
+    );
   }
 
   /// Maps an error answer to a [SyncApiException] with a user-facing text.
@@ -237,12 +271,20 @@ class SyncClient {
     int status,
     Object? json, {
     bool login = false,
+    Duration? retryAfter,
   }) {
     final code = json is Map && json['error'] is String
         ? json['error'] as String
         : null;
-    SyncApiException e(SyncErrorKind k, String m) =>
-        SyncApiException(k, m, code: code, status: status);
+    final st = json is Map ? json['serverTime'] : null;
+    SyncApiException e(SyncErrorKind k, String m) => SyncApiException(
+      k,
+      m,
+      code: code,
+      status: status,
+      serverTime: st is num ? st.toInt() : null,
+      retryAfter: retryAfter,
+    );
     switch ((status, code)) {
       case (401, _) when login:
         return e(
@@ -279,6 +321,12 @@ class SyncClient {
           SyncErrorKind.quota,
           'Too many notes to sync (at most 20 000 per account).',
         );
+      case (413, 'storage_quota'):
+        return e(
+          SyncErrorKind.quota,
+          'Your synced notes take up too much space on the server (at most '
+          '5 MB per account). Delete some long lesson details.',
+        );
       case (413, _):
         return e(SyncErrorKind.quota, 'The sync request was too large.');
       case (409, 'e2e_required'):
@@ -296,9 +344,9 @@ class SyncClient {
           SyncErrorKind.e2eExists,
           'End-to-end encryption was already set up on another device.',
         );
-      case (409, 'e2e_check_mismatch'):
+      case (403, 'e2e_auth_failed'):
         return e(
-          SyncErrorKind.e2eCheckMismatch,
+          SyncErrorKind.e2eAuthFailed,
           'The encryption key changed on another device. Unlock again.',
         );
       case (502, _):
@@ -338,10 +386,12 @@ class SyncClient {
     if (j is! Map) throw _unexpected();
     final token = j['token'];
     final id = j['identity'];
-    if (token is! String || id is! Map) throw _unexpected();
+    if ((token != null && token is! String) || id is! Map) {
+      throw _unexpected();
+    }
     final exp = j['expiresAt'];
     return SyncSession(
-      token: token,
+      token: token as String?,
       expiresAt: exp is String
           ? DateTime.tryParse(exp)
           : exp is num
@@ -365,11 +415,19 @@ class SyncClient {
     if (j is! Map || j['notes'] is! List) throw _unexpected();
     final latest = j['latestSeq'];
     final e2e = j['e2e'];
+    final id = j['identity'];
     return NotesPage(
       notes: [for (final n in j['notes'] as List) ?RemoteNote.tryParse(n)],
       latestSeq: latest is num ? latest.toInt() : 0,
       more: j['more'] == true,
       e2e: e2e is bool ? e2e : null,
+      identity: id is Map
+          ? SyncIdentity(
+              host: '${id['host'] ?? ''}',
+              school: '${id['school'] ?? ''}',
+              userId: '${id['userId'] ?? ''}',
+            )
+          : null,
     );
   }
 
@@ -419,15 +477,14 @@ class SyncClient {
     return out;
   }
 
-  /// `GET /api/sync/e2e`; null if E2E isn't set up (404).
+  /// `GET /api/sync/e2e`; null if E2E isn't set up (404 `e2e_not_enabled`;
+  /// any other error is thrown).
   Future<E2eHeader?> getE2e(String? token) async {
     try {
       final (_, j) = await _send('GET', '/api/sync/e2e', token: token);
       return E2eHeader.fromJson(j);
     } on SyncApiException catch (e) {
-      if (e.kind == SyncErrorKind.e2eNotEnabled || e.status == 404) {
-        return null;
-      }
+      if (e.code == 'e2e_not_enabled') return null;
       rethrow;
     } on E2eException {
       throw const SyncApiException(
@@ -447,9 +504,27 @@ class SyncClient {
   }
 
   /// `PATCH /api/sync/e2e`: replaces the header with one for the same data
-  /// key (same `check`).
-  Future<void> patchE2e(String? token, E2eHeader header) async {
-    await _send('PATCH', '/api/sync/e2e', token: token, body: header.toJson());
+  /// key; [authKey] (`E2eKeys.authKeyB64`) proves this device has it.
+  /// Throws [SyncErrorKind.e2eAuthFailed] otherwise.
+  Future<void> patchE2e(String? token, E2eHeader header, String authKey) async {
+    await _send(
+      'PATCH',
+      '/api/sync/e2e',
+      token: token,
+      body: {'header': header.toJson(), 'authKey': authKey},
+    );
+  }
+
+  /// `DELETE /api/sync/e2e`: turns E2E off (deletes the header and all
+  /// notes on the server; sessions stay, other devices switch to plaintext
+  /// when they see `e2e: false`).
+  Future<void> deleteE2e(String? token, String authKey) async {
+    await _send(
+      'DELETE',
+      '/api/sync/e2e',
+      token: token,
+      body: {'authKey': authKey},
+    );
   }
 
   /// `DELETE /api/sync/account`: deletes the identity and all its data.

@@ -121,6 +121,13 @@ once confirmed.
   lib/sync/sync_client.dart (or pass `--dart-define=BBU_SYNC_URL=...` in
   release.yml). A custom domain would make this independent of the
   Cloudflare subdomain.
+- **Update (engine review):** the placeholder default is gone. Release
+  builds pass the repository **variable** `BBU_SYNC_URL`
+  (`--dart-define=BBU_SYNC_URL=${{ vars.BBU_SYNC_URL }}`); without it the
+  default is `''` and sync is **unavailable** in the phone apps of that
+  build (the sync screen says "Sync isn't available in this build" instead
+  of the opt-in, `enable()` throws). The web version still uses its own
+  origin. To do: set the variable to the Worker / custom-domain URL.
 
 ## 6. Web version: only one account can sync
 - **Chosen:** the browser has one `bbu_sync` cookie, so on the web `enable()`
@@ -138,10 +145,27 @@ once confirmed.
   server data), which would affect the user's other devices.
 
 ## 8. Small engine behaviours
-- No automatic retry/back-off after 429 (rate limit); the error is shown and
-  the next trigger (change, app start/resume, "Sync now") retries.
-- Two devices changing the same note in the same millisecond: treated as the
-  same version (practically never happens).
+- 429 (rate limit): single calls (pull, E2E header changes, interactive
+  actions) are not retried; the error is shown and the next trigger
+  (change, app start/resume, "Sync now") retries. **Exception: note
+  uploads** (`PUT /notes` batches of a sync, e.g. a full upload of
+  thousands of notes after enable/unlock/E2E switch run into the server's
+  20 writes/min per identity): the engine waits `retry-after` (at most 65 s
+  per wait, at most 10 min per sync) and continues; it stops if the
+  account's state changed or the engine was disposed. Acknowledged
+  batches are already stored (not dirty), the rest stays dirty.
+  Switch: `SyncEngine.maxRateLimitWait` / `maxPushWait`.
+- Two devices changing the same note in the same millisecond: the server
+  keeps the version it stored first and every device adopts it ("server /
+  first writer wins"). Notes from before sync (updatedAt 0) are stamped
+  with the current time on their first upload, so they don't all tie.
+- 401: one silent re-login with the account's WebUntis login; continues
+  only for the same identity and if the server's seq didn't go back
+  (otherwise "turned off or reset on another device", signed out, an empty
+  re-created account is deleted again).
+- Clock ahead: changes are never stamped more than 60 s ahead of the
+  device clock; on 400 `clock_skew` the offending notes are stamped with
+  the server's `serverTime` and the upload is retried once.
 - Notes over 4 000 characters are skipped (counted in the sync error); the
   input field is now capped at 4 000.
 

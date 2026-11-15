@@ -189,8 +189,12 @@ different keys at the same time.
 - **Content:** `exam`, `text` and the real note key are encrypted together
   with **XChaCha20-Poly1305** (random 192-bit nonce; package `cryptography`,
   same algorithm on all platforms), with `K_enc` from HKDF
-  (`info = "bbu-note-enc-v1"`). Associated data = the server key + version, so
-  a ciphertext can't be moved to another note.
+  (`info = "bbu-note-enc-v1"`). Blob format v2:
+  `0x02 | nonce(24) | ciphertext | tag(16)`. Associated data =
+  `0x02 | u64 updatedAt | u8 deleted | server key`, so a ciphertext can't be
+  moved to another note, and the server can't change a note's timestamp or
+  mark it deleted (both checked when decrypting; tampered notes are skipped
+  and counted).
 - **Padding:** plaintext padded to multiples of 256 bytes to hide the text
   length.
 - **Server still sees:** the identity, number of notes, `updatedAt`, `seq`,

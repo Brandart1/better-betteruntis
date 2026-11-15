@@ -19,22 +19,42 @@
 ///   info, L = 32)`:
 ///   * `bbu-note-key-v1` – HMAC-SHA256 key hiding note keys from the server,
 ///   * `bbu-note-enc-v1` – XChaCha20-Poly1305 key for note contents,
-///   * `bbu-check-v1` – XChaCha20-Poly1305 key for the header `check` value.
+///   * `bbu-check-v1` – XChaCha20-Poly1305 key for the header `check` value,
+///   * `bbu-header-auth-v1` – the **auth key**. The header stores
+///     `authHash = base64url(SHA-256(auth key))`; changing (PATCH) or
+///     deleting the header on the server requires presenting the auth key
+///     itself (base64url, 43 chars), which proves possession of the DEK
+///     without revealing it. The auth key never changes for a DEK (passphrase
+///     changes and new recovery codes keep it).
 ///
 /// ## Binary formats (all base64url without padding on the wire)
 ///
 /// **Sealed box** (wrapped DEKs, `check`, note blobs):
-/// `version (1 byte = 0x01) | nonce (24 bytes) | ciphertext | tag (16 bytes)`,
-/// XChaCha20-Poly1305 with a random 192-bit nonce.
+/// `version (1 byte) | nonce (24 bytes) | ciphertext | tag (16 bytes)`,
+/// XChaCha20-Poly1305 with a random 192-bit nonce. The version byte is `0x01`
+/// for the header boxes and `0x02` for note blobs (v1 note blobs, which only
+/// bound the server key, are refused with [E2eUnsupported]).
 ///
 /// | box                   | key            | plaintext                 | AAD (bytes)                          |
 /// |-----------------------|----------------|---------------------------|--------------------------------------|
 /// | `wrappedDek`          | KEK            | DEK (32 bytes)            | UTF-8 `"bbu-dek-wrap-v1"`            |
 /// | `wrappedDekRecovery`  | recovery KEK   | DEK (32 bytes)            | UTF-8 `"bbu-dek-wrap-v1"`            |
 /// | `check`               | check subkey   | UTF-8 `"bbu-e2e-check-v1"`| UTF-8 `"bbu-check-v1"`               |
-/// | note blob             | note-enc subkey| note plaintext (below)    | `0x01` + UTF-8 of the server key     |
+/// | note blob (v2)         | note-enc subkey| note plaintext (below)    | note AAD v2 (below)                  |
 ///
 /// So `wrappedDek` is 73 bytes (98 chars) and `check` 57 bytes (76 chars).
+///
+/// **Note AAD v2** (binds the blob to the record metadata the server reports,
+/// so the server can't move a blob to another note, flip a deletion or pass
+/// off an old version as newer):
+///
+/// ```text
+/// 0x02 | updatedAt (u64 big-endian, ms since epoch) | deleted (u8: 0 or 1)
+///      | UTF-8 of the server key
+/// ```
+///
+/// Tombstones (deleted notes) are encrypted records too: `deleted = 1`,
+/// plaintext with `exam = false` and empty text.
 ///
 /// **Server key:** `base64url(HMAC-SHA256(note-key subkey, UTF-8 note key))`,
 /// 43 characters.
@@ -52,7 +72,8 @@
 /// 8+n+m   ...   zero bytes up to the next multiple of 256 (min. 256 total)
 /// ```
 ///
-/// Decryption checks the AEAD tag (with the server key as AAD), the layout,
+/// Decryption checks the AEAD tag (with the AAD built from the server key and
+/// the server-reported `updatedAt` / `deleted`), the layout,
 /// that the padding is all zeros and is shorter than 256 bytes, and that
 /// `HMAC(note key) == server key` (constant time), so a blob can't be moved
 /// to another note.
@@ -60,11 +81,12 @@
 /// ## Header policy
 ///
 /// Headers are accepted only with `version == 1`, `alg == "argon2id"`,
-/// a 16-byte salt and KDF parameters at least the defaults (m ≥ 19456,
+/// a 43-character `authHash`, a 16-byte salt and KDF parameters at least the defaults (m ≥ 19456,
 /// t ≥ 2, p ≥ 1) and at most m ≤ 262144 (256 MiB), t ≤ 16, p ≤ 16. Weaker
 /// parameters are refused (a malicious server must not be able to downgrade
 /// new devices); absurdly high ones are refused so a server can't freeze the
-/// app. Violations throw [E2eUnsupported].
+/// app. Violations throw [E2eUnsupported]. The server enforces the same
+/// KDF range.
 ///
 /// ## Performance
 ///
@@ -86,8 +108,11 @@ typedef E2eRandomBytes = Uint8List Function(int length);
 
 // ---------------------------------------------------------------- constants
 
-/// Current header / blob / plaintext format version.
+/// Current header / header box / note plaintext layout version.
 const int e2eVersion = 1;
+
+/// Current note blob version (sealed box version byte and first AAD byte).
+const int e2eNoteBlobVersion = 2;
 
 /// Default (and minimum accepted) Argon2id memory in KiB (19 MiB).
 const int e2eDefaultMemoryKiB = 19456;
@@ -118,11 +143,13 @@ const int _keyLength = 32;
 const int _recoveryKeyLength = 16;
 const int _nonceLength = 24;
 const int _tagLength = 16;
+const int _maxSafeInt = 9007199254740991; // 2^53 - 1
 
 const String _infoNoteKey = 'bbu-note-key-v1';
 const String _infoNoteEnc = 'bbu-note-enc-v1';
 const String _infoCheck = 'bbu-check-v1';
 const String _infoRecovery = 'bbu-recovery-kek-v1';
+const String _infoHeaderAuth = 'bbu-header-auth-v1';
 const String _aadDekWrap = 'bbu-dek-wrap-v1';
 const String _aadCheck = 'bbu-check-v1';
 const String _checkPlaintext = 'bbu-e2e-check-v1';
@@ -233,12 +260,14 @@ class E2eKdfParams {
 ///
 /// Wire format:
 /// `{version, kdf: {alg: "argon2id", m, t, p, salt}, wrappedDek,
-/// wrappedDekRecovery?, check}`; binary fields are base64url without padding.
+/// wrappedDekRecovery?, check, authHash}`; binary fields are base64url
+/// without padding.
 class E2eHeader {
   const E2eHeader({
     required this.kdf,
     required this.wrappedDek,
     required this.check,
+    required this.authHash,
     this.wrappedDekRecovery,
     this.version = e2eVersion,
   });
@@ -255,6 +284,9 @@ class E2eHeader {
   /// Sealed box: [_checkPlaintext] under the check subkey.
   final Uint8List check;
 
+  /// SHA-256 of the auth key (32 bytes), see [E2eKeys.authHashB64].
+  final Uint8List authHash;
+
   /// Whether a recovery code can unlock this header.
   bool get hasRecovery => wrappedDekRecovery != null;
 
@@ -268,6 +300,9 @@ class E2eHeader {
     final rec = wrappedDekRecovery;
     if (rec != null) _checkBoxShape(rec, _keyLength, 'wrappedDekRecovery');
     _checkBoxShape(check, utf8.encode(_checkPlaintext).length, 'check');
+    if (authHash.length != _keyLength) {
+      throw const E2eCorrupt('authHash: bad length');
+    }
   }
 
   Map<String, Object?> toJson() => {
@@ -277,6 +312,7 @@ class E2eHeader {
     if (wrappedDekRecovery != null)
       'wrappedDekRecovery': b64uEncode(wrappedDekRecovery!),
     'check': b64uEncode(check),
+    'authHash': b64uEncode(authHash),
   };
 
   /// Parses and validates. Throws [E2eUnsupported] or [E2eCorrupt].
@@ -290,8 +326,11 @@ class E2eHeader {
     final wrapped = json['wrappedDek'];
     final rec = json['wrappedDekRecovery'];
     final check = json['check'];
+    final authHash = json['authHash'];
     if (wrapped is! String ||
         check is! String ||
+        authHash is! String ||
+        authHash.length != 43 ||
         (rec != null && rec is! String)) {
       throw const E2eCorrupt('header: bad fields');
     }
@@ -303,6 +342,7 @@ class E2eHeader {
           ? null
           : _b64uDecodeOrCorrupt(rec as String),
       check: _b64uDecodeOrCorrupt(check),
+      authHash: _b64uDecodeOrCorrupt(authHash),
     );
     header.validate();
     return header;
@@ -318,6 +358,7 @@ class E2eHeader {
     wrappedDek: wrappedDek ?? this.wrappedDek,
     wrappedDekRecovery: wrappedDekRecovery ?? this.wrappedDekRecovery,
     check: check,
+    authHash: authHash,
   );
 }
 
@@ -327,15 +368,34 @@ class E2eHeader {
 /// [unlockWithPassphrase], [unlockWithRecoveryCode] or [E2eKeys.fromDek]
 /// (for a DEK cached in secure storage).
 class E2eKeys {
-  E2eKeys._(this._dek, this._noteKey, this._noteEnc, this._check);
+  E2eKeys._(
+    this._dek,
+    this._noteKey,
+    this._noteEnc,
+    this._check,
+    this._authKey,
+    this._authHash,
+  );
 
   final Uint8List _dek;
   final SecretKey _noteKey;
   final SecretKey _noteEnc;
   final SecretKey _check;
+  final Uint8List _authKey;
+  final Uint8List _authHash;
 
   /// Raw DEK bytes, for caching in secure storage. Handle with care.
   Uint8List get dekBytes => Uint8List.fromList(_dek);
+
+  /// Header auth key, `HKDF-SHA256(DEK, info "bbu-header-auth-v1")` (32
+  /// bytes). Sent to the server to change or delete the E2E header.
+  Uint8List get authKey => Uint8List.fromList(_authKey);
+
+  /// [authKey] as base64url without padding (43 characters).
+  String get authKeyB64 => b64uEncode(_authKey);
+
+  /// `base64url(SHA-256(authKey))` (43 characters), the header's `authHash`.
+  String get authHashB64 => b64uEncode(_authHash);
 
   /// Derives the subkeys of a 32-byte [dek].
   static Future<E2eKeys> fromDek(List<int> dek) async {
@@ -343,17 +403,23 @@ class E2eKeys {
       throw ArgumentError.value(dek.length, 'dek', 'must be 32 bytes');
     }
     final d = Uint8List.fromList(dek);
+    final authKey = await _hkdf(d, _infoHeaderAuth);
+    final authHash = await Sha256().hash(authKey);
     return E2eKeys._(
       d,
       SecretKey(await _hkdf(d, _infoNoteKey)),
       SecretKey(await _hkdf(d, _infoNoteEnc)),
       SecretKey(await _hkdf(d, _infoCheck)),
+      authKey,
+      Uint8List.fromList(authHash.bytes),
     );
   }
 
-  /// Whether these keys belong to [header] (decrypts its `check`). Use it to
-  /// verify a cached DEK, e.g. after another device reset the account.
+  /// Whether these keys belong to [header] (its `authHash` matches and its
+  /// `check` decrypts). Use it to verify a cached DEK, e.g. after another
+  /// device reset the account.
   Future<bool> matchesHeader(E2eHeader header) async {
+    if (!_constantTimeEquals(_authHash, header.authHash)) return false;
     try {
       final plain = await _open(_check, header.check, utf8.encode(_aadCheck));
       return _constantTimeEquals(plain, utf8.encode(_checkPlaintext));
@@ -432,6 +498,7 @@ Future<E2eSetup> createE2e(
     wrappedDek: wrappedDek,
     wrappedDekRecovery: wrappedRec,
     check: check,
+    authHash: Uint8List.fromList(keys._authHash),
   );
   return E2eSetup(header, keys, code);
 }
@@ -533,28 +600,64 @@ Future<Uint8List> deriveKek(String passphrase, E2eKdfParams kdf) async {
 Future<String> serverKey(E2eKeys keys, String noteKey) async =>
     b64uEncode(await _hmacKey(keys, noteKey));
 
-/// Encrypts a note. Returns the blob (base64url sealed box, see library
-/// docs). Its AAD binds it to `serverKey(keys, noteKey)`.
+/// Encrypts a note record. Returns the blob (base64url sealed box v2, see
+/// library docs). Its AAD binds it to `serverKey(keys, noteKey)` and to
+/// [updatedAt] (ms since epoch, 0..2^53-1) and [deleted], which must be the
+/// values sent to the server with the blob. Tombstones: `deleted: true`,
+/// `exam: false`, `text: ''`.
 Future<String> encryptNote(
   E2eKeys keys, {
   required String noteKey,
   required bool exam,
   required String text,
+  required int updatedAt,
+  required bool deleted,
   E2eRandomBytes? random,
 }) async {
+  if (updatedAt < 0 || updatedAt > _maxSafeInt) {
+    throw ArgumentError.value(updatedAt, 'updatedAt', 'out of range');
+  }
   final sk = await serverKey(keys, noteKey);
   final plain = encodeNotePlaintext(noteKey: noteKey, exam: exam, text: text);
   final nonce = _take(random ?? _secureRandomBytes, _nonceLength);
-  final box = await _seal(keys._noteEnc, plain, _noteAad(sk), nonce);
+  final box = await _seal(
+    keys._noteEnc,
+    plain,
+    noteAad(serverKey: sk, updatedAt: updatedAt, deleted: deleted),
+    nonce,
+    version: e2eNoteBlobVersion,
+  );
   return b64uEncode(box);
 }
 
-/// Decrypts a note [blob] stored under [serverKey]. Throws [E2eCorrupt] if
-/// the blob is malformed, tampered with, from another key, or belongs to
-/// another server key.
-Future<E2eNote> decryptNote(E2eKeys keys, String serverKey, String blob) async {
+/// Decrypts a note [blob] stored under [serverKey] with the server-reported
+/// [updatedAt] and [deleted]. Throws [E2eCorrupt] if the blob is malformed,
+/// tampered with, from another key, or doesn't match the server key,
+/// `updatedAt` or `deleted` it was encrypted with; [E2eUnsupported] for
+/// another blob version (including v1).
+Future<E2eNote> decryptNote(
+  E2eKeys keys,
+  String serverKey,
+  String blob, {
+  required int updatedAt,
+  required bool deleted,
+}) async {
   final box = _b64uDecodeOrCorrupt(blob);
-  final plain = await _open(keys._noteEnc, box, _noteAad(serverKey));
+  if (box.length < 1 + _nonceLength + _tagLength) {
+    throw const E2eCorrupt('box too short');
+  }
+  if (box[0] != e2eNoteBlobVersion) {
+    throw E2eUnsupported('note blob version ${box[0]} not supported');
+  }
+  if (updatedAt < 0 || updatedAt > _maxSafeInt) {
+    throw const E2eCorrupt('updatedAt out of range');
+  }
+  final plain = await _open(
+    keys._noteEnc,
+    box,
+    noteAad(serverKey: serverKey, updatedAt: updatedAt, deleted: deleted),
+    version: e2eNoteBlobVersion,
+  );
   final note = decodeNotePlaintext(plain);
   final expected = await _hmacKey(keys, note.noteKey);
   final given = _b64uDecodeOrNull(serverKey);
@@ -562,6 +665,25 @@ Future<E2eNote> decryptNote(E2eKeys keys, String serverKey, String blob) async {
     throw const E2eCorrupt('note key does not match server key');
   }
   return note;
+}
+
+/// Note AAD v2: `0x02 | u64 BE updatedAt | u8 deleted | UTF-8 serverKey`.
+/// Exposed for tests.
+Uint8List noteAad({
+  required String serverKey,
+  required int updatedAt,
+  required bool deleted,
+}) {
+  final k = utf8.encode(serverKey);
+  final out = Uint8List(10 + k.length);
+  final bd = ByteData.sublistView(out);
+  out[0] = e2eNoteBlobVersion;
+  // Two u32 halves: ByteData.setUint64 is not supported on the web.
+  bd.setUint32(1, updatedAt ~/ 0x100000000);
+  bd.setUint32(5, updatedAt % 0x100000000);
+  out[9] = deleted ? 1 : 0;
+  out.setRange(10, out.length, k);
+  return out;
 }
 
 /// Encodes the v1 note plaintext (padded). Exposed for tests.
@@ -764,7 +886,7 @@ Future<E2eKeys> _unwrap(
   if (dek.length != _keyLength) throw const E2eCorrupt('bad DEK length');
   final keys = await E2eKeys.fromDek(dek);
   if (!await keys.matchesHeader(header)) {
-    throw const E2eCorrupt('check value does not match the unwrapped key');
+    throw const E2eCorrupt('check / authHash do not match the unwrapped key');
   }
   return keys;
 }
@@ -777,17 +899,15 @@ Future<Uint8List> _hmacKey(E2eKeys keys, String noteKey) async {
   return Uint8List.fromList(mac.bytes);
 }
 
-Uint8List _noteAad(String serverKey) =>
-    Uint8List.fromList([e2eVersion, ...utf8.encode(serverKey)]);
-
 final _aead = Xchacha20.poly1305Aead();
 
 Future<Uint8List> _seal(
   SecretKey key,
   List<int> plain,
   List<int> aad,
-  List<int> nonce,
-) async {
+  List<int> nonce, {
+  int version = e2eVersion,
+}) async {
   final box = await _aead.encrypt(
     plain,
     secretKey: key,
@@ -795,7 +915,7 @@ Future<Uint8List> _seal(
     aad: aad,
   );
   return Uint8List.fromList([
-    e2eVersion,
+    version,
     ...nonce,
     ...box.cipherText,
     ...box.mac.bytes,
@@ -803,11 +923,16 @@ Future<Uint8List> _seal(
 }
 
 /// Opens a sealed box; any failure is [E2eCorrupt].
-Future<Uint8List> _open(SecretKey key, Uint8List box, List<int> aad) async {
+Future<Uint8List> _open(
+  SecretKey key,
+  Uint8List box,
+  List<int> aad, {
+  int version = e2eVersion,
+}) async {
   if (box.length < 1 + _nonceLength + _tagLength) {
     throw const E2eCorrupt('box too short');
   }
-  if (box[0] != e2eVersion) throw const E2eCorrupt('box: unknown version');
+  if (box[0] != version) throw const E2eCorrupt('box: unknown version');
   final nonce = box.sublist(1, 1 + _nonceLength);
   final ct = box.sublist(1 + _nonceLength, box.length - _tagLength);
   final tag = box.sublist(box.length - _tagLength);

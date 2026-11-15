@@ -113,6 +113,7 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
   }
 
   Future<void> _turnOnE2e() async {
+    final root = Navigator.of(context, rootNavigator: true);
     final done = await showDialog<SyncDone<SyncEnableResult>>(
       context: context,
       barrierDismissible: false,
@@ -128,7 +129,9 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
       ),
     );
     final code = done?.value.recoveryCode;
-    if (code != null && mounted) await showRecoveryCode(context, code);
+    if (code != null && root.mounted) {
+      await showRecoveryCode(root.context, code);
+    }
   }
 
   Future<void> _changePassphrase() => showDialog<SyncDone<void>>(
@@ -158,12 +161,33 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
       );
       if (!ok || !mounted) return;
     }
+    final root = Navigator.of(context, rootNavigator: true);
     final done = await runSyncAction(
       context,
       title: 'Creating a recovery code',
       action: () => _sync.regenerateRecoveryCode(_id),
     );
-    if (done != null && mounted) await showRecoveryCode(context, done.value);
+    if (done != null && root.mounted) {
+      await showRecoveryCode(root.context, done.value);
+    }
+  }
+
+  Future<void> _forget() async {
+    final ok = await confirmSync(
+      context,
+      title: 'Forget sync on this device?',
+      body:
+          'This device forgets its sync session and encryption key. Your '
+          'notes on this device stay, and nothing on the server is deleted '
+          '(turn sync on again and then off to delete it there).',
+      confirmLabel: 'Forget',
+    );
+    if (!ok || !mounted) return;
+    await runSyncAction(
+      context,
+      title: 'Forgetting sync',
+      action: () => _sync.signOutDevice(_id),
+    );
   }
 
   Future<void> _turnOffE2e() async {
@@ -172,7 +196,9 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
       title: 'Turn off encryption?',
       body:
           'Your notes on the server are replaced by an unencrypted copy that '
-          'the server can read. Your other devices keep syncing.',
+          'the server can read. Your other devices stay signed in and '
+          'switch to unencrypted sync by themselves (also devices that are '
+          'still locked).',
       confirmLabel: 'Turn off encryption',
       destructive: true,
     );
@@ -216,6 +242,7 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: switch (s.phase) {
+                  SyncPhase.off when !_sync.available => _unavailable(),
                   SyncPhase.off => _off(),
                   SyncPhase.on => _on(s),
                   SyncPhase.locked => _locked(s),
@@ -268,6 +295,16 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
         );
+
+  List<Widget> _unavailable() => [
+    _status(Icons.cloud_off, "Sync isn't available in this build"),
+    const SizedBox(height: 8),
+    const Text(
+      'This version of the app was built without a sync server. Your notes '
+      'are only stored on this device.',
+      key: ValueKey('sync-unavailable'),
+    ),
+  ];
 
   List<Widget> _off() => [
     _status(Icons.cloud_outlined, 'Sync is off'),
@@ -433,9 +470,9 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
     ),
     const SizedBox(height: 8),
     const Text(
-      'The server no longer accepts this device: the session expired, or '
-      'sync was turned off on another device. Your notes on this device '
-      'were kept.',
+      'This device no longer syncs: the session ended (and signing in '
+      'again did not work), or sync was turned off or reset on another '
+      'device. Your notes on this device were kept.',
     ),
     ?_errorText(s),
     _buttons([
@@ -444,6 +481,12 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
         icon: const Icon(Icons.cloud_upload_outlined),
         label: const Text('Turn on again'),
         onPressed: () => turnOnSync(context, _sync, _id),
+      ),
+      OutlinedButton.icon(
+        key: const ValueKey('sync-forget'),
+        icon: const Icon(Icons.phonelink_erase),
+        label: const Text('Forget sync on this device'),
+        onPressed: _forget,
       ),
     ]),
   ];

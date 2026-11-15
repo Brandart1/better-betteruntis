@@ -160,9 +160,67 @@ void main() {
     // Newer remote: replaces, also as a tombstone.
     expect(n.applyRemote({'a|k': const LessonNote.tombstone(2000)}), {'a|k'});
     expect(c.read(lessonNotesProvider)['a|k']!.deleted, isTrue);
-    // A remote tombstone for an unknown key adds nothing.
-    n.applyRemote({'a|x': const LessonNote.tombstone(3000)});
-    expect(c.read(lessonNotesProvider).containsKey('a|x'), isFalse);
+    // A remote tombstone for an unknown key is kept (H1), so an older copy
+    // uploaded later loses against it; it changes no visible content.
+    expect(n.applyRemote({'a|x': const LessonNote.tombstone(3000)}), isEmpty);
+    expect(c.read(lessonNotesProvider)['a|x']!.deleted, isTrue);
+    expect(c.read(lessonNotesProvider)['a|x']!.dirty, isFalse);
+  });
+
+  test(
+    'applyRemote: a tie with other content takes the server version (H3)',
+    () {
+      final c = ProviderContainer(
+        overrides: [
+          settingsStoreProvider.overrideWithValue(MemorySettingsStore()),
+          lessonNotesClockProvider.overrideWithValue(
+            () => DateTime.fromMillisecondsSinceEpoch(1000),
+          ),
+        ],
+      );
+      addTearDown(c.dispose);
+      final n = c.read(lessonNotesProvider.notifier);
+      n.set(['a|k'], const LessonNote(text: 'mine'));
+      expect(
+        n.applyRemote({
+          'a|k': const LessonNote(text: 'theirs', updatedAt: 1000),
+        }),
+        {'a|k'},
+      );
+      final k = c.read(lessonNotesProvider)['a|k']!;
+      expect(k.text, 'theirs');
+      expect(k.dirty, isFalse);
+    },
+  );
+
+  test('set never stamps far ahead; clampFuture and stampLegacy (H2/H3)', () {
+    final now = DateTime.utc(2026, 11, 16, 10);
+    final c = ProviderContainer(
+      overrides: [
+        settingsStoreProvider.overrideWithValue(MemorySettingsStore()),
+        lessonNotesClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(c.dispose);
+    final n = c.read(lessonNotesProvider.notifier);
+    final ms = now.millisecondsSinceEpoch;
+    // A version from a device whose clock was an hour ahead.
+    n.applyRemote({
+      'a|k': LessonNote(text: 'future', updatedAt: ms + 3600 * 1000),
+    });
+    for (var i = 0; i < 3; i++) {
+      n.set(['a|k'], LessonNote(text: 'edit $i'));
+    }
+    expect(c.read(lessonNotesProvider)['a|k']!.updatedAt, ms + 60 * 1000);
+    expect(n.clampFuture('a', ms), 1);
+    expect(c.read(lessonNotesProvider)['a|k']!.updatedAt, ms);
+    expect(c.read(lessonNotesProvider)['a|k']!.dirty, isTrue);
+
+    n.applyRemote({'a|old': const LessonNote(text: 'legacy')});
+    expect(c.read(lessonNotesProvider)['a|old']!.updatedAt, 0);
+    expect(n.stampLegacy('a', 5), 1);
+    expect(c.read(lessonNotesProvider)['a|old']!.updatedAt, 5);
+    expect(c.read(lessonNotesProvider)['a|old']!.dirty, isTrue);
   });
 
   test('old tombstones are pruned only for accounts that do not sync', () {

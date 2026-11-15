@@ -16,12 +16,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fake_sync_server.dart';
 
 class _Api implements UntisApi {
+  /// Simulates WebUntis answering for another user.
+  String? user;
+
   @override
   Future<String> restAuthToken({
     required String host,
     required String school,
     required UntisCredentials auth,
-  }) async => 'untis:${auth.username}';
+  }) async => 'untis:${user ?? auth.username}';
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -53,6 +56,7 @@ class Device {
     Duration debounce = const Duration(seconds: 30),
     MemorySettingsStore? store,
     MemorySecretStore? secrets,
+    this.syncUrl = 'https://sync.test',
   }) : store = store ?? MemorySettingsStore(),
        secrets = secrets ?? MemorySecretStore(),
        adapter = server.device(browser: web) {
@@ -65,17 +69,24 @@ class Device {
         settingsStoreProvider.overrideWithValue(this.store),
         secretStoreProvider.overrideWithValue(this.secrets),
         accountRepositoryProvider.overrideWithValue(repo),
-        untisApiProvider.overrideWithValue(_Api()),
+        untisApiProvider.overrideWithValue(api),
         syncClientProvider.overrideWithValue(
           SyncClient(
             dio: Dio()..httpClientAdapter = adapter,
-            baseUrl: Uri.parse('https://sync.test'),
+            baseUrl: Uri.parse(syncUrl),
           ),
         ),
         syncClockProvider.overrideWithValue(() => clock),
         lessonNotesClockProvider.overrideWithValue(() => clock),
         syncControllerProvider.overrideWith(
-          () => SyncEngine(web: web, debounce: debounce),
+          () => SyncEngine(
+            web: web,
+            debounce: debounce,
+            sleep: (d) async {
+              slept.add(d);
+              server.resetWriteWindow();
+            },
+          ),
         ),
       ],
     );
@@ -84,6 +95,9 @@ class Device {
 
   final FakeSyncServer server;
   final String accountId;
+  final String syncUrl;
+  final api = _Api();
+  final slept = <Duration>[];
   final MemorySettingsStore store;
   final MemorySecretStore secrets;
   final FakeDevice adapter;
@@ -109,6 +123,8 @@ class Device {
   Future<SyncAccountState> sync() => engine.syncNow(accountId);
   Future<SyncEnableResult> enable([String? passphrase]) =>
       engine.enable(accountId, SyncEnableOptions(passphrase: passphrase));
+
+  Map<String, LessonNote> get all => c.read(lessonNotesProvider);
 
   void dispose() => c.dispose();
 }
@@ -318,27 +334,68 @@ void main() {
     expect(c.live.length, 3);
   });
 
-  test('disabling E2E resets the server and re-uploads in plaintext', () async {
+  test('disabling E2E keeps sessions; other devices switch to plaintext '
+      '(M3)', () async {
+    final a = Device(server);
+    final b = Device(server);
+    final c = Device(server);
+    addTearDown(a.dispose);
+    addTearDown(b.dispose);
+    addTearDown(c.dispose);
+    a.write('1', 'one');
+    await a.enable('a passphrase');
+    await b.enable();
+    expect(b.state.phase, SyncPhase.locked);
+    await c.enable();
+    await c.engine.unlock('acc1', 'a passphrase');
+    tick();
+    c.write('2', 'two');
+    await c.sync();
+    await a.sync();
+    final sessions = server.sessions.length;
+
+    await a.engine.disableE2e('acc1');
+    expect(a.state.e2e, isFalse);
+    expect(a.state.phase, SyncPhase.on);
+    expect(_ident(server)!.header, isNull);
+    expect(server.sessions.length, sessions);
+    expect(
+      {for (final n in _ident(server)!.notes.values) n['text']},
+      {'one', 'two'},
+    );
+    expect(a.secrets.values.keys.any((k) => k.startsWith('sync-dek')), false);
+
+    // The locked device notices on its next sync and syncs in plaintext.
+    expect((await b.sync()).phase, SyncPhase.on);
+    expect(b.state.e2e, isFalse);
+    expect(b.live, {'1': 'one', '2': 'two'});
+    // The unlocked one drops its key and switches too.
+    tick();
+    c.write('3', 'three');
+    final sc = await c.sync();
+    expect(sc.phase, SyncPhase.on);
+    expect(sc.e2e, isFalse);
+    expect(c.secrets.values.keys.any((k) => k.startsWith('sync-dek')), false);
+    expect(
+      _ident(server)!.notes.values.every((n) => n['blob'] == null),
+      isTrue,
+    );
+    await a.sync();
+    expect(a.live, {'1': 'one', '2': 'two', '3': 'three'});
+  });
+
+  test('disableE2e needs the key on this device', () async {
     final a = Device(server);
     final b = Device(server);
     addTearDown(a.dispose);
     addTearDown(b.dispose);
-    a.write('1', 'one');
     await a.enable('a passphrase');
     await b.enable();
-    await a.engine.disableE2e('acc1');
-    expect(a.state.e2e, isFalse);
-    expect(a.state.phase, SyncPhase.on);
-    final n = _ident(server)!.notes.values.single;
-    expect(n['text'], 'one');
-    expect(_ident(server)!.header, isNull);
-    // b (locked) learns that its session died with the reset.
-    expect(b.state.phase, SyncPhase.locked);
     await expectLater(
-      b.engine.unlock('acc1', 'a passphrase'),
+      b.engine.disableE2e('acc1'),
       throwsA(isA<SyncException>()),
     );
-    expect(b.state.phase, SyncPhase.signedOut);
+    expect(_ident(server)!.header, isNotNull);
   });
 
   test(
@@ -353,33 +410,84 @@ void main() {
       await b.enable();
       await a.engine.disable('acc1');
       expect(_ident(server), isNull);
+      final puts = server.putRequests;
       expect(a.state.phase, SyncPhase.off);
       expect(a.live, {'1': 'keep me'});
       expect(a.secrets.values, isEmpty);
       expect(a.store.values[SyncEngine.storeKey], isEmpty);
 
+      // b signs in again, sees the reset and stops without uploading.
       final s = await b.sync();
       expect(s.phase, SyncPhase.signedOut);
-      expect(s.error, isNotNull);
+      expect(s.error, contains('turned off or reset on another device'));
       expect(b.live, {'1': 'keep me'});
-      // No automatic re-login.
       expect(server.sessions, isEmpty);
+      // The empty account the re-login created is removed again.
+      expect(_ident(server), isNull);
+      expect(server.putRequests, puts);
     },
   );
 
-  test('401 → signed out without data loss; enable again works', () async {
+  test('401 → silent re-login with the same identity continues (M1)', () async {
     final a = Device(server);
     addTearDown(a.dispose);
     a.write('1', 'one');
     await a.enable();
     server.sessions.clear();
+    tick();
+    a.write('2', 'two');
+    final s = await a.sync();
+    expect(s.phase, SyncPhase.on);
+    expect(s.error, isNull);
+    expect(_ident(server)!.notes.length, 2);
+    expect(server.sessions.length, 1);
+    expect(a.live, {'1': 'one', '2': 'two'});
+  });
+
+  test('401 and the re-login is another identity → signed out, nothing '
+      'uploaded (M1)', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    a.write('1', 'one');
+    await a.enable();
+    server.sessions.clear();
+    a.api.user = 'moritz';
     a.write('2', 'two');
     final s = await a.sync();
     expect(s.phase, SyncPhase.signedOut);
+    expect(s.error, contains('different WebUntis user'));
+    expect(_ident(server, 'moritz')?.notes ?? const {}, isEmpty);
+    expect(server.sessions, isEmpty);
     expect(a.live, {'1': 'one', '2': 'two'});
     expect(a.secrets.values.keys.any((k) => k.startsWith('sync-token')), false);
+    // Turning on again works (as whoever WebUntis says now).
+    a.api.user = null;
     expect((await a.enable()).state.phase, SyncPhase.on);
     expect(_ident(server)!.notes.length, 2);
+  });
+
+  test('disable refuses when the re-login is another identity (L5)', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    a.write('1', 'one');
+    await a.enable();
+    server.sessions.clear();
+    a.api.user = 'moritz';
+    await expectLater(
+      a.engine.disable('acc1'),
+      throwsA(
+        isA<SyncException>().having(
+          (e) => e.message,
+          'message',
+          contains('Nothing was deleted'),
+        ),
+      ),
+    );
+    expect(_ident(server)!.notes.length, 1);
+    expect(a.state.enabled, isTrue);
+    a.api.user = null;
+    await a.engine.disable('acc1');
+    expect(_ident(server), isNull);
   });
 
   test('state survives a restart; signOutDevice keeps server data', () async {
@@ -415,14 +523,43 @@ void main() {
     expect(server.putRequests, before + 1);
   });
 
-  test('clock skew is reported and keeps sync on', () async {
+  test('clock ahead: stamps are clamped and retried with the server time '
+      '(H2)', () async {
     final a = Device(server);
     addTearDown(a.dispose);
     await a.enable();
     final real = clock;
     clock = clock.add(const Duration(minutes: 10));
     a.write('1', 'from the future');
+    // Further edits on a note from the future don't run away.
+    for (var i = 0; i < 5; i++) {
+      a.write('1', 'from the future $i');
+    }
     clock = real;
+    a.write('1', 'now');
+    expect(
+      a.all[a.key('1')]!.updatedAt,
+      lessThanOrEqualTo(clock.millisecondsSinceEpoch + 60 * 1000),
+    );
+    clock = clock.add(const Duration(minutes: 10));
+    a.write('2', 'ahead again');
+    clock = real;
+    final s = await a.sync();
+    expect(s.phase, SyncPhase.on);
+    expect(s.error, isNull);
+    expect(a.notes.hasDirty('acc1'), isFalse);
+    expect(
+      _ident(server)!.notes['2026-11-16|0800|2|3']!['updatedAt'],
+      lessThanOrEqualTo(clock.millisecondsSinceEpoch),
+    );
+  });
+
+  test('clock skew that persists is reported and keeps sync on', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    await a.enable();
+    server.alwaysClockSkew = true;
+    a.write('1', 'x');
     final s = await a.sync();
     expect(s.phase, SyncPhase.on);
     expect(s.error, contains('clock'));
@@ -514,8 +651,19 @@ void main() {
       SyncErrorKind.e2eExists,
     );
     expect(
-      SyncClient.errorFor(409, {'error': 'e2e_check_mismatch'}).kind,
-      SyncErrorKind.e2eCheckMismatch,
+      SyncClient.errorFor(403, {'error': 'e2e_auth_failed'}).kind,
+      SyncErrorKind.e2eAuthFailed,
+    );
+    expect(
+      SyncClient.errorFor(400, {
+        'error': 'clock_skew',
+        'serverTime': 1234,
+      }).serverTime,
+      1234,
+    );
+    expect(
+      SyncClient.errorFor(413, {'error': 'storage_quota'}).message,
+      contains('5 MB'),
     );
     expect(SyncClient.errorFor(503, null).kind, SyncErrorKind.server);
   });
@@ -531,4 +679,398 @@ void main() {
     server.forceStatus = null;
     expect((await a.sync()).error, isNull);
   });
+
+  // ------------------------------------------------------------ findings
+
+  test(
+    'C1: failed E2E setup on enable rolls back, nothing in plaintext',
+    () async {
+      final a = Device(server);
+      addTearDown(a.dispose);
+      a.write('1', 'secret');
+      server.writesPerWindow = 0; // PUT /e2e is refused (429)
+      await expectLater(
+        a.enable('a passphrase'),
+        throwsA(isA<SyncException>()),
+      );
+      expect(a.state.phase, SyncPhase.off);
+      expect(server.sessions, isEmpty);
+      expect(a.secrets.values, isEmpty);
+      expect(_ident(server)!.notes, isEmpty);
+      server.writesPerWindow = null;
+      await a.engine.syncAll(force: true);
+      expect(_ident(server)!.notes, isEmpty);
+      expect(server.putRequests, 0);
+    },
+  );
+
+  test('C1: lost answers keep the setup pending; the next sync finishes it '
+      'encrypted (L1: recovery code flagged)', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    a.write('1', 'secret');
+    server.loseAnswer.addAll({'PUT /api/sync/e2e', 'GET /api/sync/e2e'});
+    await expectLater(
+      a.enable('a passphrase'),
+      throwsA(
+        isA<SyncException>().having(
+          (e) => e.message,
+          'message',
+          contains('nothing is uploaded unencrypted'),
+        ),
+      ),
+    );
+    expect(a.state.phase, SyncPhase.on);
+    expect(a.state.e2e, isFalse);
+    expect(server.putRequests, 0);
+    // Restart: the pending setup survives and finishes.
+    a.dispose();
+    final b = Device(server, store: a.store, secrets: a.secrets);
+    addTearDown(b.dispose);
+    final s = await b.sync();
+    expect(s.phase, SyncPhase.on);
+    expect(s.e2e, isTrue);
+    expect(s.error, contains('recovery code'));
+    expect(_ident(server)!.notes.values.single['blob'], isA<String>());
+    // A new code clears the hint.
+    await b.engine.regenerateRecoveryCode('acc1');
+    expect((await b.sync()).error, isNull);
+  });
+
+  test('C1: an account meant to be encrypted never pushes plaintext', () async {
+    final a = Device(server);
+    await a.enable();
+    final st = Map<String, Object?>.from(
+      a.store.values[SyncEngine.storeKey]! as Map,
+    );
+    st['acc1'] = {...(st['acc1']! as Map), 'e2ePending': true};
+    a.store.values[SyncEngine.storeKey] = st;
+    a.dispose();
+    final b = Device(server, store: a.store, secrets: a.secrets);
+    addTearDown(b.dispose);
+    b.write('1', 'must stay local');
+    final puts = server.putRequests;
+    final s = await b.sync();
+    expect(server.putRequests, puts);
+    expect(_ident(server)!.notes, isEmpty);
+    expect(s.error, contains('encryption'));
+    // Finishing it: turn on encryption again.
+    await b.engine.enableE2e('acc1', 'a passphrase');
+    expect(_ident(server)!.notes.values.single['blob'], isA<String>());
+  });
+
+  test(
+    'C1: enableE2e that fails definitely stays plaintext as before',
+    () async {
+      final a = Device(server);
+      addTearDown(a.dispose);
+      a.write('1', 'one');
+      await a.enable();
+      server.writesPerWindow = 0;
+      await expectLater(
+        a.engine.enableE2e('acc1', 'a passphrase'),
+        throwsA(isA<SyncException>()),
+      );
+      server.writesPerWindow = null;
+      expect(a.state.e2e, isFalse);
+      expect(_ident(server)!.header, isNull);
+      tick();
+      a.write('2', 'two');
+      expect((await a.sync()).error, isNull);
+      expect(_ident(server)!.notes.length, 2);
+    },
+  );
+
+  test(
+    'H1: remote tombstones are kept and beat older copies after a reset',
+    () async {
+      final a = Device(server);
+      final b = Device(server);
+      final c = Device(server);
+      addTearDown(a.dispose);
+      addTearDown(b.dispose);
+      addTearDown(c.dispose);
+      a.write('1', 'old note');
+      await a.enable();
+      await b.enable();
+      tick();
+      a.notes.set([a.key('1')], const LessonNote());
+      await a.sync();
+      await c.enable();
+      expect(c.all[c.key('1')]!.deleted, isTrue);
+      // Reset on a; c turns on again first, then b (still has the old copy).
+      await a.engine.disable('acc1');
+      await c.sync(); // signed out (reset)
+      await c.enable();
+      await b.sync();
+      await b.enable();
+      expect(b.live, isEmpty);
+      expect(_ident(server)!.notes.values.single['deleted'], isTrue);
+    },
+  );
+
+  test('H3: a tie keeps the server version on every device', () async {
+    final a = Device(server);
+    final b = Device(server);
+    addTearDown(a.dispose);
+    addTearDown(b.dispose);
+    await a.enable();
+    await b.enable();
+    tick();
+    a.write('1', 'from a');
+    b.write('1', 'from b'); // same millisecond
+    await a.sync();
+    await b.sync();
+    expect(b.live['1'], 'from a');
+    expect(b.notes.hasDirty('acc1'), isFalse);
+    await a.sync();
+    expect(a.live['1'], 'from a');
+  });
+
+  test(
+    'H3: legacy notes (updatedAt 0) are stamped on their first upload',
+    () async {
+      MemorySettingsStore legacy(String text) => MemorySettingsStore({
+        LessonNotesNotifier.storeKey: {
+          'acc1|2026-11-16|0800|1|3': {'text': text},
+        },
+      });
+      final a = Device(server, store: legacy('from a'));
+      final b = Device(server, store: legacy('from b'));
+      addTearDown(a.dispose);
+      addTearDown(b.dispose);
+      await a.enable();
+      expect(
+        _ident(server)!.notes.values.single['updatedAt'],
+        clock.millisecondsSinceEpoch,
+      );
+      tick();
+      await b.enable();
+      expect(b.live['1'], 'from a');
+      expect(_ident(server)!.notes.values.single['text'], 'from a');
+    },
+  );
+
+  test('M2: syncNow never throws and resets syncing', () async {
+    final secrets = _ThrowingSecrets();
+    final a = Device(server, secrets: secrets);
+    addTearDown(a.dispose);
+    await a.enable();
+    secrets.fail = true;
+    final s = await a.sync();
+    expect(s.syncing, isFalse);
+    expect(a.state.syncing, isFalse);
+    expect(s.error, isNotNull);
+  });
+
+  test('M4: encrypted tombstones', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    a.write('1', 'x');
+    await a.enable('a passphrase');
+    tick();
+    a.notes.set([a.key('1')], const LessonNote());
+    await a.sync();
+    final n = _ident(server)!.notes.values.single;
+    expect(n['deleted'], isTrue);
+    expect(n['blob'], isA<String>());
+    // Moving the deleted flag breaks the blob: unreadable, not applied.
+    n['deleted'] = false;
+    n['seq'] = ++_ident(server)!.lastSeq;
+    final b = Device(server);
+    addTearDown(b.dispose);
+    await b.enable('a passphrase');
+    expect(b.live, isEmpty);
+    expect(b.state.error, contains('could not be synced'));
+  });
+
+  test(
+    'M5: web, another tab switched the cookie → stop, nothing applied',
+    () async {
+      final a = Device(server, web: true);
+      final m = Device(server, web: true, user: 'moritz');
+      addTearDown(a.dispose);
+      addTearDown(m.dispose);
+      a.write('1', 'max note');
+      await a.enable();
+      m.write('1', 'moritz note');
+      await m.enable();
+      a.adapter.cookie = m.adapter.cookie;
+      tick();
+      a.write('2', 'max only');
+      final puts = server.putRequests;
+      final s = await a.sync();
+      expect(s.phase, SyncPhase.signedOut);
+      expect(s.error, contains('another account'));
+      expect(a.live, {'1': 'max note', '2': 'max only'});
+      expect(server.putRequests, puts);
+      expect(
+        _ident(server, 'moritz')!.notes.values.single['text'],
+        'moritz note',
+      );
+      final requests = server.log.length;
+      await a.sync();
+      expect(server.log.length, requests);
+    },
+  );
+
+  test('M5: web guard reads the state another tab stored', () async {
+    final store = MemorySettingsStore();
+    final secrets = MemorySecretStore();
+    final tab2 = Device(
+      server,
+      web: true,
+      accountId: 'acc2',
+      store: store,
+      secrets: secrets,
+    );
+    final tab1 = Device(server, web: true, store: store, secrets: secrets);
+    addTearDown(tab1.dispose);
+    addTearDown(tab2.dispose);
+    await tab1.enable();
+    await expectLater(
+      tab2.enable(),
+      throwsA(
+        isA<SyncException>().having(
+          (e) => e.message,
+          'message',
+          contains('one account'),
+        ),
+      ),
+    );
+  });
+
+  test(
+    'L1: lost answers of PUT/PATCH /e2e are resolved by re-reading',
+    () async {
+      final a = Device(server);
+      addTearDown(a.dispose);
+      a.write('1', 'one');
+      server.loseAnswer.add('PUT /api/sync/e2e');
+      final r = await a.enable('a passphrase');
+      expect(r.state.e2e, isTrue);
+      expect(r.recoveryCode, isNotNull);
+
+      server.loseAnswer.add('PATCH /api/sync/e2e');
+      final code = await a.engine.regenerateRecoveryCode('acc1');
+      final b = Device(server);
+      addTearDown(b.dispose);
+      await b.enable();
+      await b.engine.unlock('acc1', code);
+      expect(b.live, {'1': 'one'});
+
+      server.loseAnswer.add('PATCH /api/sync/e2e');
+      server.onHandled = (r) {
+        // The re-read after the lost PATCH answer fails too.
+        if (r == 'PATCH /api/sync/e2e') {
+          server.loseAnswer.add('GET /api/sync/e2e');
+        }
+      };
+      await expectLater(
+        a.engine.regenerateRecoveryCode('acc1'),
+        throwsA(
+          isA<SyncException>().having(
+            (e) => e.message,
+            'message',
+            contains('may have stopped working'),
+          ),
+        ),
+      );
+      expect(a.state.error, contains('recovery code'));
+    },
+  );
+
+  test('L3: only e2e_not_enabled means "no E2E"', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    await a.enable();
+    final client = a.c.read(syncClientProvider);
+    final token = a.secrets.values['sync-token|acc1'];
+    expect(await client.getE2e(token), isNull);
+    server.forceStatus = 404;
+    await expectLater(client.getE2e(token), throwsA(isA<SyncApiException>()));
+  });
+
+  test('L6: lastSeq is stored only after the pulled notes', () async {
+    final store = _RecordingStore();
+    final a = Device(server);
+    final b = Device(server, store: store);
+    addTearDown(a.dispose);
+    addTearDown(b.dispose);
+    a.write('1', 'one');
+    await a.enable();
+    await b.enable();
+    final notesAt = store.order.indexWhere(
+      (e) => e.startsWith('lessonNotes:') && e != 'lessonNotes:0',
+    );
+    final seqAt = store.order.indexWhere(
+      (e) => e.startsWith('syncState:') && e != 'syncState:0',
+    );
+    expect(notesAt, greaterThanOrEqualTo(0));
+    expect(seqAt, greaterThan(notesAt));
+  });
+
+  test('L7: web key expiry also applies to the key in memory', () async {
+    final a = Device(server, web: true);
+    addTearDown(a.dispose);
+    await a.enable('web passphrase');
+    clock = clock.add(const Duration(days: 31));
+    expect((await a.sync()).phase, SyncPhase.locked);
+  });
+
+  test('no sync URL in this build: unavailable', () async {
+    final a = Device(server, syncUrl: '');
+    addTearDown(a.dispose);
+    expect(a.engine.available, isFalse);
+    await expectLater(
+      a.enable(),
+      throwsA(
+        isA<SyncException>().having(
+          (e) => e.message,
+          'message',
+          contains("isn't available"),
+        ),
+      ),
+    );
+    expect(server.log, isEmpty);
+  });
+
+  test('a big upload waits for the write rate limit and continues', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    for (var i = 0; i < 600; i++) {
+      a.write('$i', 'n$i');
+    }
+    server.writesPerWindow = 1;
+    final r = await a.enable();
+    expect(r.state.error, isNull);
+    expect(a.slept, [const Duration(seconds: 60)]);
+    expect(_ident(server)!.notes.length, 600);
+    expect(a.notes.hasDirty('acc1'), isFalse);
+  });
+}
+
+class _ThrowingSecrets extends MemorySecretStore {
+  bool fail = false;
+  @override
+  Future<String?> read(String accountId) async {
+    if (fail) throw StateError('keystore broken');
+    return super.read(accountId);
+  }
+}
+
+/// Records the order of writes: `key:count` (notes) / `key:lastSeq`.
+class _RecordingStore extends MemorySettingsStore {
+  final order = <String>[];
+  @override
+  Future<void> write(String key, Object? value) async {
+    if (key == LessonNotesNotifier.storeKey) {
+      order.add('$key:${(value as Map).length}');
+    } else if (key == SyncEngine.storeKey) {
+      final acc = (value as Map)['acc1'];
+      order.add('$key:${acc is Map ? acc['lastSeq'] : 0}');
+    }
+    await Future<void>.delayed(Duration.zero);
+    await super.write(key, value);
+  }
 }

@@ -32,6 +32,9 @@ Future<void> turnOnSync(
   SyncController sync,
   String accountId,
 ) async {
+  // The recovery code goes through the root navigator: it must be shown
+  // even if the screen that started the flow is gone by then.
+  final root = Navigator.of(context, rootNavigator: true);
   final agreed = await showDialog<bool>(
     context: context,
     builder: (_) => const SyncDisclaimerDialog(),
@@ -68,11 +71,11 @@ Future<void> turnOnSync(
     );
   }
   final result = done?.value;
-  if (result == null || !context.mounted) return;
+  if (result == null) return;
   if (result.recoveryCode case final code?) {
-    await showRecoveryCode(context, code);
-    if (!context.mounted) return;
+    if (root.mounted) await showRecoveryCode(root.context, code);
   }
+  if (!context.mounted) return;
   if (result.state.phase == SyncPhase.locked) {
     await unlockSync(context, sync, accountId, alreadyEncrypted: true);
   }
@@ -98,9 +101,11 @@ Future<bool> unlockSync(
 }
 
 /// Shows [code] once with a copy button; closes only after "I saved it".
+/// Uses the root navigator of [context].
 Future<void> showRecoveryCode(BuildContext context, String code) =>
     showDialog<void>(
       context: context,
+      useRootNavigator: true,
       barrierDismissible: false,
       builder: (_) => RecoveryCodeDialog(code: code),
     );

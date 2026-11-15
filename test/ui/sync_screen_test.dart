@@ -33,6 +33,15 @@ class FakeSync extends SyncController {
   /// When set, syncNow waits for it.
   Completer<void>? syncGate;
 
+  /// Whether this build has a sync server.
+  static bool isAvailable = true;
+
+  /// Runs inside enableE2e before it returns.
+  static Future<void> Function()? duringEnableE2e;
+
+  @override
+  bool get available => isAvailable;
+
   @override
   Map<String, SyncAccountState> build() => initial;
 
@@ -108,7 +117,10 @@ class FakeSync extends SyncController {
   }
 
   @override
-  Future<void> signOutDevice(String id) async => calls.add('signOutDevice');
+  Future<void> signOutDevice(String id) async {
+    calls.add('signOutDevice');
+    _set(SyncAccountState(accountId: id));
+  }
 
   @override
   Future<SyncEnableResult> enableE2e(
@@ -117,6 +129,7 @@ class FakeSync extends SyncController {
     bool withRecoveryCode = true,
   }) async {
     calls.add('enableE2e:$passphrase:$withRecoveryCode');
+    await duringEnableE2e?.call();
     final s = _on(id, e2e: true, recovery: withRecoveryCode);
     _set(s);
     return SyncEnableResult(
@@ -148,7 +161,11 @@ void main() {
   setUp(() {
     FakeSync.initial = const {};
     FakeSync.serverHasE2e = false;
+    FakeSync.isAvailable = true;
+    FakeSync.duringEnableE2e = null;
   });
+
+  late InMemoryAccountRepository repo;
 
   Future<FakeSync> pump(
     WidgetTester tester, {
@@ -174,7 +191,7 @@ void main() {
       ProviderScope(
         overrides: [
           accountRepositoryProvider.overrideWithValue(
-            InMemoryAccountRepository(initial: [account]),
+            repo = InMemoryAccountRepository(initial: [account]),
           ),
           appVersionProvider.overrideWith(
             (ref) async => const AppVersion('0.6.0', '1'),
@@ -381,6 +398,65 @@ void main() {
     expect(find.textContaining('were kept'), findsOneWidget);
     await tap(tester, key('sync-turn-on-again'));
     expect(key('sync-disclaimer'), findsOneWidget);
+  });
+
+  testWidgets('signed out view: forget sync on this device', (tester) async {
+    FakeSync.initial = {
+      'demo': const SyncAccountState(
+        accountId: 'demo',
+        phase: SyncPhase.signedOut,
+      ),
+    };
+    final sync = await pump(tester);
+    await tap(tester, key('sync-forget'));
+    expect(find.text('Forget sync on this device?'), findsOneWidget);
+    await tap(tester, key('sync-confirm'));
+    expect(sync.calls, ['signOutDevice']);
+    expect(find.text('Sync is off'), findsOneWidget);
+  });
+
+  testWidgets('no sync server in this build: no opt-in', (tester) async {
+    FakeSync.isAvailable = false;
+    await pump(tester);
+    expect(find.text("Sync isn't available in this build"), findsOneWidget);
+    expect(key('sync-turn-on'), findsNothing);
+  });
+
+  testWidgets('the recovery code is shown even if the section is gone', (
+    tester,
+  ) async {
+    FakeSync.initial = {
+      'demo': const SyncAccountState(
+        accountId: 'demo',
+        phase: SyncPhase.on,
+        identity: _identity,
+      ),
+    };
+    FakeSync.duringEnableE2e = () => repo.delete(account.id);
+    await pump(tester);
+    await tap(tester, key('sync-e2e-on'));
+    await tester.enterText(key('sync-passphrase'), _passphrase);
+    await tester.enterText(key('sync-passphrase-repeat'), _passphrase);
+    await tap(tester, key('sync-passphrase-submit'));
+    expect(find.byType(SyncAccountSection), findsNothing);
+    expect(key('sync-recovery-dialog'), findsOneWidget);
+    expect(find.text(_code), findsOneWidget);
+  });
+
+  testWidgets('turning off encryption says other devices switch', (
+    tester,
+  ) async {
+    FakeSync.initial = {
+      'demo': const SyncAccountState(
+        accountId: 'demo',
+        phase: SyncPhase.on,
+        identity: _identity,
+        e2e: true,
+      ),
+    };
+    await pump(tester);
+    await tap(tester, key('sync-e2e-off'));
+    expect(find.textContaining('stay signed in'), findsOneWidget);
   });
 
   testWidgets('sync now shows progress, error text is shown', (tester) async {

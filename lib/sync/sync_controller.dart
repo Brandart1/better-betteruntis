@@ -115,6 +115,11 @@ abstract class SyncController extends Notifier<Map<String, SyncAccountState>> {
   SyncAccountState stateOf(String accountId) =>
       state[accountId] ?? SyncAccountState(accountId: accountId);
 
+  /// Whether this build can sync at all (the phone apps need a sync server
+  /// URL at build time). Unavailable: the UI says so instead of offering
+  /// the opt-in, and [enable] throws.
+  bool get available => true;
+
   /// Turns sync on for [accountId]: logs in to the sync server with the
   /// account's WebUntis token, optionally sets up E2E, then syncs.
   /// If the server already has E2E for this identity, the result's phase is
@@ -124,7 +129,9 @@ abstract class SyncController extends Notifier<Map<String, SyncAccountState>> {
   /// Unlocks E2E on this device with the passphrase or the recovery code.
   Future<SyncAccountState> unlock(String accountId, String passphraseOrCode);
 
-  /// Syncs now (pull then push). No-op when off/locked/signed out.
+  /// Syncs now (pull then push). Never throws (errors end up in the
+  /// state). No-op when off or signed out; when locked it only checks
+  /// whether E2E is still on (turned off elsewhere → syncs in plaintext).
   Future<SyncAccountState> syncNow(String accountId);
 
   /// Turns sync off: deletes everything about this identity on the server
@@ -143,7 +150,9 @@ abstract class SyncController extends Notifier<Map<String, SyncAccountState>> {
     bool withRecoveryCode = true,
   });
 
-  /// Turns E2E off: resets the server data and uploads in plaintext.
+  /// Turns E2E off (needs the key on this device): the server deletes the
+  /// header and the encrypted notes, this device uploads in plaintext.
+  /// Other devices stay signed in and switch to plaintext when they see it.
   Future<void> disableE2e(String accountId);
 
   /// Changes the passphrase (re-wraps the key; notes stay as they are).
@@ -166,6 +175,9 @@ final syncControllerProvider =
 class UnavailableSyncController extends SyncController {
   @override
   Map<String, SyncAccountState> build() => const {};
+
+  @override
+  bool get available => false;
 
   Never _unavailable() =>
       throw const SyncException('Sync is not available in this build.');
