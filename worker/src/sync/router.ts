@@ -14,10 +14,11 @@ import {
   deleteSessionHandler,
   identityLogTag,
   type AuthedRequest,
+  type AuthOptions,
   type SyncDeps,
 } from "./auth";
 import * as db from "./db";
-import { getE2e, patchE2e, putE2e } from "./e2e";
+import { deleteE2e, getE2e, patchE2e, putE2e } from "./e2e";
 import { HttpError, jsonError, methodNotAllowed, noContent } from "./http";
 import { getNotes, putNotes } from "./notes";
 
@@ -28,10 +29,10 @@ function errorName(e: unknown): string {
   return e instanceof Error ? e.name : "error";
 }
 
-/** Wraps [fn] with session authentication. */
-function authed(fn: AuthedHandler): Handler {
+/** Wraps [fn] with session authentication (and its rate limits). */
+function authed(fn: AuthedHandler, options: AuthOptions = {}): Handler {
   return async (request, env, deps) => {
-    const auth = await authenticate(request, env, deps);
+    const auth = await authenticate(request, env, deps, options);
     try {
       return await fn(request, env, auth, deps);
     } catch (e) {
@@ -45,6 +46,8 @@ function authed(fn: AuthedHandler): Handler {
   };
 }
 
+const WRITE: AuthOptions = { write: true };
+
 const ROUTES: Record<string, Record<string, Handler>> = {
   "/api/sync/session": {
     POST: (r, env, deps) => createSessionHandler(r, env, deps),
@@ -52,12 +55,13 @@ const ROUTES: Record<string, Record<string, Handler>> = {
   },
   "/api/sync/notes": {
     GET: authed((r, env, auth) => getNotes(r, env, auth)),
-    PUT: authed((r, env, auth, deps) => putNotes(r, env, auth, deps)),
+    PUT: authed((r, env, auth, deps) => putNotes(r, env, auth, deps), WRITE),
   },
   "/api/sync/e2e": {
     GET: authed((_r, env, auth) => getE2e(env, auth)),
-    PUT: authed((r, env, auth, deps) => putE2e(r, env, auth, deps)),
-    PATCH: authed((r, env, auth) => patchE2e(r, env, auth)),
+    PUT: authed((r, env, auth, deps) => putE2e(r, env, auth, deps), WRITE),
+    PATCH: authed((r, env, auth) => patchE2e(r, env, auth), WRITE),
+    DELETE: authed((r, env, auth) => deleteE2e(r, env, auth), WRITE),
   },
   "/api/sync/account": {
     DELETE: authed(async (_r, env, auth) => {

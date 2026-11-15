@@ -6,7 +6,7 @@
 import type { Env } from "./env";
 import { withSecurityHeaders } from "./http";
 import { handleProxy } from "./proxy";
-import { purgeExpiredSessions } from "./sync/db";
+import { purgeExpiredSessions, purgeTombstones, TOMBSTONE_MAX_AGE_MS } from "./sync/db";
 import { handleSync } from "./sync/router";
 
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -26,6 +26,16 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   return env.ASSETS.fetch(request);
 }
 
+/** The daily cron's work (exported for tests). */
+export async function dailyCleanup(db: D1Database, now: number): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    if ((await purgeExpiredSessions(db, now)) < 1000) break;
+  }
+  for (let i = 0; i < 20; i++) {
+    if ((await purgeTombstones(db, now - TOMBSTONE_MAX_AGE_MS)) < 1000) break;
+  }
+}
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const res = await route(request, env, ctx);
@@ -34,11 +44,11 @@ export default {
     return withSecurityHeaders(res);
   },
 
-  /** Daily cron (wrangler.jsonc triggers): removes expired sync sessions. */
-  async scheduled(_controller, env, _ctx): Promise<void> {
-    const now = Date.now();
-    for (let i = 0; i < 20; i++) {
-      if ((await purgeExpiredSessions(env.DB, now)) < 1000) break;
-    }
+  /**
+   * Daily cron (wrangler.jsonc triggers): removes expired sync sessions and
+   * tombstones not written for 400 days (bounded: at most 20 000 each).
+   */
+  async scheduled(controller, env, _ctx): Promise<void> {
+    await dailyCleanup(env.DB, controller.scheduledTime || Date.now());
   },
 } satisfies ExportedHandler<Env>;

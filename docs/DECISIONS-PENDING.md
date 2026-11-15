@@ -22,7 +22,7 @@ once confirmed.
   the engine's enableE2e flow.
 
 ## 3. Passphrase change / new recovery code: `PATCH /api/sync/e2e`
-- **Chosen:** replace the header only if its `check` value is unchanged
+- **Superseded by R4** (authKey proof). Was: replace the header only if its `check` value is unchanged
   (proves the same data key; the library keeps `check`). 409
   `e2e_check_mismatch` otherwise.
 - **Alternative:** no server-side replace; change = reset + re-upload
@@ -37,7 +37,7 @@ once confirmed.
 - Daily cron at 03:17 UTC deletes expired sessions (`wrangler.jsonc`
   `triggers`).
 - Rate limits (wrangler.jsonc `ratelimits`): login 10/min per IP, relay
-  300/min per IP, other sync calls 120/min per session.
+  300/min per IP, other sync calls 120/min (now per identity, see R3).
 - **Switch:** values in worker/src/sync/notes.ts (`LIMITS`), db.ts
   (`MAX_SESSIONS_PER_IDENTITY`), wrangler.jsonc.
 
@@ -144,3 +144,60 @@ once confirmed.
   same version (practically never happens).
 - Notes over 4 000 characters are skipped (counted in the sync error); the
   input field is now capped at 4 000.
+
+## R1. Per-identity byte quota: 5 MiB
+- **Chosen:** 5 MiB per identity = UTF-8 bytes of key + text/blob over all
+  stored notes incl. tombstones (413 `storage_quota`), next to the 20 000
+  notes limit. A write that only shrinks the total always passes (deleting
+  works when over quota). Counters `identities.note_count`/`bytes` are kept
+  by SQLite triggers on `notes` (same statement as every change, also for
+  E2E on/off, tombstone purge, cascades), so no request scans notes.
+- **Alternative:** a larger quota (20 000 × 4 000 chars would be ~80 MB per
+  user; 500 MB D1 total); or explicit counter statements in each batch
+  instead of triggers.
+- **Switch:** `LIMITS.maxBytesPerUser` in worker/src/sync/notes.ts.
+
+## R2. Tombstone purge after 400 days (server time)
+- **Chosen:** daily cron deletes tombstones whose row wasn't written on the
+  server for 400 days (new column `notes.stored_at`, server ms, partial
+  index `notes_tombstones`; `updated_at` is the client clock and could be
+  set arbitrarily old). At most 20 000 per run. A device offline longer
+  than that may keep or re-upload notes deleted elsewhere.
+- **Alternative:** longer (or never) — tombstones count against both quotas.
+- **Switch:** `TOMBSTONE_MAX_AGE_MS` in worker/src/sync/db.ts.
+
+## R3. Rate limits per identity: RL_WRITE 20/min, RL_AUTH 300/min per IP
+- **Chosen:** RL_SYNC (120/min) is now keyed by identity, not session, and
+  applies to every authenticated call; new RL_WRITE (20/min per identity)
+  on top for PUT notes and PUT/PATCH/DELETE e2e; new RL_AUTH (300/min per
+  client IP, /64 for IPv6) before every session lookup (also logout).
+  RL_SESSION / RL_PROXY keys are now /64 for IPv6. 20 writes × 500 notes =
+  10 000 notes/min, so a first upload of 20 000 notes takes ≥ 2 minutes
+  (the client must honour 429 + `retry-after`; see 8. "no automatic retry").
+  RL_AUTH 300/min allows a school NAT with many users; lower it if abused.
+- **Alternative:** RL_WRITE 60/min; reuse RL_SESSION with a key prefix
+  instead of RL_AUTH (10/min per IP would be far too low for normal use).
+- **Switch:** `ratelimits` in worker/wrangler.jsonc (namespace ids 1004,
+  1005 are new).
+
+## R4. E2E PATCH: authKey proof, `check` rule dropped
+- **Chosen:** PATCH `{header, authKey}` requires SHA-256(authKey) == stored
+  `authHash` (constant time) and the new header's `authHash` == stored. The
+  old rule "`check` must be unchanged" is dropped (and with it 409
+  `e2e_check_mismatch`): the auth key already proves the DEK, and the
+  client may re-encrypt `check` with a fresh nonce. Same proof for the new
+  `DELETE /api/sync/e2e` (turn E2E off, sessions stay). KDF bounds on the
+  server: m 19 456–262 144, t 2–16, p 1–16, salt exactly 16 bytes.
+- **Alternative:** keep the `check` equality as an extra condition.
+- **Switch:** worker/src/sync/e2e.ts `patchE2e` (compare `check` with the
+  stored header) and db.ts `replaceE2eHeader`.
+
+## R5. Browser login answer without token; identity ids never reused
+- **Chosen:** `POST /api/sync/session` omits `token` when an `Origin`
+  header is present (browsers use the HttpOnly cookie). `identities.id` is
+  `AUTOINCREMENT`, so a deleted identity's id is never given to a later
+  login. More than one `bbu_sync` cookie → 401.
+- **Alternative:** always return the token (web client could keep it in
+  memory), plain `INTEGER PRIMARY KEY`.
+- **Switch:** worker/src/sync/auth.ts `createSessionHandler`,
+  migrations/0001_init.sql.

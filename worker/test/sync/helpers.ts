@@ -52,7 +52,8 @@ export async function call(request: Request, deps: SyncDeps = {}, e: typeof env 
 }
 
 export function req(method: string, path: string, init: { token?: string; body?: unknown; headers?: Record<string, string> } = {}): Request {
-  const headers: Record<string, string> = { ...init.headers };
+  // A fresh client IP per request unless given (RL_AUTH is per IP).
+  const headers: Record<string, string> = { "cf-connecting-ip": freshIp(), ...init.headers };
   if (init.token !== undefined) headers["authorization"] = `Bearer ${init.token}`;
   let body: string | undefined;
   if (init.body !== undefined) {
@@ -105,6 +106,7 @@ export interface Page {
   latestSeq: number;
   more: boolean;
   e2e: boolean;
+  identity: { host: string; school: string; userId: string };
 }
 
 export async function get(token: string, since?: number): Promise<Page> {
@@ -120,7 +122,19 @@ export function b64(n: number, byte = 7): string {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-/** A valid E2E header. */
+/** base64url(SHA-256(base64url-decoded [authKey])), like the client's authHash. */
+export async function authHashOf(authKey: string): Promise<string> {
+  const bin = atob(authKey.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (authKey.length % 4)) % 4));
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return btoa(String.fromCharCode(...digest)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** The auth key (32 bytes) whose hash [e2eHeader] carries by default. */
+export const AUTH_KEY = b64(32, 42);
+export const AUTH_HASH = await authHashOf(AUTH_KEY);
+
+/** A valid E2E header (authHash of [AUTH_KEY]). */
 export function e2eHeader(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     version: 1,
@@ -128,6 +142,7 @@ export function e2eHeader(overrides: Record<string, unknown> = {}): Record<strin
     wrappedDek: b64(72, 1),
     wrappedDekRecovery: b64(72, 2),
     check: b64(56, 3),
+    authHash: AUTH_HASH,
     ...overrides,
   };
 }

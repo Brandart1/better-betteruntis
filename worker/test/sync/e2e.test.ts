@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { LIMITS } from "../../src/sync/notes";
-import { b64, blobNote, call, e2eHeader, freshUser, get, identityId, login, note, put, req } from "./helpers";
+import { AUTH_HASH, AUTH_KEY, authHashOf, b64, blobNote, call, e2eHeader, freshUser, get, identityId, login, note, put, req } from "./helpers";
 
 async function errorOf(res: Response): Promise<string> {
   return ((await res.json()) as { error: string }).error;
@@ -30,6 +30,12 @@ describe("E2E header", () => {
     expect(await (await getHeader(s.token)).json()).toEqual(header);
     // A new login reports e2e: true.
     expect((await login(user)).body.e2e).toBe(true);
+  });
+
+  it("maximum KDF parameters are accepted", async () => {
+    const s = await login(freshUser());
+    const res = await putHeader(s.token, e2eHeader({ kdf: { alg: "argon2id", m: 262144, t: 16, p: 16, salt: b64(16) } }));
+    expect(res.status).toBe(201);
   });
 
   it("wrappedDekRecovery is optional", async () => {
@@ -61,6 +67,19 @@ describe("E2E header", () => {
     ["wrappedDek too long", { wrappedDek: "A".repeat(600) }],
     ["wrappedDekRecovery number", { wrappedDekRecovery: 5 }],
     ["check missing", { check: undefined }],
+    ["m below 19456", { kdf: { alg: "argon2id", m: 19455, t: 2, p: 1, salt: b64(16) } }],
+    ["m above 262144", { kdf: { alg: "argon2id", m: 262145, t: 2, p: 1, salt: b64(16) } }],
+    ["t 1", { kdf: { alg: "argon2id", m: 19456, t: 1, p: 1, salt: b64(16) } }],
+    ["t 17", { kdf: { alg: "argon2id", m: 19456, t: 17, p: 1, salt: b64(16) } }],
+    ["p 0", { kdf: { alg: "argon2id", m: 19456, t: 2, p: 0, salt: b64(16) } }],
+    ["p 17", { kdf: { alg: "argon2id", m: 19456, t: 2, p: 17, salt: b64(16) } }],
+    ["salt 15 bytes", { kdf: { alg: "argon2id", m: 19456, t: 2, p: 1, salt: b64(15) } }],
+    ["salt 17 bytes", { kdf: { alg: "argon2id", m: 19456, t: 2, p: 1, salt: b64(17) } }],
+    ["salt 32 bytes", { kdf: { alg: "argon2id", m: 19456, t: 2, p: 1, salt: b64(32) } }],
+    ["authHash missing", { authHash: undefined }],
+    ["authHash 42 chars", { authHash: AUTH_HASH.slice(0, 42) }],
+    ["authHash 44 chars", { authHash: AUTH_HASH + "A" }],
+    ["authHash not base64url", { authHash: "+" + AUTH_HASH.slice(1) }],
   ];
   for (const [name, overrides] of bad) {
     it(`invalid header (${name}) -> 400, nothing stored`, async () => {
@@ -182,23 +201,61 @@ describe("E2E notes", () => {
 describe("E2E header replace (PATCH)", () => {
   const patchHeader = (token: string, body: unknown) => call(req("PATCH", "/api/sync/e2e", { token, body }));
 
-  it("replaces the header when check is unchanged (passphrase change)", async () => {
+  it("replaces the header with the right authKey and the same authHash; check may change", async () => {
     const s = await login(freshUser());
-    const header = e2eHeader();
-    expect((await putHeader(s.token, header)).status).toBe(201);
-    const changed = e2eHeader({ wrappedDek: b64(72, 9), kdf: { alg: "argon2id", m: 19456, t: 2, p: 1, salt: b64(16, 5) } });
-    const res = await patchHeader(s.token, changed);
+    expect((await putHeader(s.token, e2eHeader())).status).toBe(201);
+    const changed = e2eHeader({
+      wrappedDek: b64(72, 9),
+      check: b64(56, 8),
+      kdf: { alg: "argon2id", m: 65536, t: 3, p: 1, salt: b64(16, 5) },
+    });
+    const res = await patchHeader(s.token, { header: changed, authKey: AUTH_KEY });
     expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(changed);
     expect(await (await getHeader(s.token)).json()).toEqual(changed);
   });
 
-  it("refuses a header with a different check (other key) -> 409", async () => {
+  it("wrong authKey -> 403 e2e_auth_failed, header unchanged", async () => {
     const s = await login(freshUser());
     const header = e2eHeader();
     await putHeader(s.token, header);
-    const res = await patchHeader(s.token, e2eHeader({ check: b64(56, 8) }));
-    expect([res.status, await errorOf(res)]).toEqual([409, "e2e_check_mismatch"]);
+    const res = await patchHeader(s.token, { header: e2eHeader({ wrappedDek: b64(72, 9) }), authKey: b64(32, 43) });
+    expect([res.status, await errorOf(res)]).toEqual([403, "e2e_auth_failed"]);
     expect(await (await getHeader(s.token)).json()).toEqual(header);
+  });
+
+  it("new header with another authHash -> 403 even with the right authKey", async () => {
+    const s = await login(freshUser());
+    const header = e2eHeader();
+    await putHeader(s.token, header);
+    const otherKey = b64(32, 77);
+    const res = await patchHeader(s.token, { header: e2eHeader({ authHash: await authHashOf(otherKey) }), authKey: AUTH_KEY });
+    expect([res.status, await errorOf(res)]).toEqual([403, "e2e_auth_failed"]);
+    expect(await (await getHeader(s.token)).json()).toEqual(header);
+  });
+
+  it("the authHash itself is not accepted as authKey", async () => {
+    const s = await login(freshUser());
+    await putHeader(s.token, e2eHeader());
+    const res = await patchHeader(s.token, { header: e2eHeader({ wrappedDek: b64(72, 9) }), authKey: AUTH_HASH });
+    expect(res.status).toBe(403);
+  });
+
+  it("bad bodies -> 400 (old bare-header form, malformed authKey, invalid header)", async () => {
+    const s = await login(freshUser());
+    await putHeader(s.token, e2eHeader());
+    for (const body of [
+      e2eHeader(),
+      { header: e2eHeader() },
+      { header: e2eHeader(), authKey: "short" },
+      { header: e2eHeader(), authKey: AUTH_KEY + "A" },
+      { header: e2eHeader(), authKey: 5 },
+      { header: e2eHeader({ authHash: undefined }), authKey: AUTH_KEY },
+      { header: e2eHeader({ kdf: { alg: "argon2id", m: 1024, t: 2, p: 1, salt: b64(16) } }), authKey: AUTH_KEY },
+    ]) {
+      const res = await patchHeader(s.token, JSON.parse(JSON.stringify(body)));
+      expect([res.status, await errorOf(res)], JSON.stringify(body).slice(0, 60)).toEqual([400, "bad_request"]);
+    }
   });
 
   it("404 without a header; only touches the caller's identity", async () => {
@@ -206,9 +263,52 @@ describe("E2E header replace (PATCH)", () => {
     const b = await login(freshUser());
     const header = e2eHeader();
     await putHeader(a.token, header);
-    const res = await patchHeader(b.token, e2eHeader({ wrappedDek: b64(72, 9) }));
+    const res = await patchHeader(b.token, { header: e2eHeader({ wrappedDek: b64(72, 9) }), authKey: AUTH_KEY });
     expect([res.status, await errorOf(res)]).toEqual([404, "e2e_not_enabled"]);
     expect(await (await getHeader(a.token)).json()).toEqual(header);
+  });
+});
+
+describe("E2E off (DELETE /api/sync/e2e)", () => {
+  const deleteE2e = (token: string, body: unknown) => call(req("DELETE", "/api/sync/e2e", { token, body }));
+
+  it("deletes header and all notes in one go, keeps sessions; other devices see e2e:false", async () => {
+    const user = freshUser();
+    const [a, b] = await Promise.all([login(user), login(user)]);
+    await putHeader(a.token, e2eHeader());
+    expect((await put(a.token, [blobNote(1, 1), blobNote(2, 2, { deleted: true })])).status).toBe(200);
+    const id = await identityId(user);
+    const res = await deleteE2e(a.token, { authKey: AUTH_KEY });
+    expect(res.status).toBe(204);
+    expect((await getHeader(b.token)).status).toBe(404);
+    const page = await get(b.token);
+    expect(page).toMatchObject({ notes: [], e2e: false, latestSeq: 2 });
+    const c = await env.DB.prepare("SELECT note_count, bytes FROM identities WHERE id = ?").bind(id).first();
+    expect(c).toEqual({ note_count: 0, bytes: 0 });
+    // Plaintext works again with the same sessions; seqs continue.
+    const out = await put(b.token, [note("a", 5)]);
+    expect(out.status).toBe(200);
+    expect(((await out.json()) as { notes: { seq: number }[]; e2e: boolean }).notes[0]!.seq).toBe(3);
+  });
+
+  it("wrong or missing authKey -> 403 / 400, nothing deleted", async () => {
+    const s = await login(freshUser());
+    await putHeader(s.token, e2eHeader());
+    await put(s.token, [blobNote(1, 1)]);
+    let res = await deleteE2e(s.token, { authKey: b64(32, 43) });
+    expect([res.status, await errorOf(res)]).toEqual([403, "e2e_auth_failed"]);
+    res = await deleteE2e(s.token, {});
+    expect([res.status, await errorOf(res)]).toEqual([400, "bad_request"]);
+    expect((await getHeader(s.token)).status).toBe(200);
+    expect((await get(s.token)).notes).toHaveLength(1);
+  });
+
+  it("without a header -> 404 e2e_not_enabled, plaintext notes stay", async () => {
+    const s = await login(freshUser());
+    await put(s.token, [note("a", 1)]);
+    const res = await deleteE2e(s.token, { authKey: AUTH_KEY });
+    expect([res.status, await errorOf(res)]).toEqual([404, "e2e_not_enabled"]);
+    expect((await get(s.token)).notes).toHaveLength(1);
   });
 });
 

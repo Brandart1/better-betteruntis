@@ -6,7 +6,12 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   "cross-origin-embedder-policy": "credentialless",
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
+  "x-frame-options": "DENY",
+  "strict-transport-security": "max-age=31536000",
 };
+
+/** Default CSP of Worker responses: no framing. Stricter CSPs already set (relay) are kept. */
+export const DEFAULT_CSP = "frame-ancestors 'none'";
 
 /** Copy of `res` with the security headers set (headers of fetched responses are immutable). */
 export function withSecurityHeaders(res: Response): Response {
@@ -14,6 +19,7 @@ export function withSecurityHeaders(res: Response): Response {
   if (res.webSocket) return res;
   const out = new Response(res.body, res);
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) out.headers.set(k, v);
+  if (!out.headers.has("content-security-policy")) out.headers.set("content-security-policy", DEFAULT_CSP);
   return out;
 }
 

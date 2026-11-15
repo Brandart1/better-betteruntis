@@ -14,6 +14,7 @@ it("has the D1 binding with migrations applied", async () => {
 });
 
 it("has the rate limit bindings", async () => {
-  const r = await env.RL_SESSION.limit({ key: "smoke" });
-  expect(r.success).toBe(true);
+  for (const rl of [env.RL_SESSION, env.RL_PROXY, env.RL_SYNC, env.RL_WRITE, env.RL_AUTH]) {
+    expect((await rl.limit({ key: "smoke" })).success).toBe(true);
+  }
 });

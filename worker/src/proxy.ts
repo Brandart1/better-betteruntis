@@ -15,6 +15,7 @@
 import { allowlistFor, type HostAllowlist, isValidHostname } from "./allowlist";
 import type { Env } from "./env";
 import { jsonError, readLimited, textError, TooLargeError } from "./http";
+import { clientIpKey } from "./ip";
 
 export const PROXY_PREFIX = "/proxy/";
 
@@ -45,19 +46,55 @@ export const DEFAULT_PROXY_OPTIONS = {
 
 class UpstreamTimeout extends Error {}
 
+/**
+ * Headers on every relay response: relayed WebUntis content must never run
+ * as a document of this origin (sandboxed, no subresources, no framing) and
+ * is offered as a download if someone navigates to it anyway.
+ */
+export const PROXY_RESPONSE_HEADERS: Readonly<Record<string, string>> = {
+  "content-security-policy": "sandbox; default-src 'none'; frame-ancestors 'none'",
+  "content-disposition": "attachment",
+};
+
+/**
+ * Fetch-metadata check: the app only calls the relay with fetch/XHR
+ * (`Sec-Fetch-Dest: empty`) from its own origin. Navigations, iframes,
+ * objects, scripts etc. and cross-site requests are refused. Clients that
+ * send no fetch metadata (older browsers, native) pass.
+ */
+export function passesFetchMetadata(request: Request): boolean {
+  const dest = request.headers.get("sec-fetch-dest");
+  if (dest !== null && dest.trim().toLowerCase() !== "empty") return false;
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null && site.trim().toLowerCase() === "cross-site") return false;
+  return true;
+}
+
 export async function handleProxy(
   request: Request,
   env: Env,
-  _ctx: ExecutionContext,
+  ctx: ExecutionContext,
   options: ProxyOptions = {},
 ): Promise<Response> {
+  const res = await relay(request, env, ctx, options);
+  for (const [k, v] of Object.entries(PROXY_RESPONSE_HEADERS)) res.headers.set(k, v);
+  return res;
+}
+
+async function relay(
+  request: Request,
+  env: Env,
+  _ctx: ExecutionContext,
+  options: ProxyOptions,
+): Promise<Response> {
+  if (!passesFetchMetadata(request)) return textError(403, "Forbidden request type");
+
   const fetchImpl = options.fetch ?? ((r: Request) => fetch(r));
   const maxRequest = options.maxRequestBodyBytes ?? DEFAULT_PROXY_OPTIONS.maxRequestBodyBytes;
   const maxResponse = options.maxResponseBodyBytes ?? DEFAULT_PROXY_OPTIONS.maxResponseBodyBytes;
   const timeoutMs = options.timeoutMs ?? DEFAULT_PROXY_OPTIONS.timeoutMs;
 
-  const clientIp = request.headers.get("cf-connecting-ip") ?? "unknown";
-  const { success } = await env.RL_PROXY.limit({ key: clientIp });
+  const { success } = await env.RL_PROXY.limit({ key: clientIpKey(request) });
   if (!success) return jsonError(429, "rate_limited", undefined, { "retry-after": "60" });
 
   let allowlist: HostAllowlist;

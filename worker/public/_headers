@@ -1,5 +1,7 @@
 # Cloudflare static-assets headers (copied next to the Flutter web build by CI).
-# Same headers as the old Dart server (removed in 0.5.0).
+# Same headers as the old Dart server (removed in 0.5.0), plus no framing
+# (X-Frame-Options, CSP frame-ancestors only: a full CSP would break
+# Flutter's inline bootstrap/wasm) and HSTS.
 # Without a Cache-Control rule assets get Cloudflare's default
 # "public, max-age=0, must-revalidate" (revalidate with ETag), which covers
 # SPA routes served from index.html. Rules below don't overlap, so each path
@@ -10,6 +12,9 @@
   Cross-Origin-Embedder-Policy: credentialless
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'
+  Strict-Transport-Security: max-age=31536000
 
 # Not content-hashed in a Flutter web build (index.html, main.dart.js,
 # flutter_bootstrap.js, flutter_service_worker.js, version.json,

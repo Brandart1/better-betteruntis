@@ -97,6 +97,22 @@ describe("POST /api/sync/session", () => {
     expect(own.status).toBe(200);
   });
 
+  it("browser login (Origin present): token only in the HttpOnly cookie, not in the body", async () => {
+    const user = freshUser();
+    const body = { host: HOST, school: "s", untisToken: `tok.${user}.s` };
+    const web = await call(sessionReq(body, { origin: ORIGIN }));
+    expect(web.status).toBe(200);
+    const json = (await web.json()) as Record<string, unknown>;
+    expect(json).not.toHaveProperty("token");
+    expect(json["identity"]).toEqual({ host: HOST, school: "s", userId: user });
+    const cookie = web.headers.get("set-cookie")!;
+    const token = /^bbu_sync=([^;]+);/.exec(cookie)![1]!;
+    expect((await call(req("GET", "/api/sync/notes", { headers: { cookie: `bbu_sync=${token}` } }))).status).toBe(200);
+    // Native (no Origin): token in the body.
+    const app = (await (await call(sessionReq(body))).json()) as Record<string, unknown>;
+    expect(app["token"]).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
   it("rate limit per client IP -> 429 with retry-after", async () => {
     const ip = freshIp();
     const statuses: number[] = [];
@@ -167,16 +183,61 @@ describe("session check", () => {
     expect((await call(req("GET", "/api/sync/notes", { token: s.token }))).status).toBe(401);
   });
 
-  it("RL_SYNC per session -> 429", async () => {
+  it("RL_SYNC is per identity: more sessions don't buy more requests", async () => {
     const s = await login(freshUser());
+    const s2 = await login(s.body.identity.userId);
     let status = 0;
     for (let i = 0; i < 125 && status !== 429; i++) {
       status = (await call(req("GET", "/api/sync/notes?since=999999", { token: s.token }))).status;
     }
     expect(status).toBe(429);
-    // Another session of the same user is not affected.
+    // Another session of the same identity is limited too; other users aren't.
+    expect((await call(req("GET", "/api/sync/notes", { token: s2.token }))).status).toBe(429);
+    const other = await login(freshUser());
+    expect((await call(req("GET", "/api/sync/notes", { token: other.token }))).status).toBe(200);
+  });
+
+  it("RL_WRITE: 20 writes per minute per identity, reads still pass", async () => {
+    const s = await login(freshUser());
     const s2 = await login(s.body.identity.userId);
-    expect((await call(req("GET", "/api/sync/notes", { token: s2.token }))).status).toBe(200);
+    const statuses: number[] = [];
+    for (let i = 0; i < 21; i++) statuses.push((await put(i % 2 ? s.token : s2.token, [note(`k${i}`, i + 1)])).status);
+    expect(statuses.slice(0, 20).every((x) => x === 200)).toBe(true);
+    expect(statuses[20]).toBe(429);
+    expect((await call(req("PUT", "/api/sync/e2e", { token: s.token, body: {} }))).status).toBe(429);
+    expect((await call(req("GET", "/api/sync/notes", { token: s.token }))).status).toBe(200);
+  });
+
+  it("RL_AUTH per client IP before the session lookup (random tokens, IPv6 /64)", async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 301; i++) {
+      const token = (crypto.randomUUID().replace(/-/g, "") + "x".repeat(20)).slice(0, 43);
+      // Different addresses of one /64 count together.
+      const ip = `2001:db8:77:1:${i.toString(16)}::1`;
+      const res = await call(req("GET", "/api/sync/notes", { token, headers: { "cf-connecting-ip": ip } }));
+      statuses.push(res.status);
+    }
+    expect(statuses.slice(0, 300).every((x) => x === 401)).toBe(true);
+    expect(statuses[300]).toBe(429);
+    const other = await call(req("GET", "/api/sync/notes", { token: "y".repeat(43), headers: { "cf-connecting-ip": "2001:db8:78::1" } }));
+    expect(other.status).toBe(401);
+  });
+
+  it("more than one bbu_sync cookie -> 401 (cookie tossing)", async () => {
+    const s = await login(freshUser());
+    const other = await login(freshUser());
+    for (const cookie of [`bbu_sync=${s.token}; bbu_sync=${other.token}`, `bbu_sync=${s.token}; x=1; bbu_sync=${s.token}`]) {
+      const res = await call(req("GET", "/api/sync/notes", { headers: { cookie } }));
+      expect([res.status, await errorOf(res)]).toEqual([401, "unauthorized"]);
+      // Also with a bearer token.
+      expect((await call(req("GET", "/api/sync/notes", { token: s.token, headers: { cookie } }))).status).toBe(401);
+    }
+    const logout = await call(req("DELETE", "/api/sync/session", { headers: { cookie: `bbu_sync=${s.token}; bbu_sync=${other.token}`, "x-bbu-sync": "1" } }));
+    expect(logout.status).toBe(401);
+    expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
+    // Nothing was logged out.
+    expect((await call(req("GET", "/api/sync/notes", { token: s.token }))).status).toBe(200);
+    expect((await call(req("GET", "/api/sync/notes", { token: other.token }))).status).toBe(200);
   });
 });
 

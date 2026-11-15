@@ -20,7 +20,8 @@
     // is served straight from the assets.
     "run_worker_first": ["/proxy/*", "/api/*", "/healthz"]
   },
-  // Daily cleanup of expired sync sessions (scheduled handler in index.ts).
+  // Daily cleanup (scheduled handler in index.ts): expired sync sessions and
+  // tombstones not written for 400 days.
   "triggers": { "crons": ["17 3 * * *"] },
   "d1_databases": [
     {
@@ -33,10 +34,18 @@
     }
   ],
   // Workers rate limiting (per key, per Cloudflare location; period 10 or 60 s).
+  // IP keys use the IPv6 /64 prefix (src/ip.ts).
   "ratelimits": [
+    // POST /api/sync/session, per client IP.
     { "name": "RL_SESSION", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } },
+    // /proxy/*, per client IP.
     { "name": "RL_PROXY", "namespace_id": "1002", "simple": { "limit": 300, "period": 60 } },
-    { "name": "RL_SYNC", "namespace_id": "1003", "simple": { "limit": 120, "period": 60 } }
+    // Every authenticated sync call, per identity (after the session lookup).
+    { "name": "RL_SYNC", "namespace_id": "1003", "simple": { "limit": 120, "period": 60 } },
+    // Writes (PUT notes, PUT/PATCH e2e), per identity, on top of RL_SYNC.
+    { "name": "RL_WRITE", "namespace_id": "1004", "simple": { "limit": 20, "period": 60 } },
+    // Session lookups (any presented token, before D1 is asked), per client IP.
+    { "name": "RL_AUTH", "namespace_id": "1005", "simple": { "limit": 300, "period": 60 } }
   ],
   "vars": {
     "ALLOWED_HOSTS": "webuntis.com,*.webuntis.com",

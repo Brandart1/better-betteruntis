@@ -10,8 +10,12 @@ export interface Env {
   RL_SESSION: RateLimit;
   /** Rate limit: WebUntis relay (per client IP). */
   RL_PROXY: RateLimit;
-  /** Rate limit: other sync calls (per session). */
+  /** Rate limit: every authenticated sync call (per identity). */
   RL_SYNC: RateLimit;
+  /** Rate limit: sync writes, PUT notes and PUT/PATCH e2e (per identity). */
+  RL_WRITE: RateLimit;
+  /** Rate limit: session lookups before D1 is asked (per client IP). */
+  RL_AUTH: RateLimit;
   /** Public origin, e.g. https://bbu.example.org (CSRF origin check); may be empty. */
   PUBLIC_ORIGIN: string;
 }

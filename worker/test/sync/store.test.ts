@@ -79,8 +79,20 @@ describe("write statement guards (without the pre-check)", () => {
   it("CHECK constraint rejects mixed rows", async () => {
     const id = await newIdentity();
     await expect(
-      env.DB.prepare("INSERT INTO notes VALUES (?, 'k', 1, 'x', 'blob', 1, 0, 1)").bind(id).run(),
+      env.DB.prepare("INSERT INTO notes VALUES (?, 'k', 1, 'x', 'blob', 1, 0, 1, 1)").bind(id).run(),
     ).rejects.toThrow();
+  });
+});
+
+describe("identities", () => {
+  it("ids of deleted identities are never reused (AUTOINCREMENT)", async () => {
+    const id = await newIdentity();
+    await db.deleteIdentity(env.DB, id);
+    const next = await newIdentity();
+    expect(next).toBeGreaterThan(id);
+    const max = await env.DB.prepare("SELECT max(id) AS m FROM identities").first<{ m: number }>();
+    await db.deleteIdentity(env.DB, max!.m);
+    expect(await newIdentity()).toBeGreaterThan(max!.m);
   });
 });
 

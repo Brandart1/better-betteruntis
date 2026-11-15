@@ -35,12 +35,15 @@ export class HttpError extends Error {
     readonly code: string,
     message: string,
     readonly headers: Record<string, string> = {},
+    /** Extra fields of the error body (never user data). */
+    readonly extra: Record<string, unknown> = {},
   ) {
     super(message);
   }
 
   toResponse(): Response {
-    return jsonError(this.status, this.code, this.message, this.headers);
+    if (Object.keys(this.extra).length === 0) return jsonError(this.status, this.code, this.message, this.headers);
+    return json({ error: this.code, message: this.message, ...this.extra }, this.status, this.headers);
   }
 }
 
@@ -115,4 +118,33 @@ export function base64UrlEncode(bytes: Uint8Array): string {
 export async function sha256Hex(s: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Decodes unpadded base64url; null if [s] isn't valid base64url. */
+export function base64UrlDecode(s: string): Uint8Array | null {
+  if (!isBase64Url(s, 0, Number.MAX_SAFE_INTEGER)) return null;
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  try {
+    const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/") + pad);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** base64url (unpadded) SHA-256 of [bytes]. */
+export async function sha256Base64Url(bytes: Uint8Array): Promise<string> {
+  return base64UrlEncode(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+}
+
+/** Compares two strings in time independent of where they differ (lengths are not secret). */
+export function constantTimeEqual(a: string, b: string): boolean {
+  const x = new TextEncoder().encode(a);
+  const y = new TextEncoder().encode(b);
+  if (x.byteLength !== y.byteLength) return false;
+  let diff = 0;
+  for (let i = 0; i < x.byteLength; i++) diff |= x[i]! ^ y[i]!;
+  return diff === 0;
 }

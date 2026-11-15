@@ -11,6 +11,7 @@ interface PutBody {
   notes: WireNote[];
   latestSeq: number;
   e2e: boolean;
+  identity: { host: string; school: string; userId: string };
 }
 
 async function putOk(token: string, notes: unknown[]): Promise<PutBody> {
@@ -23,8 +24,8 @@ async function putOk(token: string, notes: unknown[]): Promise<PutBody> {
 async function seed(id: number, n: number): Promise<void> {
   await env.DB.prepare(
     "WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < ?2) " +
-      "INSERT INTO notes (identity_id, key, exam, text, blob, updated_at, deleted, seq) " +
-      "SELECT ?1, 'seed-' || i, 0, '', NULL, 1, 0, i FROM c",
+      "INSERT INTO notes (identity_id, key, exam, text, blob, updated_at, deleted, seq, stored_at) " +
+      "SELECT ?1, 'seed-' || i, 0, '', NULL, 1, 0, i, 1 FROM c",
   )
     .bind(id, n)
     .run();
@@ -51,7 +52,7 @@ describe("auth", () => {
 describe("GET /api/sync/notes", () => {
   it("empty", async () => {
     const s = await login(freshUser());
-    expect(await get(s.token)).toEqual({ notes: [], latestSeq: 0, more: false, e2e: false });
+    expect(await get(s.token)).toEqual({ notes: [], latestSeq: 0, more: false, e2e: false, identity: s.body.identity });
   });
 
   it("returns changes after since, with all fields", async () => {
@@ -178,7 +179,7 @@ describe("PUT /api/sync/notes", () => {
 
   it("empty list is fine", async () => {
     const s = await login(freshUser());
-    expect(await putOk(s.token, [])).toEqual({ notes: [], latestSeq: 0, e2e: false });
+    expect(await putOk(s.token, [])).toEqual({ notes: [], latestSeq: 0, e2e: false, identity: s.body.identity });
   });
 
   const badNotes: [string, unknown][] = [
@@ -236,7 +237,10 @@ describe("PUT /api/sync/notes", () => {
     const s = await login(freshUser());
     const t0 = Date.now();
     let res = await call(req("PUT", "/api/sync/notes", { token: s.token, body: { notes: [note("a", t0 + 6 * 60_000)] } }), { now: () => t0 });
-    expect([res.status, await errorOf(res)]).toEqual([400, "clock_skew"]);
+    expect(res.status).toBe(400);
+    const err = (await res.json()) as { error: string; serverTime: number };
+    expect(err.error).toBe("clock_skew");
+    expect(err.serverTime).toBe(t0);
     res = await call(req("PUT", "/api/sync/notes", { token: s.token, body: { notes: [note("a", t0 + 4 * 60_000)] } }), { now: () => t0 });
     expect(res.status).toBe(200);
   });
@@ -293,6 +297,94 @@ describe("PUT /api/sync/notes", () => {
     // Another user is not affected.
     const other = await login(freshUser());
     expect((await put(other.token, [note("one-more", 5)])).status).toBe(200);
+  });
+});
+
+describe("counters and byte quota", () => {
+  const counters = async (id: number) =>
+    (await env.DB.prepare("SELECT note_count, bytes FROM identities WHERE id = ?").bind(id).first<{ note_count: number; bytes: number }>())!;
+  const actual = async (id: number) =>
+    (await env.DB.prepare(
+      "SELECT count(*) AS note_count, coalesce(sum(length(CAST(key AS BLOB)) + coalesce(length(CAST(text AS BLOB)), 0) + " +
+        "coalesce(length(CAST(blob AS BLOB)), 0)), 0) AS bytes FROM notes WHERE identity_id = ?",
+    ).bind(id).first<{ note_count: number; bytes: number }>())!;
+
+  it("note_count and bytes follow inserts, overwrites (UTF-8 bytes), tombstones and E2E switch", async () => {
+    const s = await login(freshUser());
+    const id = await identityId(s.body.identity.userId);
+    await putOk(s.token, [note("a", 1, "xyz"), note("bb", 1, "ä")]);
+    expect(await counters(id)).toEqual({ note_count: 2, bytes: 1 + 3 + 2 + 2 });
+    await putOk(s.token, [note("a", 2, "😀😀")]); // 8 bytes
+    expect(await counters(id)).toEqual({ note_count: 2, bytes: 1 + 8 + 2 + 2 });
+    await putOk(s.token, [note("bb", 3, "", { deleted: true })]);
+    expect(await counters(id)).toEqual({ note_count: 2, bytes: 1 + 8 + 2 });
+    expect(await counters(id)).toEqual(await actual(id));
+  });
+
+  it("counters stay exact under concurrent writes", async () => {
+    const user = freshUser();
+    const sessions = await Promise.all([login(user), login(user), login(user)]);
+    await Promise.all(
+      sessions.flatMap((s, d) =>
+        Array.from({ length: 4 }, (_, r) => put(s.token, Array.from({ length: 10 }, (_, i) => note(`k${(d + r + i) % 17}`, 10 * r + d + i, "v".repeat(d + r + i))))),
+      ),
+    );
+    const id = await identityId(user);
+    expect(await counters(id)).toEqual(await actual(id));
+  });
+
+  it("byte quota (5 MiB) -> 413 storage_quota, all or nothing; shrinking writes still pass", async () => {
+    const s = await login(freshUser());
+    const id = await identityId(s.body.identity.userId);
+    // Pretend the account is almost full.
+    await putOk(s.token, [note("a", 1, "x".repeat(100))]);
+    await env.DB.prepare("UPDATE identities SET bytes = ? WHERE id = ?").bind(LIMITS.maxBytesPerUser - 50, id).run();
+    let res = await put(s.token, [note("small", 1, "y"), note("big", 1, "z".repeat(100))]);
+    expect([res.status, await errorOf(res)]).toEqual([413, "storage_quota"]);
+    expect((await get(s.token)).notes.map((n) => n.key)).toEqual(["a"]);
+    // Fits exactly: +45 bytes ("small" + 40 chars).
+    expect((await put(s.token, [note("small", 1, "y".repeat(40))])).status).toBe(200);
+    // 5 bytes left: "c" + 4 fits, "c" + 5 doesn't.
+    res = await put(s.token, [note("c", 1, "x".repeat(5))]);
+    expect([res.status, await errorOf(res)]).toEqual([413, "storage_quota"]);
+    expect((await put(s.token, [note("c", 1, "x".repeat(4))])).status).toBe(200);
+    // Over the quota a shrinking write (tombstone) is allowed.
+    await env.DB.prepare("UPDATE identities SET bytes = ? WHERE id = ?").bind(LIMITS.maxBytesPerUser + 1000, id).run();
+    expect((await put(s.token, [note("a", 2, "", { deleted: true })])).status).toBe(200);
+  });
+
+  it("tie: equal updatedAt keeps the stored version and returns it", async () => {
+    const s = await login(freshUser());
+    await putOk(s.token, [note("a", 100, "stored", { exam: true })]);
+    const out = await putOk(s.token, [note("a", 100, "other", { exam: false })]);
+    expect(out.notes).toEqual([{ key: "a", exam: true, text: "stored", updatedAt: 100, deleted: false, seq: 1 }]);
+    expect(out.latestSeq).toBe(1);
+  });
+
+  it("GET and PUT answers carry the session's identity", async () => {
+    const s = await login(freshUser(), "school-x");
+    expect((await get(s.token)).identity).toEqual({ host: s.body.identity.host, school: "school-x", userId: s.body.identity.userId });
+    expect((await putOk(s.token, [note("a", 1)])).identity).toEqual(s.body.identity);
+  });
+});
+
+describe("tombstone purge (cron)", () => {
+  it("deletes only tombstones not written for 400 days, adjusts counters, keeps last_seq", async () => {
+    const { dailyCleanup } = await import("../../src/index");
+    const { TOMBSTONE_MAX_AGE_MS } = await import("../../src/sync/db");
+    const s = await login(freshUser());
+    const id = await identityId(s.body.identity.userId);
+    await putOk(s.token, [note("old-tomb", 1, "", { deleted: true }), note("old-live", 2, "x"), note("new-tomb", 3, "", { deleted: true })]);
+    const now = Date.now();
+    await env.DB.prepare("UPDATE notes SET stored_at = ? WHERE identity_id = ? AND key IN ('old-tomb', 'old-live')")
+      .bind(now - TOMBSTONE_MAX_AGE_MS - 1, id)
+      .run();
+    await dailyCleanup(env.DB, now);
+    const page = await get(s.token);
+    expect(page.notes.map((n) => n.key).sort()).toEqual(["new-tomb", "old-live"]);
+    expect(page.latestSeq).toBe(3);
+    const c = await env.DB.prepare("SELECT note_count, bytes FROM identities WHERE id = ?").bind(id).first<{ note_count: number; bytes: number }>();
+    expect(c).toEqual({ note_count: 2, bytes: "old-live".length + 1 + "new-tomb".length });
   });
 });
 

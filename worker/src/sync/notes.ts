@@ -10,6 +10,8 @@ export const LIMITS = {
   maxNotesPerRequest: 500,
   maxBodyBytes: 1024 * 1024,
   maxNotesPerUser: 20_000,
+  /** Stored bytes per user: UTF-8 key + text/blob over all notes incl. tombstones. */
+  maxBytesPerUser: 5 * 1024 * 1024,
   maxKeyLength: 256,
   maxTextLength: 4000,
   /** E2E key: base64url HMAC-SHA256 (32 bytes, unpadded). */
@@ -48,7 +50,13 @@ export async function getNotes(request: Request, env: Env, auth: AuthedRequest):
   const page = await db.changes(env.DB, auth.identityId, since, LIMITS.pageSize + 1);
   const more = page.notes.length > LIMITS.pageSize;
   const notes = more ? page.notes.slice(0, LIMITS.pageSize) : page.notes;
-  return json({ notes: notes.map(noteToJson), latestSeq: page.latestSeq, more, e2e: page.e2e });
+  return json({
+    notes: notes.map(noteToJson),
+    latestSeq: page.latestSeq,
+    more,
+    e2e: page.e2e,
+    identity: auth.identity,
+  });
 }
 
 const bad = (msg: string) => new HttpError(400, "bad_request", msg);
@@ -61,7 +69,9 @@ function parseNote(v: unknown, i: number, now: number): db.NoteInput {
   if (typeof key !== "string" || typeof deleted !== "boolean" || typeof updatedAt !== "number") throw bad(shape);
   if (!Number.isSafeInteger(updatedAt) || updatedAt < 0) throw bad(`notes[${i}]: updatedAt must be an integer >= 0.`);
   if (updatedAt > now + LIMITS.maxClockSkewMs) {
-    throw new HttpError(400, "clock_skew", `notes[${i}]: updatedAt is more than 5 minutes in the future.`);
+    throw new HttpError(400, "clock_skew", `notes[${i}]: updatedAt is more than 5 minutes in the future.`, {}, {
+      serverTime: now,
+    });
   }
   if (blob !== undefined) {
     // End-to-end encrypted note: key = base64url HMAC, blob = base64url ciphertext.
@@ -113,13 +123,22 @@ export async function putNotes(request: Request, env: Env, auth: AuthedRequest, 
 
   if (notes.length === 0) {
     const page = await db.changes(env.DB, auth.identityId, Number.MAX_SAFE_INTEGER, 0);
-    return json({ notes: [], latestSeq: page.latestSeq, e2e: page.e2e });
+    return json({ notes: [], latestSeq: page.latestSeq, e2e: page.e2e, identity: auth.identity });
   }
-  const out = await db.putNotes(env.DB, auth.identityId, notes, e2eMode, LIMITS.maxNotesPerUser);
+  const out = await db.putNotes(
+    env.DB,
+    auth.identityId,
+    notes,
+    e2eMode,
+    { maxNotes: LIMITS.maxNotesPerUser, maxBytes: LIMITS.maxBytesPerUser },
+    now,
+  );
   if (!out.ok) {
     switch (out.reason) {
       case "too_many_notes":
         throw new HttpError(413, "too_many_notes", `At most ${LIMITS.maxNotesPerUser} notes per user.`);
+      case "storage_quota":
+        throw new HttpError(413, "storage_quota", `At most ${LIMITS.maxBytesPerUser} bytes of notes per user.`);
       case "e2e_required":
         throw new HttpError(409, "e2e_required", "This account uses end-to-end encryption; send encrypted notes.");
       case "e2e_not_enabled":
@@ -127,5 +146,10 @@ export async function putNotes(request: Request, env: Env, auth: AuthedRequest, 
     }
   }
   const { result } = out;
-  return json({ notes: result.notes.map(noteToJson), latestSeq: result.latestSeq, e2e: result.e2e });
+  return json({
+    notes: result.notes.map(noteToJson),
+    latestSeq: result.latestSeq,
+    e2e: result.e2e,
+    identity: auth.identity,
+  });
 }

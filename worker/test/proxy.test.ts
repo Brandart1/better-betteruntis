@@ -209,7 +209,9 @@ describe("proxy forwarding", () => {
     const res = await call(req("GET", "/proxy/x.webuntis.com/x"), { fetch: r.fetch });
     expect(res.status).toBe(418);
     expect(await res.text()).toBe("teapot");
-    expect(new Set([...res.headers.keys()])).toEqual(new Set(["content-type", "cache-control"]));
+    expect(new Set([...res.headers.keys()])).toEqual(
+      new Set(["content-type", "cache-control", "content-security-policy", "content-disposition"]),
+    );
     expect(res.headers.get("content-type")).toBe("application/json;charset=UTF-8");
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
@@ -326,6 +328,64 @@ describe("upstream failures", () => {
   });
 });
 
+describe("fetch metadata and sandboxing", () => {
+  const CSP = "sandbox; default-src 'none'; frame-ancestors 'none'";
+
+  for (const headers of [
+    { "sec-fetch-dest": "document" },
+    { "sec-fetch-dest": "iframe" },
+    { "sec-fetch-dest": "object" },
+    { "sec-fetch-dest": "embed" },
+    { "sec-fetch-dest": "script" },
+    { "sec-fetch-dest": "" },
+    { "sec-fetch-site": "cross-site" },
+    { "sec-fetch-dest": "empty", "sec-fetch-site": "cross-site" },
+  ] as Record<string, string>[]) {
+    it(`rejects ${JSON.stringify(headers)} with 403, upstream never called`, async () => {
+      const rec = new Recorder();
+      const res = await call(req("GET", "/proxy/x.webuntis.com/x", { headers }), { fetch: rec.fetch });
+      expect(res.status).toBe(403);
+      expect(res.headers.get("content-security-policy")).toBe(CSP);
+      expect(rec.requests).toHaveLength(0);
+    });
+  }
+
+  for (const headers of [
+    {},
+    { "sec-fetch-dest": "empty", "sec-fetch-site": "same-origin" },
+    { "sec-fetch-dest": "EMPTY" },
+    { "sec-fetch-site": "same-site" },
+    { "sec-fetch-site": "none" },
+  ] as Record<string, string>[]) {
+    it(`allows ${JSON.stringify(headers)}`, async () => {
+      const rec = new Recorder();
+      const res = await call(req("GET", "/proxy/x.webuntis.com/x", { headers }), { fetch: rec.fetch });
+      expect(res.status).toBe(200);
+      expect(rec.requests).toHaveLength(1);
+    });
+  }
+
+  it("every relay response is sandboxed and an attachment (success and errors)", async () => {
+    const ok = await call(req("GET", "/proxy/x.webuntis.com/x"), { fetch: new Recorder(200, "<html><script>x</script>", { "content-type": "text/html" }).fetch });
+    const bad = await call(req("GET", "/proxy/evil.com/x"), { fetch: new Recorder().fetch });
+    for (const res of [ok, bad]) {
+      expect(res.headers.get("content-security-policy")).toBe(CSP);
+      expect(res.headers.get("content-disposition")).toBe("attachment");
+    }
+  });
+
+  it("the Worker wrapper keeps the relay's CSP", async () => {
+    const res = await SELF.fetch("https://bbu.test/proxy/evil.com/x");
+    expect(res.headers.get("content-security-policy")).toBe(CSP);
+    expect(res.headers.get("x-frame-options")).toBe("DENY");
+  });
+
+  it("navigations through the Worker are refused", async () => {
+    const res = await SELF.fetch("https://bbu.test/proxy/x.webuntis.com/x", { headers: { "sec-fetch-dest": "document" } });
+    expect(res.status).toBe(403);
+  });
+});
+
 describe("rate limit", () => {
   it("429 with retry-after when the limiter says no, keyed by client IP", async () => {
     const keys: string[] = [];
@@ -349,6 +409,22 @@ describe("rate limit", () => {
     expect(rec.requests).toHaveLength(0);
   });
 
+  it("IPv6 clients are keyed by their /64", async () => {
+    const keys: string[] = [];
+    const spy: RateLimit = {
+      limit: async ({ key }) => {
+        keys.push(key);
+        return { success: true };
+      },
+    };
+    await call(
+      req("GET", "/proxy/x.webuntis.com/x", { headers: { "cf-connecting-ip": "2001:db8:1:2:aaaa::7" } }),
+      { fetch: new Recorder().fetch },
+      testEnv({ RL_PROXY: spy }),
+    );
+    expect(keys).toEqual(["2001:db8:1:2::/64"]);
+  });
+
   it("falls back to 'unknown' without CF-Connecting-IP", async () => {
     const keys: string[] = [];
     const spy: RateLimit = {
@@ -368,6 +444,8 @@ describe("through the Worker", () => {
     "cross-origin-embedder-policy": "credentialless",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
+    "x-frame-options": "DENY",
+    "strict-transport-security": "max-age=31536000",
   };
 
   function expectSecurityHeaders(res: Response): void {
@@ -390,6 +468,7 @@ describe("through the Worker", () => {
   it("/healthz has the security headers", async () => {
     const res = await SELF.fetch("https://bbu.test/healthz");
     expectSecurityHeaders(res);
+    expect(res.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
@@ -408,6 +487,7 @@ describe("through the Worker", () => {
     // env.ASSETS bypasses the Worker's wrapper, so these come from _headers.
     const index = await env.ASSETS.fetch("https://bbu.test/index.html");
     expectSecurityHeaders(index);
+    expect(index.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
     expect(index.headers.get("cache-control")).toBe("no-cache");
     const root = await env.ASSETS.fetch("https://bbu.test/");
     expect(root.headers.get("cache-control")).toBe("no-cache");

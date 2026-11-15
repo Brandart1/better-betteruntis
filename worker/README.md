@@ -18,27 +18,75 @@ Unknown paths → 404 `not_found`, wrong method → 405 with `allow`.
 
 | Endpoint | Request → answer |
 |---|---|
-| `POST /api/sync/session` | `{host, school, untisToken}` → `{token, expiresAt, identity: {host, school, userId}, e2e}` + cookie `bbu_sync` |
+| `POST /api/sync/session` | `{host, school, untisToken}` → `{token, expiresAt, identity: {host, school, userId}, e2e}` + cookie `bbu_sync`. **`token` is omitted when the request has an `Origin` header** (browsers use the HttpOnly cookie; native apps send no Origin) |
 | `DELETE /api/sync/session` | → 204, clears the cookie (also without a session) |
-| `GET /api/sync/notes?since=<seq>` | → `{notes, latestSeq, more, e2e}` (1 000 per page) |
-| `PUT /api/sync/notes` | `{notes: [...]}` (≤ 500, ≤ 1 MiB) → `{notes, latestSeq, e2e}` |
+| `GET /api/sync/notes?since=<seq>` | → `{notes, latestSeq, more, e2e, identity}` (1 000 per page) |
+| `PUT /api/sync/notes` | `{notes: [...]}` (≤ 500, ≤ 1 MiB) → `{notes, latestSeq, e2e, identity}`; 413 `too_many_notes` / `storage_quota`; 400 `clock_skew` with `serverTime` |
 | `GET /api/sync/e2e` | → header, or 404 `e2e_not_enabled` |
-| `PUT /api/sync/e2e` | header → 201 (once; deletes plaintext notes), 409 `e2e_exists` |
-| `PATCH /api/sync/e2e` | header for the same key (passphrase change, new recovery code) → 200 if `check` is unchanged, 409 `e2e_check_mismatch`, 404 `e2e_not_enabled` |
+| `PUT /api/sync/e2e` | header (with `authHash`) → 201 (once; deletes plaintext notes), 409 `e2e_exists` |
+| `PATCH /api/sync/e2e` | `{header: {... same authHash}, authKey}` → 200; 403 `e2e_auth_failed`, 404 `e2e_not_enabled` |
+| `DELETE /api/sync/e2e` | `{authKey}` → 204: deletes the header and all notes, sessions stay (E2E off); 403 `e2e_auth_failed`, 404 `e2e_not_enabled` |
 | `DELETE /api/sync/account` | → 204, deletes identity, notes, sessions, header |
+
+`identity` in the notes answers comes from the session, so a web client can
+notice that the shared cookie now belongs to another account.
 
 Notes: plaintext `{key, exam, text, updatedAt, deleted}`, E2E
 `{key (43-char base64url HMAC), blob (base64url), updatedAt, deleted}`;
-answers add `seq`. E2E header:
-`{version: 1, kdf: {alg: "argon2id", m, t, p, salt}, wrappedDek, wrappedDekRecovery?, check}`.
+answers add `seq`. Last write wins; an equal `updatedAt` keeps the stored
+version (the answer returns it). `clock_skew` (updatedAt > server time +
+5 min) answers `{"error": "clock_skew", "message", "serverTime": <ms UTC>}`.
+
+E2E header:
+`{version: 1, kdf: {alg: "argon2id", m, t, p, salt}, wrappedDek, wrappedDekRecovery?, check, authHash}`.
+Server-side bounds: m 19 456–262 144 (KiB), t 2–16, p 1–16, salt exactly
+16 bytes; `authHash` = 43-char base64url of SHA-256(authKey), where
+authKey (32 bytes) = HKDF-SHA256(DEK, info `"bbu-header-auth-v1"`). PATCH and
+DELETE send `authKey` (43-char base64url); the server compares
+SHA-256(authKey) with the stored `authHash` in constant time, and PATCH also
+requires the new header's `authHash` to equal the stored one. `check` is not
+compared (it may change). The server never sees the DEK; `authHash` is part
+of the header returned by GET.
+
+Limits: 500 notes / 1 MiB per request, per identity 20 000 notes and
+5 MiB (UTF-8 bytes of key + text/blob, tombstones included; a write that only
+shrinks the total is always allowed). The counters live on `identities`
+(`note_count`, `bytes`) and are kept by triggers in the same statement as
+each change, so no request scans the notes.
+
+Rate limits (`wrangler.jsonc` `ratelimits`, 429 `rate_limited` +
+`retry-after: 60`; IP keys use the IPv6 /64, see `src/ip.ts`):
+
+| Binding | Limit | Key | Applies to |
+|---|---|---|---|
+| `RL_SESSION` | 10/min | client IP | `POST /session` |
+| `RL_AUTH` | 300/min | client IP | every request presenting a token, before the D1 lookup |
+| `RL_SYNC` | 120/min | identity | every authenticated call |
+| `RL_WRITE` | 20/min | identity | `PUT /notes`, `PUT/PATCH/DELETE /e2e` (on top of `RL_SYNC`) |
+| `RL_PROXY` | 300/min | client IP | `/proxy/*` |
+
+Daily cron (03:17 UTC): deletes expired sessions and **tombstones not
+written on the server for 400 days** (column `stored_at`, server time). A
+device that was offline longer than that may keep, or re-upload, notes that
+were deleted elsewhere.
 
 Auth: `Authorization: Bearer <token>` (apps) or the cookie (web; state-changing
-requests need `X-BBU-Sync: 1` or a same-origin `Origin`). The identity is
+requests need `X-BBU-Sync: 1` or a same-origin `Origin`). A request with more
+than one `bbu_sync` cookie gets 401 (cookie tossing). The identity is
 verified with WebUntis `app/data` on an allowlisted host (`ALLOWED_HOSTS`).
+
+Relay: requests with `Sec-Fetch-Dest` other than `empty` or
+`Sec-Fetch-Site: cross-site` get 403 (the app only uses fetch/XHR); every
+relay response carries `Content-Security-Policy: sandbox; default-src
+'none'; frame-ancestors 'none'` and `Content-Disposition: attachment`. All
+Worker responses get `X-Frame-Options: DENY`, `frame-ancestors 'none'` (unless
+a stricter CSP is set) and HSTS; the app gets the same via `public/_headers`
+(frame-ancestors only, no full CSP: Flutter needs inline scripts/wasm).
 
 Modules: `router.ts` (routes), `auth.ts` (sessions, cookie, CSRF, rate limits),
 `identity.ts` (WebUntis check), `notes.ts` / `e2e.ts` (validation, handlers),
-`db.ts` (all SQL), `http.ts` (JSON helpers). Schema: `migrations/0001_init.sql`.
+`db.ts` (all SQL), `http.ts` (JSON helpers); `../ip.ts` (rate-limit IP keys).
+Schema: `migrations/0001_init.sql`.
 
 ## Operations (maintainer)
 
@@ -95,7 +143,7 @@ Modules: `router.ts` (routes), `auth.ts` (sessions, cookie, CSRF, rate limits),
    → WAF → Rate limiting rules: *URI Path equals `/api/sync/session`*,
    10 requests per 10 seconds per IP, action Block for 10 seconds. This
    stops floods before they reach the Worker (and its
-   `RL_SESSION`/`RL_PROXY`/`RL_SYNC` limits, which are per Cloudflare
+   `RL_*` limits, which are per Cloudflare
    location). The free plan allows one such rule.
 9. **Bot Fight Mode: leave it off** (Security → Bots). It challenges
    non-browser clients and can't be skipped per path on the free plan, so

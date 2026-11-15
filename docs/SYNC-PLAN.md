@@ -46,12 +46,13 @@ All JSON, `cache-control: no-store`, errors `{"error": "<code>", "message"}`.
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/sync/session` | `{host, school, untisToken}` → verify with WebUntis `app/data`, create session; returns `{token, expiresAt, identity, e2e}` + cookie |
+| `POST /api/sync/session` | `{host, school, untisToken}` → verify with WebUntis `app/data`, create session; returns `{token, expiresAt, identity, e2e}` + cookie (`token` omitted when the request has an `Origin`, i.e. from a browser) |
 | `DELETE /api/sync/session` | log out this session |
 | `GET /api/sync/notes?since=<seq>` | changes after seq (paged, max 1000) |
-| `PUT /api/sync/notes` | upsert up to 500 notes, last write wins |
+| `PUT /api/sync/notes` | upsert up to 500 notes, last write wins (a tie keeps the stored version) |
 | `GET/PUT /api/sync/e2e` | the user's E2E header (salt, KDF params, wrapped keys); PUT creates it once and deletes the plaintext notes; see below |
-| `PATCH /api/sync/e2e` | replace the header for the same key (passphrase change, new recovery code): only if `check` is unchanged, else 409 `e2e_check_mismatch` |
+| `PATCH /api/sync/e2e` | `{header, authKey}`: replace the header for the same key (passphrase change, new recovery code); needs proof of the DEK (`authKey`), else 403 `e2e_auth_failed` |
+| `DELETE /api/sync/e2e` | `{authKey}`: turn E2E off (deletes header + all notes, sessions stay), 403 `e2e_auth_failed` / 404 `e2e_not_enabled` |
 | `DELETE /api/sync/account` | delete everything about the user (opt-out, E2E reset) |
 
 Wire details (implemented in `worker/src/sync/`, summary in `worker/README.md`):
@@ -62,8 +63,12 @@ Wire details (implemented in `worker/src/sync/`, summary in `worker/README.md`):
   HMAC and `blob` = base64url ciphertext (≤ 16 KiB decoded); `exam`/`text`
   must be absent. One request is either all plaintext or all encrypted.
   Responses add `seq`. `updatedAt` > now + 5 min → 400 `clock_skew`.
-- `GET /notes` → `{notes, latestSeq, more, e2e}`; `PUT /notes` →
-  `{notes: stored version of each key, latestSeq, e2e}`. Duplicate keys in one
+- `GET /notes` → `{notes, latestSeq, more, e2e, identity}`; `PUT /notes` →
+  `{notes: stored version of each key, latestSeq, e2e, identity}` (`identity`
+  from the session, so the web client can detect a cookie of another
+  account). A write with an equal `updatedAt` keeps the stored version and
+  returns it. `clock_skew` errors carry `serverTime` (ms UTC) so the client
+  can clamp and retry. Duplicate keys in one
   request merge like applying them in order. Seqs are strictly increasing per
   identity (gaps possible after deletions).
 - Mode: once a header exists, plaintext notes → 409 `e2e_required`; without
@@ -76,9 +81,17 @@ Wire details (implemented in `worker/src/sync/`, summary in `worker/README.md`):
   from `e2e: true` and the 409s). Turning E2E off/resetting the passphrase
   without a recovery code is still `DELETE /account`.
 - Limits: 500 notes and 1 MiB per request (413 `batch_too_large` /
-  `body_too_large`), 20 000 notes per user incl. tombstones (413
-  `too_many_notes`), at most 30 sessions per identity (oldest dropped on
-  login). Rate limits → 429 `rate_limited` + `retry-after`.
+  `body_too_large`), per identity 20 000 notes incl. tombstones (413
+  `too_many_notes`) and 5 MiB of key + text/blob bytes (413
+  `storage_quota`; shrinking writes always pass), at most 30 sessions per
+  identity (oldest dropped on login). Rate limits → 429 `rate_limited` +
+  `retry-after` (bindings in worker/README.md).
+- Tombstones not written on the server for 400 days are purged by the
+  daily cron; a device offline longer than that may keep or re-upload notes
+  deleted elsewhere.
+- `DELETE /e2e` turns E2E off without signing devices out: header and all
+  (encrypted) notes go in one batch; other devices see `e2e: false` and
+  re-upload in plaintext.
 - A cross-site `Origin` on `POST /session` → 403 `csrf_rejected`.
 
 ## Security design (agreed)
@@ -106,15 +119,31 @@ Wire details (implemented in `worker/src/sync/`, summary in `worker/README.md`):
    **keep their local notes**. Last-write-wins in one atomic statement
    (`INSERT … ON CONFLICT DO UPDATE … WHERE excluded.updated_at >
    notes.updated_at`); multi-statement changes via `db.batch()` (atomic).
-6. **Abuse and limits:** Workers rate-limiting binding on session creation
-   and the relay, plus a WAF rule; 20 000 notes/user, 4 000 chars/note, 500
-   notes and 1 MiB per request. Free plan stops instead of billing.
+6. **Abuse and limits:** Workers rate-limiting bindings: session creation
+   and the relay per client IP, session lookups per client IP *before* D1
+   is asked (random tokens can't cost unlimited reads), all sync calls and,
+   stricter, writes **per identity** (more sessions don't buy more
+   requests); IPv6 clients are keyed by their /64. Plus a WAF rule.
+   Per identity 20 000 notes and a **5 MiB byte quota**, both checked from
+   counters on `identities` (maintained by triggers, no scans: D1 bills
+   rows read/written); 4 000 chars/note, 500 notes and 1 MiB per request;
+   old tombstones purged daily. Free plan stops instead of billing.
+   Multiple `bbu_sync` cookies (cookie tossing) → 401; the browser login
+   answer carries no token (cookie only).
 7. **Privacy:** no logging of bodies, tokens, note keys or texts; identities
    only as a short hash. Privacy notice (draft from the deleted branch can be
    reused), Cloudflare as processor.
 8. **Accounts:** 2FA on Cloudflare and GitHub, API token scoped to this
    Worker, pinned action versions. A takeover could deploy a password-stealing
    Worker; this is the biggest single risk.
+9. **Relay sandboxing:** `/proxy` only serves fetch/XHR from this origin
+   (`Sec-Fetch-Dest` other than `empty` or `Sec-Fetch-Site: cross-site` →
+   403), and every relay response has `Content-Security-Policy: sandbox;
+   default-src 'none'; frame-ancestors 'none'` and `Content-Disposition:
+   attachment`, so relayed WebUntis content can never run as a page of
+   this origin (which would reach the sync cookie's API via same-origin
+   fetches). All responses: `X-Frame-Options: DENY`, `frame-ancestors
+   'none'`, HSTS.
 
 ## End-to-end encryption (optional)
 
@@ -138,9 +167,15 @@ read note texts, exam marks or which lessons they belong to.
 
 ### E2E header (server, readable by the server)
 
-`{version: 1, kdf: {alg: "argon2id", m, t, p, salt}, wrappedDek, wrappedDekRecovery?, check}`.
+`{version: 1, kdf: {alg: "argon2id", m, t, p, salt}, wrappedDek, wrappedDekRecovery?, check, authHash}`.
 `check` = the DEK encrypting a fixed string, to tell a wrong passphrase from
-corrupt data. Stored per identity, written with `PUT /api/sync/e2e` only if
+corrupt data. `authHash` = base64url(SHA-256(authKey)) (43 chars), with
+`authKey` = HKDF-SHA256(DEK, info `"bbu-header-auth-v1"`, 32 bytes): replacing
+(PATCH) or deleting (DELETE) the header requires sending `authKey`, so a
+stolen session alone can't swap in a header for an attacker's key or turn
+E2E off. The server checks SHA-256(authKey) against the stored hash in
+constant time and never sees the DEK. Server-side KDF bounds: m 19 456–262 144
+KiB, t 2–16, p 1–16, salt exactly 16 bytes. Stored per identity, written with `PUT /api/sync/e2e` only if
 none exists yet (or after an account reset), so two devices can't create
 different keys at the same time.
 
@@ -173,8 +208,11 @@ different keys at the same time.
 - **Forgot passphrase, no recovery code:** "Reset sync" deletes the server
   data (`DELETE /api/sync/account`) and starts over; local notes on every
   device stay and are uploaded again.
-- **Turn off E2E:** reset the server data and re-upload in plaintext (with
-  the normal disclaimer).
+- **Turn off E2E:** `DELETE /api/sync/e2e` with `authKey` (deletes header
+  and encrypted notes, sessions stay), then re-upload in plaintext (with the
+  normal disclaimer); other devices see `e2e: false` and do the same.
+- **Change passphrase / new recovery code:** `PATCH /api/sync/e2e` with the
+  re-wrapped header (same `authHash`) and `authKey`.
 
 ### Limits (stated in the app)
 

@@ -146,18 +146,30 @@ export async function changes(
 }
 
 function stateStatement(db: D1Database, identityId: number): D1PreparedStatement {
+  // O(1): the counters are maintained by triggers (migrations/0001_init.sql).
   return db
     .prepare(
-      "SELECT last_seq, EXISTS (SELECT 1 FROM e2e_headers WHERE identity_id = ?1) AS e2e, " +
-        "(SELECT count(*) FROM notes WHERE identity_id = ?1) AS note_count " +
+      "SELECT last_seq, note_count, bytes, EXISTS (SELECT 1 FROM e2e_headers WHERE identity_id = ?1) AS e2e " +
         "FROM identities WHERE id = ?1",
     )
     .bind(identityId);
 }
 
-function readState(r: D1Result): { latestSeq: number; e2e: boolean; noteCount: number } {
-  const row = r.results[0] as { last_seq: number; e2e: number; note_count: number } | undefined;
-  return { latestSeq: row?.last_seq ?? 0, e2e: row?.e2e === 1, noteCount: row?.note_count ?? 0 };
+interface State {
+  latestSeq: number;
+  e2e: boolean;
+  noteCount: number;
+  bytes: number;
+}
+
+function readState(r: D1Result): State {
+  const row = r.results[0] as { last_seq: number; e2e: number; note_count: number; bytes: number } | undefined;
+  return {
+    latestSeq: row?.last_seq ?? 0,
+    e2e: row?.e2e === 1,
+    noteCount: row?.note_count ?? 0,
+    bytes: row?.bytes ?? 0,
+  };
 }
 
 export interface PutResult {
@@ -169,67 +181,89 @@ export interface PutResult {
 
 export type PutOutcome =
   | { ok: true; result: PutResult }
-  | { ok: false; reason: "too_many_notes" | "e2e_required" | "e2e_not_enabled" };
+  | { ok: false; reason: "too_many_notes" | "storage_quota" | "e2e_required" | "e2e_not_enabled" };
 
-/** The notes as JSON parameters for `json_each` (data never enters SQL text). */
+/** Per-identity storage limits. */
+export interface Quota {
+  /** Stored notes incl. tombstones. */
+  maxNotes: number;
+  /** Sum of UTF-8 bytes of key + text/blob over all stored notes. */
+  maxBytes: number;
+}
+
+/** The notes as a JSON parameter for `json_each` (data never enters SQL text). */
 function encodeNotes(notes: NoteInput[]): { keysJson: string; notesJson: string } {
   return {
     keysJson: JSON.stringify(notes.map((n) => n.key)),
     notesJson: JSON.stringify(
-    notes.map((n) => ({
-      k: n.key,
-      e: n.exam === null ? null : n.exam ? 1 : 0,
-      t: n.text,
-      b: n.blob,
-      u: n.updatedAt,
-      d: n.deleted ? 1 : 0,
-    })),
-  ),
+      notes.map((n) => ({
+        k: n.key,
+        e: n.exam === null ? null : n.exam ? 1 : 0,
+        t: n.text,
+        b: n.blob,
+        u: n.updatedAt,
+        d: n.deleted ? 1 : 0,
+      })),
+    ),
   };
 }
+
+/** Stored size of a note row (alias [a]): UTF-8 bytes of key + text + blob. */
+const size = (a: string) =>
+  `(length(CAST(${a}.key AS BLOB)) + coalesce(length(CAST(${a}.text AS BLOB)), 0) + ` +
+  `coalesce(length(CAST(${a}.blob AS BLOB)), 0))`;
+
+/**
+ * CTEs over the request (?1 = identity id, ?2 = notes JSON): `c` = the
+ * given notes, `w` = those that would be written (new key or newer than the
+ * stored version) with `is_new` and the size change `delta`. Only primary
+ * key lookups, one per given note.
+ */
+const CANDIDATES =
+  "WITH c AS (SELECT CAST(j.key AS INTEGER) AS idx, " +
+  "json_extract(j.value, '$.k') AS key, json_extract(j.value, '$.e') AS exam, " +
+  "json_extract(j.value, '$.t') AS text, json_extract(j.value, '$.b') AS blob, " +
+  "json_extract(j.value, '$.u') AS updated_at, json_extract(j.value, '$.d') AS deleted " +
+  "FROM json_each(?2) AS j), " +
+  "w AS (SELECT c.*, n.key IS NULL AS is_new, " +
+  `${size("c")} - coalesce(${size("n")}, 0) AS delta ` +
+  "FROM c LEFT JOIN notes AS n ON n.identity_id = ?1 AND n.key = c.key " +
+  "WHERE n.key IS NULL OR n.updated_at < c.updated_at) ";
 
 /**
  * Last-write-wins upsert of [notes] (distinct keys) for [identityId].
  *
- * The write is ONE statement (plus the seq bookkeeping in the same batch):
- * the notes go in as a single JSON parameter, read with `json_each`. Only
- * notes newer than the stored version are selected; they get the seqs
- * `last_seq + 1, + 2, ...` (row_number), the upsert's `WHERE
- * excluded.updated_at > notes.updated_at` guards the update path again, and
- * the next statement raises `identities.last_seq` to the highest seq in use.
- * The mode (plaintext vs. E2E) and the per-user note limit are conditions
- * of the same statement, so a concurrent request can't slip past them. All
- * of that runs in one `db.batch()` (one transaction; D1 runs one at a time
- * per database), so seqs are strictly increasing per identity and never
- * handed out twice.
+ * One batch (one transaction; D1 runs one at a time per database):
+ * 1. the would-be-written set, summarised (for precise errors),
+ * 2. the write itself: ONE statement, the notes go in as a single JSON
+ *    parameter read with `json_each`. Only notes newer than the stored
+ *    version are selected; they get the seqs `last_seq + 1, + 2, ...`
+ *    (row_number), and the upsert's `WHERE excluded.updated_at >
+ *    notes.updated_at` guards the update path again. The mode (plaintext
+ *    vs. E2E), the note count and the byte quota are conditions of the
+ *    same statement (all or nothing), read from the identity's counters
+ *    (no scans); triggers update the counters in the same statement,
+ * 3. `identities.last_seq` raised to the highest seq in use,
+ * 4. the stored rows and the new state.
+ *
+ * Seqs are strictly increasing per identity and never handed out twice. A
+ * write that only shrinks the stored size is allowed even over the byte
+ * quota (so deleting always works).
  */
 export async function putNotes(
   db: D1Database,
   identityId: number,
   notes: NoteInput[],
   e2eMode: boolean,
-  maxNotes: number,
+  quota: Quota,
+  now: number,
 ): Promise<PutOutcome> {
-  const { keysJson } = encodeNotes(notes);
-
-  // Pre-check (consistent snapshot) for precise errors; the write below
-  // re-checks the same conditions atomically.
-  const [state, known] = await db.batch([
-    stateStatement(db, identityId),
-    db
-      .prepare("SELECT count(*) AS c FROM notes WHERE identity_id = ?1 AND key IN (SELECT value FROM json_each(?2))")
-      .bind(identityId, keysJson),
-  ]);
-  const before = readState(state!);
-  if (before.e2e !== e2eMode) return { ok: false, reason: before.e2e ? "e2e_required" : "e2e_not_enabled" };
-  const knownCount = (known!.results[0] as { c: number }).c;
-  if (before.noteCount + (notes.length - knownCount) > maxNotes) return { ok: false, reason: "too_many_notes" };
-  return writeNotes(db, identityId, notes, e2eMode, maxNotes);
+  return writeNotes(db, identityId, notes, e2eMode, quota.maxNotes, now, quota.maxBytes);
 }
 
 /**
- * The write half of [putNotes] without the pre-check (exported for tests:
- * the mode and quota guards inside the statement must hold on their own).
+ * [putNotes] with positional limits (also used by tests to check that the
+ * guards inside the write statement hold on their own).
  */
 export async function writeNotes(
   db: D1Database,
@@ -237,31 +271,36 @@ export async function writeNotes(
   notes: NoteInput[],
   e2eMode: boolean,
   maxNotes: number,
+  now: number = Date.now(),
+  maxBytes: number = Number.MAX_SAFE_INTEGER,
 ): Promise<PutOutcome> {
   const { keysJson, notesJson } = encodeNotes(notes);
   const results = await db.batch([
     db
       .prepare(
-        "INSERT INTO notes (identity_id, key, exam, text, blob, updated_at, deleted, seq) " +
-          "SELECT ?1, c.key, c.exam, c.text, c.blob, c.updated_at, c.deleted, " +
-          "(SELECT last_seq FROM identities WHERE id = ?1) + row_number() OVER (ORDER BY c.idx) " +
-          "FROM (SELECT CAST(j.key AS INTEGER) AS idx, " +
-          "json_extract(j.value, '$.k') AS key, json_extract(j.value, '$.e') AS exam, " +
-          "json_extract(j.value, '$.t') AS text, json_extract(j.value, '$.b') AS blob, " +
-          "json_extract(j.value, '$.u') AS updated_at, json_extract(j.value, '$.d') AS deleted " +
-          "FROM json_each(?2) AS j) AS c " +
-          "WHERE NOT EXISTS (SELECT 1 FROM notes AS n " +
-          "WHERE n.identity_id = ?1 AND n.key = c.key AND n.updated_at >= c.updated_at) " +
+        CANDIDATES +
+          "SELECT count(*) AS writes, coalesce(sum(is_new), 0) AS new_keys, coalesce(sum(delta), 0) AS delta FROM w",
+      )
+      .bind(identityId, notesJson),
+    stateStatement(db, identityId),
+    db
+      .prepare(
+        CANDIDATES +
+          ", ok AS (SELECT 1 FROM identities AS i WHERE i.id = ?1 " +
           "AND EXISTS (SELECT 1 FROM e2e_headers WHERE identity_id = ?1) = ?3 " +
-          "AND (SELECT count(*) FROM notes WHERE identity_id = ?1) + " +
-          "(SELECT count(*) FROM json_each(?2) AS f WHERE NOT EXISTS (SELECT 1 FROM notes AS m " +
-          "WHERE m.identity_id = ?1 AND m.key = json_extract(f.value, '$.k'))) <= ?4 " +
+          "AND i.note_count + (SELECT coalesce(sum(is_new), 0) FROM w) <= ?4 " +
+          "AND (i.bytes + (SELECT coalesce(sum(delta), 0) FROM w) <= ?5 " +
+          "OR (SELECT coalesce(sum(delta), 0) FROM w) <= 0)) " +
+          "INSERT INTO notes (identity_id, key, exam, text, blob, updated_at, deleted, seq, stored_at) " +
+          "SELECT ?1, w.key, w.exam, w.text, w.blob, w.updated_at, w.deleted, " +
+          "(SELECT last_seq FROM identities WHERE id = ?1) + row_number() OVER (ORDER BY w.idx), ?6 " +
+          "FROM w WHERE EXISTS (SELECT 1 FROM ok) " +
           "ON CONFLICT (identity_id, key) DO UPDATE SET exam = excluded.exam, text = excluded.text, " +
           "blob = excluded.blob, updated_at = excluded.updated_at, deleted = excluded.deleted, " +
-          "seq = excluded.seq WHERE excluded.updated_at > notes.updated_at " +
+          "seq = excluded.seq, stored_at = excluded.stored_at WHERE excluded.updated_at > notes.updated_at " +
           "RETURNING key",
       )
-      .bind(identityId, notesJson, e2eMode ? 1 : 0, maxNotes),
+      .bind(identityId, notesJson, e2eMode ? 1 : 0, maxNotes, maxBytes, now),
     db
       .prepare(
         "UPDATE identities SET last_seq = max(last_seq, " +
@@ -273,22 +312,47 @@ export async function writeNotes(
       .bind(identityId, keysJson),
     stateStatement(db, identityId),
   ]);
-  const after = readState(results[3]!);
-  const written = results[0]!.results.length;
-  const rows = new Map((results[2]!.results as unknown as NoteRow[]).map((r) => [r.key, r]));
-  if (written === 0) {
-    // Nothing was written: either nothing was newer, or a concurrent
-    // request changed the mode or filled the quota in between.
-    if (after.e2e !== e2eMode) return { ok: false, reason: after.e2e ? "e2e_required" : "e2e_not_enabled" };
-    const missing = notes.filter((n) => !rows.has(n.key)).length;
-    if (missing > 0 && after.noteCount + missing > maxNotes) return { ok: false, reason: "too_many_notes" };
+  const plan = results[0]!.results[0] as { writes: number; new_keys: number; delta: number };
+  const before = readState(results[1]!);
+  const written = results[2]!.results.length;
+  const after = readState(results[5]!);
+  if (written === 0 && plan.writes > 0) {
+    // Something was newer but nothing was written: a guard refused (all
+    // or nothing). Same snapshot as the write (same transaction).
+    if (before.e2e !== e2eMode) return { ok: false, reason: before.e2e ? "e2e_required" : "e2e_not_enabled" };
+    if (before.noteCount + plan.new_keys > maxNotes) return { ok: false, reason: "too_many_notes" };
+    if (plan.delta > 0 && before.bytes + plan.delta > maxBytes) return { ok: false, reason: "storage_quota" };
   }
+  if (written === 0 && before.e2e !== e2eMode) {
+    // Nothing newer, but the request is in the wrong mode anyway.
+    return { ok: false, reason: before.e2e ? "e2e_required" : "e2e_not_enabled" };
+  }
+  const rows = new Map((results[4]!.results as unknown as NoteRow[]).map((r) => [r.key, r]));
   const stored: NoteRow[] = [];
   for (const n of notes) {
     const r = rows.get(n.key);
     if (r !== undefined) stored.push(r);
   }
   return { ok: true, result: { notes: stored, latestSeq: after.latestSeq, e2e: after.e2e } };
+}
+
+/** Server-side age after which tombstones are purged (daily cron). */
+export const TOMBSTONE_MAX_AGE_MS = 400 * 24 * 60 * 60 * 1000;
+
+/**
+ * Deletes up to [limit] tombstones whose row wasn't written since
+ * [olderThan] (server time); returns how many. The counters follow via the
+ * delete trigger; `last_seq` stays (seqs never go back).
+ */
+export async function purgeTombstones(db: D1Database, olderThan: number, limit = 1000): Promise<number> {
+  const r = await db
+    .prepare(
+      "DELETE FROM notes WHERE (identity_id, key) IN " +
+        "(SELECT identity_id, key FROM notes WHERE deleted = 1 AND stored_at < ?1 LIMIT ?2)",
+    )
+    .bind(olderThan, limit)
+    .run();
+  return r.meta.changes ?? 0;
 }
 
 /**
@@ -342,23 +406,48 @@ export async function createE2eHeader(
 }
 
 /**
- * Replaces the identity's header only if it exists and its `check` equals
- * [check] (the new header must keep the same data key: passphrase change,
- * new recovery code). Returns "replaced", "missing" or "mismatch".
+ * Replaces the identity's header only if its stored `authHash` is still
+ * [authHash] (the caller verified the auth key against it; this guards a
+ * concurrent reset + new header). Returns "replaced", "missing" or
+ * "mismatch".
  */
 export async function replaceE2eHeader(
   db: D1Database,
   identityId: number,
   header: string,
-  check: string,
+  authHash: string,
 ): Promise<"replaced" | "missing" | "mismatch"> {
   const updated = await db
     .prepare(
       "UPDATE e2e_headers SET header = ?2 " +
-        "WHERE identity_id = ?1 AND json_extract(header, '$.check') = ?3 RETURNING identity_id",
+        "WHERE identity_id = ?1 AND json_extract(header, '$.authHash') = ?3 RETURNING identity_id",
     )
-    .bind(identityId, header, check)
+    .bind(identityId, header, authHash)
     .all();
   if (updated.results.length > 0) return "replaced";
+  return (await getE2eHeader(db, identityId)) === null ? "missing" : "mismatch";
+}
+
+/**
+ * Turns E2E off: deletes the identity's notes and header in one batch, but
+ * only if the header's authHash is still [authHash] (verified by the
+ * caller). Sessions and last_seq stay. Counters follow via the triggers.
+ */
+export async function deleteE2e(
+  db: D1Database,
+  identityId: number,
+  authHash: string,
+): Promise<"deleted" | "missing" | "mismatch"> {
+  const guard = "EXISTS (SELECT 1 FROM e2e_headers WHERE identity_id = ?1 AND json_extract(header, '$.authHash') = ?2)";
+  const [, header] = await db.batch([
+    db.prepare(`DELETE FROM notes WHERE identity_id = ?1 AND ${guard}`).bind(identityId, authHash),
+    db
+      .prepare(
+        "DELETE FROM e2e_headers WHERE identity_id = ?1 AND json_extract(header, '$.authHash') = ?2 " +
+          "RETURNING identity_id",
+      )
+      .bind(identityId, authHash),
+  ]);
+  if (header!.results.length > 0) return "deleted";
   return (await getE2eHeader(db, identityId)) === null ? "missing" : "mismatch";
 }

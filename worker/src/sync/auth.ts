@@ -4,6 +4,7 @@
  */
 import type { Env } from "../env";
 import { allowlistFor } from "../allowlist";
+import { clientIpKey } from "../ip";
 import * as db from "./db";
 import {
   base64UrlEncode,
@@ -62,8 +63,15 @@ export interface PresentedToken {
   viaCookie: boolean;
 }
 
-/** The bearer token, else the `bbu_sync` cookie, else null (Basic auth is ignored). */
+/**
+ * The bearer token, else the `bbu_sync` cookie, else null (Basic auth is
+ * ignored). Throws 401 if the request carries more than one `bbu_sync`
+ * cookie (cookie tossing from a sibling domain could otherwise slip in an
+ * attacker's session).
+ */
 export function presentedToken(request: Request): PresentedToken | null {
+  const cookieHeader = request.headers.get("cookie");
+  if (cookieCount(cookieHeader, COOKIE_NAME) > 1) throw unauthorized();
   const auth = request.headers.get("authorization");
   if (auth !== null) {
     const parts = auth.trim().split(/\s+/);
@@ -71,7 +79,7 @@ export function presentedToken(request: Request): PresentedToken | null {
       return { token: parts[1]!, viaCookie: false };
     }
   }
-  const cookie = cookieValue(request.headers.get("cookie"), COOKIE_NAME);
+  const cookie = cookieValue(cookieHeader, COOKIE_NAME);
   if (cookie !== null && cookie !== "") return { token: cookie, viaCookie: true };
   return null;
 }
@@ -84,6 +92,16 @@ function cookieValue(header: string | null, name: string): string | null {
     if (part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
   }
   return null;
+}
+
+function cookieCount(header: string | null, name: string): number {
+  if (header === null) return 0;
+  let n = 0;
+  for (const part of header.split(";")) {
+    const i = part.indexOf("=");
+    if (i >= 0 && part.slice(0, i).trim() === name) n++;
+  }
+  return n;
 }
 
 function normOrigin(s: string): string | null {
@@ -130,28 +148,42 @@ export interface AuthedRequest extends db.SessionInfo {
   tokenHash: string;
 }
 
+export interface AuthOptions {
+  /** A write (PUT notes, PUT/PATCH/DELETE e2e): also counts against RL_WRITE. */
+  write?: boolean;
+}
+
 /**
  * Requires a valid session (bearer or cookie; CSRF rule for cookie +
- * state-changing method) and applies RL_SYNC per session. Throws HttpError.
+ * state-changing method). Rate limits: RL_AUTH per client IP before D1 is
+ * asked (random tokens can't cause unlimited lookups), then RL_SYNC (and
+ * RL_WRITE for writes) per identity, so more sessions don't buy more
+ * requests. Throws HttpError.
  */
-export async function authenticate(request: Request, env: Env, deps: SyncDeps): Promise<AuthedRequest> {
+export async function authenticate(
+  request: Request,
+  env: Env,
+  deps: SyncDeps,
+  options: AuthOptions = {},
+): Promise<AuthedRequest> {
   const presented = presentedToken(request);
   if (presented === null || !TOKEN_SHAPE.test(presented.token)) throw unauthorized();
   if (presented.viaCookie && !SAFE_METHODS.has(request.method) && !passesCsrfCheck(request, env)) {
     throw csrfRejected();
   }
+  if (!(await env.RL_AUTH.limit({ key: clientIpKey(request) })).success) throw rateLimited();
   const tokenHash = await hashSessionToken(presented.token);
-  const { success } = await env.RL_SYNC.limit({ key: tokenHash });
-  if (!success) throw rateLimited();
   const session = await db.findSession(env.DB, tokenHash, nowOf(deps));
   if (session === null) throw unauthorized();
+  const idKey = `id:${session.identityId}`;
+  if (!(await env.RL_SYNC.limit({ key: idKey })).success) throw rateLimited();
+  if (options.write && !(await env.RL_WRITE.limit({ key: idKey })).success) throw rateLimited();
   return { ...session, tokenHash };
 }
 
 /** `POST /api/sync/session`. */
 export async function createSessionHandler(request: Request, env: Env, deps: SyncDeps): Promise<Response> {
-  const ip = request.headers.get("cf-connecting-ip")?.trim() || "unknown";
-  const { success } = await env.RL_SESSION.limit({ key: ip.slice(0, 64) });
+  const { success } = await env.RL_SESSION.limit({ key: clientIpKey(request) });
   if (!success) throw rateLimited();
   // A browser only sends Origin; a cross-site one is never a legitimate login.
   if (request.headers.has("origin") && !sameOrigin(request, env)) throw csrfRejected();
@@ -193,8 +225,12 @@ export async function createSessionHandler(request: Request, env: Env, deps: Syn
   const token = newSessionToken();
   const expiresAt = now + SESSION_TTL_MS;
   const { e2e } = await db.createSession(env.DB, await hashSessionToken(token), identity, now, expiresAt);
+  // Browsers (they send Origin) use the HttpOnly cookie; keeping the token
+  // out of the body keeps it away from page scripts. Native apps send no
+  // Origin and get the token for their bearer header.
+  const browser = request.headers.has("origin");
   return json(
-    { token, expiresAt: new Date(expiresAt).toISOString(), identity, e2e },
+    { ...(browser ? {} : { token }), expiresAt: new Date(expiresAt).toISOString(), identity, e2e },
     200,
     { "set-cookie": sessionCookie(token, SESSION_TTL_MS / 1000) },
   );
@@ -203,17 +239,22 @@ export async function createSessionHandler(request: Request, env: Env, deps: Syn
 /**
  * `DELETE /api/sync/session`: deletes the presented session (if any) and
  * clears the cookie. 204 also without a valid session; a cookie-only
- * logout must pass the CSRF rule (no forced logouts).
+ * logout must pass the CSRF rule (no forced logouts). Two `bbu_sync`
+ * cookies -> 401 (with the cookie cleared).
  */
 export async function deleteSessionHandler(request: Request, env: Env): Promise<Response> {
-  const presented = presentedToken(request);
+  let presented: PresentedToken | null;
+  try {
+    presented = presentedToken(request);
+  } catch (e) {
+    if (e instanceof HttpError) throw new HttpError(e.status, e.code, e.message, { "set-cookie": CLEAR_COOKIE });
+    throw e;
+  }
   if (presented !== null) {
     if (presented.viaCookie && !passesCsrfCheck(request, env)) throw csrfRejected();
     if (TOKEN_SHAPE.test(presented.token)) {
-      const tokenHash = await hashSessionToken(presented.token);
-      const { success } = await env.RL_SYNC.limit({ key: tokenHash });
-      if (!success) throw rateLimited();
-      await db.deleteSession(env.DB, tokenHash);
+      if (!(await env.RL_AUTH.limit({ key: clientIpKey(request) })).success) throw rateLimited();
+      await db.deleteSession(env.DB, await hashSessionToken(presented.token));
     }
   }
   return noContent({ "set-cookie": CLEAR_COOKIE });
