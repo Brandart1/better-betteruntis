@@ -378,3 +378,8 @@ once confirmed.
 - **Tombstones kept 400 days (R2):** fine.
 - **Silent re-login (R7) and real-load behaviour (rate limits, preview
   alias, CPU limits):** to be checked at the first real deployment.
+- **Privacy notice decisions (2026-11-16):** relay legal basis GDPR Art.
+  6(1)(b); sync by consent (Art. 6(1)(a)); sync accounts without a login for
+  12 months are deleted by the daily cron (migration 0002 `last_login`);
+  transfers outside the EU via the EU-US Data Privacy Framework + SCCs in
+  Cloudflare's DPA; consent age 14 (Austria), the opt-in says so.

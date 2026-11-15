@@ -6,7 +6,13 @@
 import type { Env } from "./env";
 import { withSecurityHeaders } from "./http";
 import { handleProxy } from "./proxy";
-import { purgeExpiredSessions, purgeTombstones, TOMBSTONE_MAX_AGE_MS } from "./sync/db";
+import {
+  INACTIVE_IDENTITY_MS,
+  purgeExpiredSessions,
+  purgeInactiveIdentities,
+  purgeTombstones,
+  TOMBSTONE_MAX_AGE_MS,
+} from "./sync/db";
 import { handleSync } from "./sync/router";
 
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -34,6 +40,10 @@ export async function dailyCleanup(db: D1Database, now: number): Promise<void> {
   for (let i = 0; i < 20; i++) {
     if ((await purgeTombstones(db, now - TOMBSTONE_MAX_AGE_MS)) < 1000) break;
   }
+  // Privacy notice: sync accounts without a login for 12 months are deleted.
+  for (let i = 0; i < 10; i++) {
+    if ((await purgeInactiveIdentities(db, now - INACTIVE_IDENTITY_MS)) < 500) break;
+  }
 }
 
 export default {
@@ -45,8 +55,9 @@ export default {
   },
 
   /**
-   * Daily cron (wrangler.jsonc triggers): removes expired sync sessions and
-   * tombstones not written for 400 days (bounded: at most 20 000 each).
+   * Daily cron (wrangler.jsonc triggers): removes expired sync sessions,
+   * tombstones not written for 400 days (bounded: at most 20 000 each) and
+   * sync accounts without a login for 12 months (at most 5 000).
    */
   async scheduled(controller, env, _ctx): Promise<void> {
     await dailyCleanup(env.DB, controller.scheduledTime || Date.now());

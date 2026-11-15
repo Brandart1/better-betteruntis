@@ -79,6 +79,9 @@ export async function createSession(
       )
       .bind(who.host, who.school, who.userId, now, epoch),
     db
+      .prepare("UPDATE identities SET last_login = ?4 WHERE host = ?1 AND school = ?2 AND user_id = ?3")
+      .bind(who.host, who.school, who.userId, now),
+    db
       .prepare(
         "INSERT INTO sessions (token_hash, identity_id, created_at, expires_at) " +
           `SELECT ?4, id, ?5, ?6 FROM identities WHERE host = ?1 AND school = ?2 AND user_id = ?3`,
@@ -98,7 +101,7 @@ export async function createSession(
       )
       .bind(who.host, who.school, who.userId),
   ]);
-  const row = results[4]!.results[0] as { e2e: number; epoch: string };
+  const row = results[5]!.results[0] as { e2e: number; epoch: string };
   return { e2e: row.e2e === 1, epoch: row.epoch };
 }
 
@@ -594,4 +597,23 @@ export async function deleteE2e(
   ]);
   if (header!.results.length > 0) return "deleted";
   return (await getE2eHeader(db, identityId)) == null ? "missing" : "mismatch";
+}
+
+/** Sync accounts are deleted after this long without a login. */
+export const INACTIVE_IDENTITY_MS = 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * Deletes up to [limit] identities whose last login is older than [cutoff]
+ * and that have no session left (notes, tombstones and the E2E header go
+ * with them via ON DELETE CASCADE). Returns how many (daily cron).
+ */
+export async function purgeInactiveIdentities(db: D1Database, cutoff: number, limit = 500): Promise<number> {
+  const r = await db
+    .prepare(
+      "DELETE FROM identities WHERE id IN (SELECT id FROM identities AS i " +
+        "WHERE i.last_login < ?1 AND NOT EXISTS (SELECT 1 FROM sessions WHERE identity_id = i.id) LIMIT ?2)",
+    )
+    .bind(cutoff, limit)
+    .run();
+  return r.meta.changes ?? 0;
 }

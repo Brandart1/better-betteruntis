@@ -435,6 +435,43 @@ describe("tombstone purge (cron)", () => {
   });
 });
 
+describe("inactive account purge (cron)", () => {
+  it("deletes accounts without a login for 12 months and no session; keeps active ones", async () => {
+    const { dailyCleanup } = await import("../../src/index");
+    const { INACTIVE_IDENTITY_MS } = await import("../../src/sync/db");
+    const now = Date.now();
+    const old = await login(freshUser());
+    const oldId = await identityId(old.body.identity.userId);
+    await putOk(old.token, [note("x", 1, "old note")]);
+    const active = await login(freshUser());
+    const activeId = await identityId(active.body.identity.userId);
+    const withSession = await login(freshUser());
+    const withSessionId = await identityId(withSession.body.identity.userId);
+    // Old: last login 12 months + 1 ms ago, session gone.
+    await env.DB.prepare("UPDATE identities SET last_login = ? WHERE id IN (?, ?)")
+      .bind(now - INACTIVE_IDENTITY_MS - 1, oldId, withSessionId)
+      .run();
+    await env.DB.prepare("DELETE FROM sessions WHERE identity_id = ?").bind(oldId).run();
+    await dailyCleanup(env.DB, now);
+    const ids = (await env.DB.prepare("SELECT id FROM identities WHERE id IN (?, ?, ?)")
+      .bind(oldId, activeId, withSessionId)
+      .all<{ id: number }>()).results.map((r) => r.id);
+    expect(ids.sort()).toEqual([activeId, withSessionId].sort());
+    const notesLeft = await env.DB.prepare("SELECT count(*) AS n FROM notes WHERE identity_id = ?").bind(oldId).first<{ n: number }>();
+    expect(notesLeft!.n).toBe(0);
+  });
+
+  it("a login updates last_login", async () => {
+    const user = freshUser();
+    const s = await login(user);
+    const id = await identityId(s.body.identity.userId);
+    await env.DB.prepare("UPDATE identities SET last_login = 1 WHERE id = ?").bind(id).run();
+    await login(user);
+    const row = await env.DB.prepare("SELECT last_login FROM identities WHERE id = ?").bind(id).first<{ last_login: number }>();
+    expect(row!.last_login).toBeGreaterThan(1);
+  });
+});
+
 describe("isolation and injection", () => {
   it("user B can't read, overwrite or delete A's notes, even with A's keys", async () => {
     const a = await login(freshUser());

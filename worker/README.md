@@ -149,6 +149,12 @@ Modules: `router.ts` (routes), `auth.ts` (sessions, cookie, CSRF, rate limits),
 `db.ts` (all SQL), `http.ts` (JSON helpers); `../ip.ts` (rate-limit IP keys).
 Schema: `migrations/0001_init.sql`.
 
+
+**Retention (daily cron):** expired sessions, tombstones not written for 400
+days, and sync accounts without a login for 12 months (no session left;
+`identities.last_login`, migration 0002) are deleted, the latter with all
+their notes and E2E header (privacy notice §2).
+
 ## Operations (maintainer)
 
 ### One-time Cloudflare setup

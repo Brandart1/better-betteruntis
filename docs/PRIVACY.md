@@ -1,10 +1,8 @@
-# Privacy notice: BetterBetterUntis web version and sync (DRAFT)
+# Privacy notice: BetterBetterUntis web version and sync
 
-> **DRAFT. Not legal advice.** This text is a starting point written for the
-> maintainer. It must be reviewed (ideally by someone who knows the GDPR and
-> the Austrian DSG / German BDSG) and every `[PLACEHOLDER]` filled in before
-> it is published. Check it against what the Worker code (`worker/`) actually
-> does at release time.
+> Not legal advice: written with the maintainer from what the Worker code
+> (`worker/`) does. Keep it in sync when the service changes; a review by
+> someone who knows the GDPR / Austrian DSG is still recommended.
 
 Last updated: 2026-11-16
 
@@ -51,11 +49,10 @@ returns the answer.
   request metadata to deliver the service, for security (e.g. DDoS
   protection, rate limiting: requests are counted per IP address for about a
   minute) and in aggregate, non-content metrics (request counts, errors,
-  [PLACEHOLDER: check dashboard analytics settings]).
+  CPU time) shown in the Cloudflare dashboard.
 - **Purpose:** to make the web version work at all.
-- **Legal basis:** [PLACEHOLDER, e.g. GDPR Art. 6(1)(b) (providing the service
-  you asked for) or Art. 6(1)(f) (legitimate interest in running and securing
-  the service)].
+- **Legal basis:** GDPR Art. 6(1)(b): providing the service you asked for
+  (you open the web version to use your WebUntis account).
 - Your school's WebUntis server sees requests coming from Cloudflare's IP
   addresses instead of yours.
 
@@ -80,12 +77,12 @@ confirm who you are and then discards it.
 
 - **Purpose:** to sync your notes between your devices.
 - **Legal basis:** your consent (GDPR Art. 6(1)(a)), given by turning sync on.
-  [PLACEHOLDER: confirm.] You can withdraw it at any time by turning sync off;
+  You can withdraw it at any time by turning sync off;
   that doesn't affect what happened before.
 - **Retention:** until you turn sync off or ask us to delete your data.
-  Sessions expire after 90 days and are removed by a daily cleanup.
-  [PLACEHOLDER: decide whether accounts without any session for N months are
-  deleted automatically.]
+  Sessions expire after 90 days and are removed by a daily cleanup. Sync
+  accounts that haven't logged in for 12 months are deleted automatically,
+  with all their notes.
 - **Deletion:** turning sync off in the app deletes all your synced notes,
   your encryption header, your sessions and your account entry from the
   database immediately. Your devices keep their local copy.
@@ -134,8 +131,9 @@ Limits:
   closest to you, which can be outside the EU. The D1 database is stored in
   the EU (Cloudflare D1 "EU jurisdiction": the data is stored and processed
   only inside the EU). Transfers outside the EU/EEA are
-  based on [PLACEHOLDER: e.g. the EU-US Data Privacy Framework, under which
-  Cloudflare is certified, and the Standard Contractual Clauses in its DPA].
+  based on the EU-US Data Privacy Framework, under which Cloudflare is
+  certified, and the EU Standard Contractual Clauses in Cloudflare's Data
+  Processing Addendum.
 - **GitHub** (source code and app downloads) is not part of this service and
   has its own privacy policy.
 - **Your school's WebUntis server** (Untis GmbH or your school) receives the
@@ -144,8 +142,8 @@ Limits:
 ## 5. Children and teenagers
 
 Many users are students under 18. In Austria, consent under Art. 8 GDPR can
-be given from age 14 (§ 4(4) DSG) [PLACEHOLDER: confirm; other countries
-differ, e.g. 16 in Germany]. Users below that age need a parent's or
+be given from age 14 (§ 4(4) DSG); other countries differ (e.g. 16 in
+Germany). Users below that age need a parent's or
 guardian's consent to turn sync on; the sync dialog in the app says so. We don't knowingly collect
 more than described above, regardless of age.
 
@@ -177,5 +175,5 @@ https://github.com/Brandart1/better-betteruntis/blob/main/docs/PRIVACY.md; its h
 > up on your other devices. Your password is never sent to sync; turn on
 > end-to-end encryption so only your devices can read your notes, and turn
 > sync off at any time to delete everything from the server.
-> [If you are under 14 (Austria) / 16 (Germany), ask a parent first.]
+> If you are under 14, ask a parent or guardian before turning sync on.
 > [Privacy notice] [Cancel] [Turn on sync]
