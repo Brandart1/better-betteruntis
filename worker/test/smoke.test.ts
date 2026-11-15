@@ -9,7 +9,7 @@ it("answers /healthz", async () => {
 });
 
 it("has the D1 binding with migrations applied", async () => {
-  const row = await env.DB.prepare("SELECT name FROM sqlite_master WHERE name = 'meta'").first();
+  const row = await env.DB.prepare("SELECT name FROM sqlite_master WHERE name = 'notes'").first();
   expect(row).not.toBeNull();
 });
 

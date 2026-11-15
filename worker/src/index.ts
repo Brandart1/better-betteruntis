@@ -6,6 +6,7 @@
 import type { Env } from "./env";
 import { withSecurityHeaders } from "./http";
 import { handleProxy } from "./proxy";
+import { purgeExpiredSessions } from "./sync/db";
 import { handleSync } from "./sync/router";
 
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -31,5 +32,13 @@ export default {
     // Worker-generated responses (/proxy, /api, /healthz) need the same
     // security headers as the assets; setting them again on assets is harmless.
     return withSecurityHeaders(res);
+  },
+
+  /** Daily cron (wrangler.jsonc triggers): removes expired sync sessions. */
+  async scheduled(_controller, env, _ctx): Promise<void> {
+    const now = Date.now();
+    for (let i = 0; i < 20; i++) {
+      if ((await purgeExpiredSessions(env.DB, now)) < 1000) break;
+    }
   },
 } satisfies ExportedHandler<Env>;

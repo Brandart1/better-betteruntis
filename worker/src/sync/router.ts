@@ -1,9 +1,92 @@
+/**
+ * Notes sync API (`/api/sync/*`, docs/SYNC-PLAN.md). Unknown paths get a
+ * JSON 404, known paths with a wrong method a JSON 405 (before any auth).
+ *
+ * Privacy: nothing here logs bodies, tokens, note keys, texts or blobs;
+ * unexpected errors are logged with the error name and a short identity
+ * hash only.
+ */
 import type { Env } from "../env";
+import {
+  authenticate,
+  CLEAR_COOKIE,
+  createSessionHandler,
+  deleteSessionHandler,
+  identityLogTag,
+  type AuthedRequest,
+  type SyncDeps,
+} from "./auth";
+import * as db from "./db";
+import { getE2e, patchE2e, putE2e } from "./e2e";
+import { HttpError, jsonError, methodNotAllowed, noContent } from "./http";
+import { getNotes, putNotes } from "./notes";
 
-/** Notes sync API. Implemented in step 2 (see docs/SYNC-PLAN.md). */
-export async function handleSync(_request: Request, _env: Env, _ctx: ExecutionContext): Promise<Response> {
-  return new Response(JSON.stringify({ error: "not_implemented", message: "Sync is not implemented yet." }), {
-    status: 501,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
-  });
+type Handler = (request: Request, env: Env, deps: SyncDeps) => Promise<Response>;
+type AuthedHandler = (request: Request, env: Env, auth: AuthedRequest, deps: SyncDeps) => Promise<Response>;
+
+function errorName(e: unknown): string {
+  return e instanceof Error ? e.name : "error";
+}
+
+/** Wraps [fn] with session authentication. */
+function authed(fn: AuthedHandler): Handler {
+  return async (request, env, deps) => {
+    const auth = await authenticate(request, env, deps);
+    try {
+      return await fn(request, env, auth, deps);
+    } catch (e) {
+      if (!(e instanceof HttpError)) {
+        const tag = await identityLogTag(auth.identity);
+        console.error(`sync ${request.method} ${new URL(request.url).pathname} id=${tag} failed: ${errorName(e)}`);
+        throw new HttpError(500, "internal_error", "Something went wrong on the server.");
+      }
+      throw e;
+    }
+  };
+}
+
+const ROUTES: Record<string, Record<string, Handler>> = {
+  "/api/sync/session": {
+    POST: (r, env, deps) => createSessionHandler(r, env, deps),
+    DELETE: (r, env) => deleteSessionHandler(r, env),
+  },
+  "/api/sync/notes": {
+    GET: authed((r, env, auth) => getNotes(r, env, auth)),
+    PUT: authed((r, env, auth, deps) => putNotes(r, env, auth, deps)),
+  },
+  "/api/sync/e2e": {
+    GET: authed((_r, env, auth) => getE2e(env, auth)),
+    PUT: authed((r, env, auth, deps) => putE2e(r, env, auth, deps)),
+    PATCH: authed((r, env, auth) => patchE2e(r, env, auth)),
+  },
+  "/api/sync/account": {
+    DELETE: authed(async (_r, env, auth) => {
+      await db.deleteIdentity(env.DB, auth.identityId);
+      return noContent({ "set-cookie": CLEAR_COOKIE });
+    }),
+  },
+};
+
+/**
+ * Entry point (called from index.ts). [deps] lets tests inject the
+ * upstream fetch and the clock; production uses the defaults.
+ */
+export async function handleSync(
+  request: Request,
+  env: Env,
+  _ctx: ExecutionContext,
+  deps: SyncDeps = {},
+): Promise<Response> {
+  const path = new URL(request.url).pathname;
+  const methods = ROUTES[path];
+  if (methods === undefined) return jsonError(404, "not_found", "Unknown sync endpoint.");
+  const handler = methods[request.method];
+  if (handler === undefined) return methodNotAllowed(Object.keys(methods).join(", "));
+  try {
+    return await handler(request, env, deps);
+  } catch (e) {
+    if (e instanceof HttpError) return e.toResponse();
+    console.error(`sync ${request.method} ${path} failed: ${errorName(e)}`);
+    return jsonError(500, "internal_error", "Something went wrong on the server.");
+  }
 }

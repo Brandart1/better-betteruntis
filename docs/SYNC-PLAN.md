@@ -1,7 +1,7 @@
-# Sync and web hosting plan (0.6.x, branch `server`)
+# Sync and web hosting plan (0.5.x, branch `server`)
 
-Status: **plan, approved 2026-11-15**. Not implemented yet. Ships after the
-teacher release (0.5.0), probably the last big step before 1.0.0.
+Status: **plan, approved 2026-11-15**; being implemented. Ships as 0.5.0,
+before the teacher release (now 0.6.0; numbers swapped 2026-11-15).
 
 ## Goal
 
@@ -49,8 +49,36 @@ All JSON, `cache-control: no-store`, errors `{"error": "<code>", "message"}`.
 | `DELETE /api/sync/session` | log out this session |
 | `GET /api/sync/notes?since=<seq>` | changes after seq (paged, max 1000) |
 | `PUT /api/sync/notes` | upsert up to 500 notes, last write wins |
-| `GET/PUT /api/sync/e2e` | the user's E2E header (salt, KDF params, wrapped keys); see below |
+| `GET/PUT /api/sync/e2e` | the user's E2E header (salt, KDF params, wrapped keys); PUT creates it once and deletes the plaintext notes; see below |
+| `PATCH /api/sync/e2e` | replace the header for the same key (passphrase change, new recovery code): only if `check` is unchanged, else 409 `e2e_check_mismatch` |
 | `DELETE /api/sync/account` | delete everything about the user (opt-out, E2E reset) |
+
+Wire details (implemented in `worker/src/sync/`, summary in `worker/README.md`):
+
+- **Note, plaintext account:** `{key, exam, text, updatedAt, deleted}` (key
+  1–256 chars, text ≤ 4 000 chars, no NUL/unpaired surrogates). **E2E
+  account:** `{key, blob, updatedAt, deleted}` with `key` = 43-char base64url
+  HMAC and `blob` = base64url ciphertext (≤ 16 KiB decoded); `exam`/`text`
+  must be absent. One request is either all plaintext or all encrypted.
+  Responses add `seq`. `updatedAt` > now + 5 min → 400 `clock_skew`.
+- `GET /notes` → `{notes, latestSeq, more, e2e}`; `PUT /notes` →
+  `{notes: stored version of each key, latestSeq, e2e}`. Duplicate keys in one
+  request merge like applying them in order. Seqs are strictly increasing per
+  identity (gaps possible after deletions).
+- Mode: once a header exists, plaintext notes → 409 `e2e_required`; without
+  one, encrypted notes → 409 `e2e_not_enabled`.
+- `GET /e2e` → the header, or 404 `e2e_not_enabled`. `PUT /e2e` → 201 with
+  the stored header (unknown fields dropped), or 409 `e2e_exists`. **Creating
+  the header also deletes the account's plaintext notes in the same batch**,
+  so the "turn on E2E" flow is: PUT header, then re-upload all notes
+  encrypted (no account reset or new login needed; other devices learn it
+  from `e2e: true` and the 409s). Turning E2E off/resetting the passphrase
+  without a recovery code is still `DELETE /account`.
+- Limits: 500 notes and 1 MiB per request (413 `batch_too_large` /
+  `body_too_large`), 20 000 notes per user incl. tombstones (413
+  `too_many_notes`), at most 30 sessions per identity (oldest dropped on
+  login). Rate limits → 429 `rate_limited` + `retry-after`.
+- A cross-site `Origin` on `POST /session` → 403 `csrf_rejected`.
 
 ## Security design (agreed)
 
@@ -137,8 +165,8 @@ different keys at the same time.
 
 - **Turn on E2E** (sync already on or new): set passphrase (min. 8 chars,
   strength hint), optionally note the recovery code → app creates the DEK,
-  uploads the header, deletes the plaintext copies on the server (account
-  reset) and re-uploads all local notes encrypted.
+  uploads the header (the server deletes its plaintext copies in the same
+  step) and re-uploads all local notes encrypted.
 - **Second device:** after the sync login the server reports `e2e: true` →
   app asks for the passphrase (or recovery code), unwraps the DEK, syncs.
 - **Forgot passphrase, no recovery code:** "Reset sync" deletes the server
