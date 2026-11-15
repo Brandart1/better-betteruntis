@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { EPOCH_HEADER, KDF_BOUNDS } from "../../src/sync/e2e";
 import { LIMITS } from "../../src/sync/notes";
 import { AUTH_HASH, AUTH_KEY, authHashOf, b64, blobNote, call, e2eHeader, freshUser, get, identityId, login, note, put, req } from "./helpers";
 
@@ -32,9 +33,10 @@ describe("E2E header", () => {
     expect((await login(user)).body.e2e).toBe(true);
   });
 
-  it("maximum KDF parameters are accepted", async () => {
+  it("KDF bounds: m 19456-65536, t 2-8, p 1-4; maximum accepted", async () => {
+    expect(KDF_BOUNDS).toMatchObject({ m: { min: 19456, max: 65536 }, t: { min: 2, max: 8 }, p: { min: 1, max: 4 } });
     const s = await login(freshUser());
-    const res = await putHeader(s.token, e2eHeader({ kdf: { alg: "argon2id", m: 262144, t: 16, p: 16, salt: b64(16) } }));
+    const res = await putHeader(s.token, e2eHeader({ kdf: { alg: "argon2id", m: 65536, t: 8, p: 4, salt: b64(16) } }));
     expect(res.status).toBe(201);
   });
 
@@ -68,11 +70,12 @@ describe("E2E header", () => {
     ["wrappedDekRecovery number", { wrappedDekRecovery: 5 }],
     ["check missing", { check: undefined }],
     ["m below 19456", { kdf: { alg: "argon2id", m: 19455, t: 2, p: 1, salt: b64(16) } }],
-    ["m above 262144", { kdf: { alg: "argon2id", m: 262145, t: 2, p: 1, salt: b64(16) } }],
+    ["m above 65536", { kdf: { alg: "argon2id", m: 65537, t: 2, p: 1, salt: b64(16) } }],
+    ["m 262144", { kdf: { alg: "argon2id", m: 262144, t: 2, p: 1, salt: b64(16) } }],
     ["t 1", { kdf: { alg: "argon2id", m: 19456, t: 1, p: 1, salt: b64(16) } }],
-    ["t 17", { kdf: { alg: "argon2id", m: 19456, t: 17, p: 1, salt: b64(16) } }],
+    ["t 9", { kdf: { alg: "argon2id", m: 19456, t: 9, p: 1, salt: b64(16) } }],
     ["p 0", { kdf: { alg: "argon2id", m: 19456, t: 2, p: 0, salt: b64(16) } }],
-    ["p 17", { kdf: { alg: "argon2id", m: 19456, t: 2, p: 17, salt: b64(16) } }],
+    ["p 5", { kdf: { alg: "argon2id", m: 19456, t: 2, p: 5, salt: b64(16) } }],
     ["salt 15 bytes", { kdf: { alg: "argon2id", m: 19456, t: 2, p: 1, salt: b64(15) } }],
     ["salt 17 bytes", { kdf: { alg: "argon2id", m: 19456, t: 2, p: 1, salt: b64(17) } }],
     ["salt 32 bytes", { kdf: { alg: "argon2id", m: 19456, t: 2, p: 1, salt: b64(32) } }],
@@ -309,6 +312,98 @@ describe("E2E off (DELETE /api/sync/e2e)", () => {
     const res = await deleteE2e(s.token, { authKey: AUTH_KEY });
     expect([res.status, await errorOf(res)]).toEqual([404, "e2e_not_enabled"]);
     expect((await get(s.token)).notes).toHaveLength(1);
+  });
+});
+
+describe("counters across the E2E switch (HTTP)", () => {
+  const counters = async (id: number) =>
+    env.DB.prepare("SELECT note_count, bytes FROM identities WHERE id = ?").bind(id).first<{ note_count: number; bytes: number }>();
+  const actual = async (id: number) =>
+    env.DB.prepare(
+      "SELECT coalesce(sum(deleted = 0), 0) AS note_count, coalesce(sum(length(CAST(key AS BLOB)) + " +
+        "coalesce(length(CAST(text AS BLOB)), 0) + coalesce(length(CAST(blob AS BLOB)), 0)), 0) AS bytes FROM notes WHERE identity_id = ?",
+    )
+      .bind(id)
+      .first<{ note_count: number; bytes: number }>();
+
+  it("plaintext -> PUT /e2e (plaintext deleted, counters 0) -> blobs -> second PUT /e2e (409, unchanged) -> DELETE /e2e (0) -> plaintext", async () => {
+    const user = freshUser();
+    const s = await login(user);
+    const id = await identityId(user);
+    expect((await put(s.token, [note("a", 1, "secret"), note("b", 2, "", { deleted: true })])).status).toBe(200);
+    expect(await counters(id)).toEqual({ note_count: 1, bytes: 1 + 6 + 1 });
+    expect((await putHeader(s.token, e2eHeader())).status).toBe(201);
+    expect(await counters(id)).toEqual({ note_count: 0, bytes: 0 });
+    expect(await counters(id)).toEqual(await actual(id));
+    expect((await put(s.token, [blobNote(1, 3), blobNote(2, 3, { deleted: true }), blobNote(3, 3)])).status).toBe(200);
+    const withBlobs = await counters(id);
+    expect(withBlobs).toEqual({ note_count: 2, bytes: 3 * (43 + b64(280, 1).length) });
+    expect(withBlobs).toEqual(await actual(id));
+    expect((await putHeader(s.token, e2eHeader({ check: b64(56, 9) }))).status).toBe(409);
+    expect(await counters(id)).toEqual(withBlobs);
+    expect((await get(s.token)).notes).toHaveLength(3);
+    // Wrong auth key: nothing changes.
+    expect((await call(req("DELETE", "/api/sync/e2e", { token: s.token, body: { authKey: b64(32, 43) } }))).status).toBe(403);
+    expect(await counters(id)).toEqual(withBlobs);
+    expect((await call(req("DELETE", "/api/sync/e2e", { token: s.token, body: { authKey: AUTH_KEY } }))).status).toBe(204);
+    expect(await counters(id)).toEqual({ note_count: 0, bytes: 0 });
+    expect(await counters(id)).toEqual(await actual(id));
+    expect((await put(s.token, [note("c", 4, "xy")])).status).toBe(200);
+    expect(await counters(id)).toEqual({ note_count: 1, bytes: 3 });
+  });
+
+  it("E2E tombstones stay opaque blobs (not blanked)", async () => {
+    const s = await login(freshUser());
+    await putHeader(s.token, e2eHeader());
+    const t = blobNote(7, 5, { deleted: true });
+    const res = await put(s.token, [t]);
+    expect(((await res.json()) as { notes: unknown[] }).notes[0]).toEqual({ ...t, seq: 1 });
+  });
+});
+
+describe("identity epoch", () => {
+  it("present in POST /session, GET/PUT /notes and every /e2e answer; stable across sessions; new after account deletion", async () => {
+    const user = freshUser();
+    const a = await login(user);
+    const epoch = a.body.identity.epoch;
+    expect(epoch).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    const b = await login(user);
+    expect(b.body.identity).toEqual(a.body.identity);
+    expect((await get(b.token)).identity.epoch).toBe(epoch);
+    const putRes = await put(a.token, [note("k", 1)]);
+    expect(((await putRes.json()) as { identity: { epoch: string } }).identity.epoch).toBe(epoch);
+    const empty = await put(a.token, []);
+    expect(((await empty.json()) as { identity: { epoch: string } }).identity.epoch).toBe(epoch);
+    // /e2e: response header (body stays the bare header).
+    const none = await getHeader(a.token);
+    expect([none.status, none.headers.get(EPOCH_HEADER)]).toEqual([404, epoch]);
+    const created = await putHeader(a.token, e2eHeader());
+    expect([created.status, created.headers.get(EPOCH_HEADER)]).toEqual([201, epoch]);
+    const got = await getHeader(b.token);
+    expect([got.status, got.headers.get(EPOCH_HEADER)]).toEqual([200, epoch]);
+    expect(await got.json()).toEqual(e2eHeader());
+    const patched = await call(req("PATCH", "/api/sync/e2e", { token: a.token, body: { header: e2eHeader({ check: b64(56, 5) }), authKey: AUTH_KEY } }));
+    expect([patched.status, patched.headers.get(EPOCH_HEADER)]).toEqual([200, epoch]);
+    const off = await call(req("DELETE", "/api/sync/e2e", { token: a.token, body: { authKey: AUTH_KEY } }));
+    expect([off.status, off.headers.get(EPOCH_HEADER)]).toEqual([204, epoch]);
+    // Turning E2E off keeps the identity (same epoch).
+    expect((await login(user)).body.identity.epoch).toBe(epoch);
+    // Account deleted + new login: same host/school/userId, new epoch.
+    expect((await call(req("DELETE", "/api/sync/account", { token: a.token }))).status).toBe(204);
+    const c = await login(user);
+    expect(c.body.identity).toMatchObject({ host: a.body.identity.host, school: a.body.identity.school, userId: user });
+    expect(c.body.identity.epoch).not.toBe(epoch);
+    expect((await get(c.token)).identity.epoch).toBe(c.body.identity.epoch);
+    // Epoch is stored, not derived from the id.
+    const row = await env.DB.prepare("SELECT id, epoch FROM identities WHERE user_id = ?").bind(user).first<{ id: number; epoch: string }>();
+    expect(row!.epoch).toBe(c.body.identity.epoch);
+    expect(row!.epoch).not.toContain(String(row!.id));
+  });
+
+  it("concurrent first logins of one user agree on the epoch", async () => {
+    const user = freshUser();
+    const logins = await Promise.all([login(user), login(user), login(user)]);
+    expect(new Set(logins.map((l) => l.body.identity.epoch)).size).toBe(1);
   });
 });
 

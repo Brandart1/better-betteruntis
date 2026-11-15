@@ -21,13 +21,18 @@ describe("POST /api/sync/session", () => {
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    const body = (await res.json()) as { token: string; expiresAt: string; identity: unknown; e2e: boolean };
+    const body = (await res.json()) as { token: string; expiresAt: string; identity: { epoch: string }; e2e: boolean };
     expect(body.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(body.expiresAt).toBe(new Date(t0 + SESSION_TTL_MS).toISOString());
-    expect(body.identity).toEqual({ host: HOST, school: "demo-school", userId: user });
+    expect(body.identity).toEqual({ host: HOST, school: "demo-school", userId: user, epoch: body.identity.epoch });
+    expect(body.identity.epoch).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    const stored = await env.DB.prepare("SELECT epoch FROM identities WHERE user_id = ?").bind(user).first();
+    expect(stored).toEqual({ epoch: body.identity.epoch });
     expect(body.e2e).toBe(false);
     const cookie = res.headers.get("set-cookie")!;
-    expect(cookie).toBe(`bbu_sync=${body.token}; Path=/api/sync; HttpOnly; Secure; SameSite=Strict; Max-Age=7776000`);
+    expect(cookie).toBe(`__Host-bbu_sync=${body.token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=7776000`);
+    // __Host- rules: Secure, Path=/, no Domain.
+    expect(cookie).not.toMatch(/domain=/i);
 
     // Only the SHA-256 of the token is stored, nowhere the token itself.
     const id = await identityId(user);
@@ -104,25 +109,26 @@ describe("POST /api/sync/session", () => {
     expect(web.status).toBe(200);
     const json = (await web.json()) as Record<string, unknown>;
     expect(json).not.toHaveProperty("token");
-    expect(json["identity"]).toEqual({ host: HOST, school: "s", userId: user });
+    expect(json["identity"]).toMatchObject({ host: HOST, school: "s", userId: user });
+    expect(Object.keys(json["identity"] as object).sort()).toEqual(["epoch", "host", "school", "userId"]);
     const cookie = web.headers.get("set-cookie")!;
-    const token = /^bbu_sync=([^;]+);/.exec(cookie)![1]!;
-    expect((await call(req("GET", "/api/sync/notes", { headers: { cookie: `bbu_sync=${token}` } }))).status).toBe(200);
+    const token = /^__Host-bbu_sync=([^;]+);/.exec(cookie)![1]!;
+    expect((await call(req("GET", "/api/sync/notes", { headers: { cookie: `__Host-bbu_sync=${token}` } }))).status).toBe(200);
     // Native (no Origin): token in the body.
     const app = (await (await call(sessionReq(body))).json()) as Record<string, unknown>;
     expect(app["token"]).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
 
-  it("rate limit per client IP -> 429 with retry-after", async () => {
+  it("rate limit per client IP (30/min) -> 429 with retry-after", async () => {
     const ip = freshIp();
     const statuses: number[] = [];
     let last: Response | undefined;
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 32; i++) {
       last = await call(req("POST", "/api/sync/session", { body: { host: "evil.com", school: "s", untisToken: "t" }, headers: { "cf-connecting-ip": ip } }));
       statuses.push(last.status);
     }
-    expect(statuses.slice(0, 10).every((s) => s === 403)).toBe(true);
-    expect(statuses[11]).toBe(429);
+    expect(statuses.slice(0, 30).every((s) => s === 403)).toBe(true);
+    expect(statuses[31]).toBe(429);
     expect(last!.headers.get("retry-after")).toBe("60");
     expect(await errorOf(last!)).toBe("rate_limited");
     // Another IP is unaffected.
@@ -148,13 +154,13 @@ describe("session check", () => {
   it("bearer token and cookie both work", async () => {
     const s = await login(freshUser());
     expect((await call(req("GET", "/api/sync/notes", { token: s.token }))).status).toBe(200);
-    const viaCookie = await call(req("GET", "/api/sync/notes", { headers: { cookie: `other=1; bbu_sync=${s.token}` } }));
+    const viaCookie = await call(req("GET", "/api/sync/notes", { headers: { cookie: `other=1; __Host-bbu_sync=${s.token}` } }));
     expect(viaCookie.status).toBe(200);
   });
 
   it("basic auth header is ignored in favour of the cookie", async () => {
     const s = await login(freshUser());
-    const res = await call(req("GET", "/api/sync/notes", { headers: { authorization: "Basic dTpw", cookie: `bbu_sync=${s.token}` } }));
+    const res = await call(req("GET", "/api/sync/notes", { headers: { authorization: "Basic dTpw", cookie: `__Host-bbu_sync=${s.token}` } }));
     expect(res.status).toBe(200);
   });
 
@@ -164,8 +170,8 @@ describe("session check", () => {
       { authorization: "Bearer " + "A".repeat(43) },
       { authorization: "Bearer short" },
       { authorization: "Bearer a b" },
-      { cookie: "bbu_sync=" },
-      { cookie: "bbu_sync=' OR 1=1 --" },
+      { cookie: "__Host-bbu_sync=" },
+      { cookie: "__Host-bbu_sync=' OR 1=1 --" },
     ]) {
       const res = await call(req("GET", "/api/sync/notes", { headers }));
       expect(res.status, JSON.stringify(headers)).toBe(401);
@@ -208,31 +214,76 @@ describe("session check", () => {
     expect((await call(req("GET", "/api/sync/notes", { token: s.token }))).status).toBe(200);
   });
 
-  it("RL_AUTH per client IP before the session lookup (random tokens, IPv6 /64)", async () => {
+  it("RL_AUTH counts only failed lookups per client IP; over the limit the IP is blocked before D1 (IPv6 /64)", async () => {
     const statuses: number[] = [];
-    for (let i = 0; i < 301; i++) {
+    for (let i = 0; i < 302; i++) {
       const token = (crypto.randomUUID().replace(/-/g, "") + "x".repeat(20)).slice(0, 43);
       // Different addresses of one /64 count together.
       const ip = `2001:db8:77:1:${i.toString(16)}::1`;
       const res = await call(req("GET", "/api/sync/notes", { token, headers: { "cf-connecting-ip": ip } }));
       statuses.push(res.status);
     }
-    expect(statuses.slice(0, 300).every((x) => x === 401)).toBe(true);
-    expect(statuses[300]).toBe(429);
+    // 300 misses allowed; the 301st is still answered (401) and marks the IP blocked.
+    expect(statuses.slice(0, 301).every((x) => x === 401)).toBe(true);
+    expect(statuses[301]).toBe(429);
+    // Blocked means blocked: even a valid session from that /64 gets 429 without a lookup.
+    const s = await login(freshUser());
+    const blocked = await call(req("GET", "/api/sync/notes", { token: s.token, headers: { "cf-connecting-ip": "2001:db8:77:1::9" } }));
+    expect([blocked.status, blocked.headers.get("retry-after")]).toEqual([429, "60"]);
+    const logout = await call(req("DELETE", "/api/sync/session", { token: s.token, headers: { "cf-connecting-ip": "2001:db8:77:1::9" } }));
+    expect(logout.status).toBe(429);
     const other = await call(req("GET", "/api/sync/notes", { token: "y".repeat(43), headers: { "cf-connecting-ip": "2001:db8:78::1" } }));
     expect(other.status).toBe(401);
+    // The block expires.
+    const later = await call(req("GET", "/api/sync/notes", { token: s.token, headers: { "cf-connecting-ip": "2001:db8:77:1::9" } }), {
+      now: () => Date.now() + 61_000,
+    });
+    expect(later.status).not.toBe(429);
   });
 
-  it("more than one bbu_sync cookie -> 401 (cookie tossing)", async () => {
+  it("successful lookups don't count against RL_AUTH (school NAT)", async () => {
+    const ip = "2001:db8:99:1::1";
+    const users = await Promise.all(Array.from({ length: 4 }, () => login(freshUser())));
+    const statuses: number[] = [];
+    for (let i = 0; i < 400; i++) {
+      const res = await call(req("GET", "/api/sync/notes?since=999999", { token: users[i % 4]!.token, headers: { "cf-connecting-ip": ip } }));
+      statuses.push(res.status);
+    }
+    expect(statuses.every((x) => x === 200)).toBe(true);
+    // Logouts of existing sessions don't count either.
+    for (const u of users) {
+      expect((await call(req("DELETE", "/api/sync/session", { token: u.token, headers: { "cf-connecting-ip": ip } }))).status).toBe(204);
+    }
+  });
+
+  it("failed logouts (unknown token) count against RL_AUTH", async () => {
+    const ip = "2001:db8:98:1::1";
+    const statuses: number[] = [];
+    for (let i = 0; i < 302; i++) {
+      const res = await call(req("DELETE", "/api/sync/session", { token: "z".repeat(43), headers: { "cf-connecting-ip": ip } }));
+      statuses.push(res.status);
+    }
+    expect(statuses.slice(0, 301).every((x) => x === 204)).toBe(true);
+    expect(statuses[301]).toBe(429);
+  });
+
+  it("the old cookie name bbu_sync is ignored", async () => {
+    const s = await login(freshUser());
+    expect((await call(req("GET", "/api/sync/notes", { headers: { cookie: `bbu_sync=${s.token}` } }))).status).toBe(401);
+    // ... and doesn't count as a second sync cookie.
+    expect((await call(req("GET", "/api/sync/notes", { headers: { cookie: `bbu_sync=x; __Host-bbu_sync=${s.token}` } }))).status).toBe(200);
+  });
+
+  it("more than one __Host-bbu_sync cookie -> 401 (cookie tossing)", async () => {
     const s = await login(freshUser());
     const other = await login(freshUser());
-    for (const cookie of [`bbu_sync=${s.token}; bbu_sync=${other.token}`, `bbu_sync=${s.token}; x=1; bbu_sync=${s.token}`]) {
+    for (const cookie of [`__Host-bbu_sync=${s.token}; __Host-bbu_sync=${other.token}`, `__Host-bbu_sync=${s.token}; x=1; __Host-bbu_sync=${s.token}`]) {
       const res = await call(req("GET", "/api/sync/notes", { headers: { cookie } }));
       expect([res.status, await errorOf(res)]).toEqual([401, "unauthorized"]);
       // Also with a bearer token.
       expect((await call(req("GET", "/api/sync/notes", { token: s.token, headers: { cookie } }))).status).toBe(401);
     }
-    const logout = await call(req("DELETE", "/api/sync/session", { headers: { cookie: `bbu_sync=${s.token}; bbu_sync=${other.token}`, "x-bbu-sync": "1" } }));
+    const logout = await call(req("DELETE", "/api/sync/session", { headers: { cookie: `__Host-bbu_sync=${s.token}; __Host-bbu_sync=${other.token}`, "x-bbu-sync": "1" } }));
     expect(logout.status).toBe(401);
     expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
     // Nothing was logged out.
@@ -246,13 +297,13 @@ describe("CSRF", () => {
     const s = await login(freshUser());
     for (const headers of [{} as Record<string, string>, { origin: "https://evil.example" }, { origin: "null" }, { "x-bbu-sync": "0" }]) {
       const res = await call(
-        req("PUT", "/api/sync/notes", { body: { notes: [] }, headers: { cookie: `bbu_sync=${s.token}`, ...headers } }),
+        req("PUT", "/api/sync/notes", { body: { notes: [] }, headers: { cookie: `__Host-bbu_sync=${s.token}`, ...headers } }),
       );
       expect(res.status, JSON.stringify(headers)).toBe(403);
       expect(await errorOf(res)).toBe("csrf_rejected");
     }
     for (const [method, path] of [["DELETE", "/api/sync/account"], ["PUT", "/api/sync/e2e"], ["DELETE", "/api/sync/session"]] as const) {
-      const res = await call(req(method, path, { headers: { cookie: `bbu_sync=${s.token}` } }));
+      const res = await call(req(method, path, { headers: { cookie: `__Host-bbu_sync=${s.token}` } }));
       expect(res.status, path).toBe(403);
     }
     // Nothing was deleted.
@@ -261,7 +312,7 @@ describe("CSRF", () => {
 
   it("cookie + X-BBU-Sync: 1, own Origin or PUBLIC_ORIGIN passes", async () => {
     const s = await login(freshUser());
-    const cookie = `bbu_sync=${s.token}`;
+    const cookie = `__Host-bbu_sync=${s.token}`;
     const put1 = async (headers: Record<string, string>, e = env) =>
       (await call(req("PUT", "/api/sync/notes", { body: { notes: [] }, headers: { cookie, ...headers } }), {}, e)).status;
     expect(await put1({ "x-bbu-sync": "1" })).toBe(200);
@@ -272,7 +323,7 @@ describe("CSRF", () => {
 
   it("cookie + GET needs no signal; bearer never does", async () => {
     const s = await login(freshUser());
-    expect((await call(req("GET", "/api/sync/notes", { headers: { cookie: `bbu_sync=${s.token}`, origin: "https://evil.example" } }))).status).toBe(200);
+    expect((await call(req("GET", "/api/sync/notes", { headers: { cookie: `__Host-bbu_sync=${s.token}`, origin: "https://evil.example" } }))).status).toBe(200);
     expect((await put(s.token, [note("k", 1)])).status).toBe(200);
   });
 });
@@ -282,7 +333,7 @@ describe("DELETE /api/sync/session", () => {
     const s = await login(freshUser());
     const res = await call(req("DELETE", "/api/sync/session", { token: s.token }));
     expect(res.status).toBe(204);
-    expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(res.headers.get("set-cookie")).toBe("__Host-bbu_sync=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0");
     expect((await call(req("GET", "/api/sync/notes", { token: s.token }))).status).toBe(401);
     const n = await env.DB.prepare("SELECT count(*) AS c FROM sessions WHERE token_hash = ?").bind(await hashSessionToken(s.token)).first<{ c: number }>();
     expect(n!.c).toBe(0);
@@ -290,7 +341,7 @@ describe("DELETE /api/sync/session", () => {
 
   it("cookie logout needs the CSRF signal", async () => {
     const s = await login(freshUser());
-    const res = await call(req("DELETE", "/api/sync/session", { headers: { cookie: `bbu_sync=${s.token}`, "x-bbu-sync": "1" } }));
+    const res = await call(req("DELETE", "/api/sync/session", { headers: { cookie: `__Host-bbu_sync=${s.token}`, "x-bbu-sync": "1" } }));
     expect(res.status).toBe(204);
     expect((await call(req("GET", "/api/sync/notes", { token: s.token }))).status).toBe(401);
   });

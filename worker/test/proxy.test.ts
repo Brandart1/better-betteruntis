@@ -158,7 +158,8 @@ describe("proxy forwarding", () => {
           accept: "application/json",
           "accept-language": "de",
           "content-type": "application/json",
-          cookie: "bbu_sync=secret",
+          // The sync cookie (Path=/) reaches /proxy too; it must never go upstream.
+          cookie: "__Host-bbu_sync=secret; bbu_sync=old",
           origin: "https://bbu.test",
           referer: "https://bbu.test/timetable",
           "user-agent": "Mozilla/5.0",
@@ -177,6 +178,8 @@ describe("proxy forwarding", () => {
     );
     expect(sent.get("authorization")).toBe("Bearer tok123");
     expect(sent.get("user-agent")).toBe(UPSTREAM_USER_AGENT);
+    expect(sent.has("cookie")).toBe(false);
+    expect([...sent.values()].join("\n")).not.toContain("secret");
   });
 
   it("basic-auth credentials are never forwarded upstream", async () => {

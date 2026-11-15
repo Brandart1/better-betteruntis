@@ -11,7 +11,7 @@ interface PutBody {
   notes: WireNote[];
   latestSeq: number;
   e2e: boolean;
-  identity: { host: string; school: string; userId: string };
+  identity: { host: string; school: string; userId: string; epoch: string };
 }
 
 async function putOk(token: string, notes: unknown[]): Promise<PutBody> {
@@ -20,17 +20,35 @@ async function putOk(token: string, notes: unknown[]): Promise<PutBody> {
   return (await res.json()) as PutBody;
 }
 
-/** Inserts [n] plaintext notes for the identity directly (fast seeding). */
+/**
+ * Inserts [n] plaintext notes for the identity directly (fast seeding) and
+ * sets the identity's counters to exactly what is stored (so later real
+ * writes see consistent counters).
+ */
 async function seed(id: number, n: number): Promise<void> {
-  await env.DB.prepare(
-    "WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < ?2) " +
-      "INSERT INTO notes (identity_id, key, exam, text, blob, updated_at, deleted, seq, stored_at) " +
-      "SELECT ?1, 'seed-' || i, 0, '', NULL, 1, 0, i, 1 FROM c",
-  )
-    .bind(id, n)
-    .run();
-  await env.DB.prepare("UPDATE identities SET last_seq = ?2 WHERE id = ?1").bind(id, n).run();
+  await env.DB.batch([
+    env.DB.prepare(
+      "WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < ?2) " +
+        "INSERT INTO notes (identity_id, key, exam, text, blob, updated_at, deleted, seq, stored_at) " +
+        "SELECT ?1, 'seed-' || i, 0, '', NULL, 1, 0, i, 1 FROM c",
+    ).bind(id, n),
+    env.DB.prepare(
+      "UPDATE identities SET last_seq = ?2, " +
+        "note_count = (SELECT count(*) FROM notes WHERE identity_id = ?1 AND deleted = 0), " +
+        "bytes = (SELECT coalesce(sum(length(CAST(key AS BLOB)) + length(CAST(text AS BLOB))), 0) FROM notes WHERE identity_id = ?1) " +
+        "WHERE id = ?1",
+    ).bind(id, n),
+  ]);
 }
+
+const counters = async (id: number) =>
+  (await env.DB.prepare("SELECT note_count, bytes FROM identities WHERE id = ?").bind(id).first<{ note_count: number; bytes: number }>())!;
+/** What the counters should be: live notes, bytes of all rows. */
+const actual = async (id: number) =>
+  (await env.DB.prepare(
+    "SELECT coalesce(sum(deleted = 0), 0) AS note_count, coalesce(sum(length(CAST(key AS BLOB)) + coalesce(length(CAST(text AS BLOB)), 0) + " +
+      "coalesce(length(CAST(blob AS BLOB)), 0)), 0) AS bytes FROM notes WHERE identity_id = ?",
+  ).bind(id).first<{ note_count: number; bytes: number }>())!;
 
 describe("auth", () => {
   for (const [method, path] of [
@@ -63,7 +81,8 @@ describe("GET /api/sync/notes", () => {
     expect(all.notes).toEqual([
       { key: "a", exam: true, text: "A", updatedAt: 10, deleted: false, seq: 1 },
       { key: "b", exam: false, text: "B", updatedAt: 11, deleted: false, seq: 2 },
-      { key: "c", exam: false, text: "C", updatedAt: 12, deleted: true, seq: 3 },
+      // Plaintext tombstones are stored and returned blanked.
+      { key: "c", exam: false, text: "", updatedAt: 12, deleted: true, seq: 3 },
     ]);
     expect(all.latestSeq).toBe(3);
     expect((await get(s.token, 2)).notes.map((n) => n.key)).toEqual(["c"]);
@@ -129,6 +148,19 @@ describe("PUT /api/sync/notes", () => {
       ["a", "y"],
       ["b", "t"],
     ]);
+  });
+
+  it("plaintext tombstones are stored blanked (text '', exam false), also in the DB", async () => {
+    const s = await login(freshUser());
+    await putOk(s.token, [note("a", 1, "secret", { exam: true })]);
+    const out = await putOk(s.token, [note("a", 2, "still secret", { exam: true, deleted: true })]);
+    expect(out.notes[0]).toEqual({ key: "a", exam: false, text: "", updatedAt: 2, deleted: true, seq: 2 });
+    const row = await env.DB.prepare("SELECT exam, text FROM notes WHERE identity_id = ? AND key = 'a'")
+      .bind(await identityId(s.body.identity.userId))
+      .first();
+    expect(row).toEqual({ exam: 0, text: "" });
+    const id = await identityId(s.body.identity.userId);
+    expect(await counters(id)).toEqual({ note_count: 0, bytes: 1 });
   });
 
   it("tombstones are stored, returned and can be revived", async () => {
@@ -277,23 +309,27 @@ describe("PUT /api/sync/notes", () => {
     expect((await get(s.token)).notes).toEqual([]);
   });
 
-  it("per-user limit 20 000 (tombstones count) -> 413 too_many_notes, all or nothing", async () => {
+  it("per-user limit 5 000 live notes (tombstones don't count) -> 413 too_many_notes, all or nothing", async () => {
     const s = await login(freshUser());
     const id = await identityId(s.body.identity.userId);
+    expect(LIMITS.maxNotesPerUser).toBe(5000);
     await seed(id, LIMITS.maxNotesPerUser - 2);
-    await env.DB.prepare("UPDATE notes SET deleted = 1 WHERE identity_id = ? AND key = 'seed-1'").bind(id).run();
     let res = await put(s.token, [note("new1", 5), note("new2", 5), note("new3", 5)]);
     expect([res.status, await errorOf(res)]).toEqual([413, "too_many_notes"]);
     const count = async () =>
       (await env.DB.prepare("SELECT count(*) AS c FROM notes WHERE identity_id = ?").bind(id).first<{ c: number }>())!.c;
     expect(await count()).toBe(LIMITS.maxNotesPerUser - 2);
     // Updates of existing keys and duplicates don't count.
-    const out = await putOk(s.token, [note("new1", 5), note("new2", 5), note("new1", 6), note("seed-1", 9, "revived")]);
+    const out = await putOk(s.token, [note("new1", 5), note("new2", 5), note("new1", 6), note("seed-1", 9, "edited")]);
     expect(out.notes).toHaveLength(3);
-    expect(await count()).toBe(LIMITS.maxNotesPerUser);
+    expect(await counters(id)).toMatchObject({ note_count: LIMITS.maxNotesPerUser });
     res = await put(s.token, [note("one-more", 5)]);
-    expect(res.status).toBe(413);
-    expect((await putOk(s.token, [note("new2", 7, "edit")])).notes[0]).toMatchObject({ text: "edit" });
+    expect([res.status, await errorOf(res)]).toEqual([413, "too_many_notes"]);
+    // A tombstone frees a slot (tombstones count only in bytes).
+    expect((await put(s.token, [note("seed-2", 9, "", { deleted: true })])).status).toBe(200);
+    expect((await put(s.token, [note("one-more", 5)])).status).toBe(200);
+    expect(await count()).toBe(LIMITS.maxNotesPerUser + 1);
+    expect(await counters(id)).toEqual(await actual(id));
     // Another user is not affected.
     const other = await login(freshUser());
     expect((await put(other.token, [note("one-more", 5)])).status).toBe(200);
@@ -301,23 +337,18 @@ describe("PUT /api/sync/notes", () => {
 });
 
 describe("counters and byte quota", () => {
-  const counters = async (id: number) =>
-    (await env.DB.prepare("SELECT note_count, bytes FROM identities WHERE id = ?").bind(id).first<{ note_count: number; bytes: number }>())!;
-  const actual = async (id: number) =>
-    (await env.DB.prepare(
-      "SELECT count(*) AS note_count, coalesce(sum(length(CAST(key AS BLOB)) + coalesce(length(CAST(text AS BLOB)), 0) + " +
-        "coalesce(length(CAST(blob AS BLOB)), 0)), 0) AS bytes FROM notes WHERE identity_id = ?",
-    ).bind(id).first<{ note_count: number; bytes: number }>())!;
 
-  it("note_count and bytes follow inserts, overwrites (UTF-8 bytes), tombstones and E2E switch", async () => {
+  it("note_count (live) and bytes follow inserts, overwrites (UTF-8 bytes), tombstones and revivals", async () => {
     const s = await login(freshUser());
     const id = await identityId(s.body.identity.userId);
     await putOk(s.token, [note("a", 1, "xyz"), note("bb", 1, "ä")]);
     expect(await counters(id)).toEqual({ note_count: 2, bytes: 1 + 3 + 2 + 2 });
     await putOk(s.token, [note("a", 2, "😀😀")]); // 8 bytes
     expect(await counters(id)).toEqual({ note_count: 2, bytes: 1 + 8 + 2 + 2 });
-    await putOk(s.token, [note("bb", 3, "", { deleted: true })]);
-    expect(await counters(id)).toEqual({ note_count: 2, bytes: 1 + 8 + 2 });
+    await putOk(s.token, [note("bb", 3, "ignored", { deleted: true })]);
+    expect(await counters(id)).toEqual({ note_count: 1, bytes: 1 + 8 + 2 });
+    await putOk(s.token, [note("bb", 4, "back")]);
+    expect(await counters(id)).toEqual({ note_count: 2, bytes: 1 + 8 + 2 + 4 });
     expect(await counters(id)).toEqual(await actual(id));
   });
 
@@ -333,24 +364,34 @@ describe("counters and byte quota", () => {
     expect(await counters(id)).toEqual(await actual(id));
   });
 
-  it("byte quota (5 MiB) -> 413 storage_quota, all or nothing; shrinking writes still pass", async () => {
+  it("byte quota (5 MiB) via real writes -> 413 storage_quota, all or nothing; shrinking writes still pass", async () => {
     const s = await login(freshUser());
     const id = await identityId(s.body.identity.userId);
-    // Pretend the account is almost full.
-    await putOk(s.token, [note("a", 1, "x".repeat(100))]);
-    await env.DB.prepare("UPDATE identities SET bytes = ? WHERE id = ?").bind(LIMITS.maxBytesPerUser - 50, id).run();
-    let res = await put(s.token, [note("small", 1, "y"), note("big", 1, "z".repeat(100))]);
+    // Fill to just under the quota with real PUTs (4 000-char notes).
+    const big = (i: number) => note(`big-${String(i).padStart(4, "0")}`, 1, "x".repeat(LIMITS.maxTextLength));
+    const perNote = "big-0000".length + LIMITS.maxTextLength;
+    const fill = Math.floor(LIMITS.maxBytesPerUser / perNote);
+    for (let i = 0; i < fill; i += 240) {
+      await putOk(s.token, Array.from({ length: Math.min(240, fill - i) }, (_, j) => big(i + j)));
+    }
+    expect(await counters(id)).toEqual(await actual(id));
+    const free = LIMITS.maxBytesPerUser - (await counters(id)).bytes;
+    expect(free).toBeGreaterThan(10);
+    expect(free).toBeLessThan(perNote);
+    // Too big by one byte: refused, nothing of the request stored.
+    // "small"+"y" = 6 bytes, "c" + (free - 6) chars = free - 5 -> one byte over.
+    let res = await put(s.token, [note("small", 1, "y"), note("c", 1, "z".repeat(free - 6))]);
     expect([res.status, await errorOf(res)]).toEqual([413, "storage_quota"]);
-    expect((await get(s.token)).notes.map((n) => n.key)).toEqual(["a"]);
-    // Fits exactly: +45 bytes ("small" + 40 chars).
-    expect((await put(s.token, [note("small", 1, "y".repeat(40))])).status).toBe(200);
-    // 5 bytes left: "c" + 4 fits, "c" + 5 doesn't.
-    res = await put(s.token, [note("c", 1, "x".repeat(5))]);
+    expect((await get(s.token, fill)).notes).toEqual([]);
+    // Exactly full.
+    expect((await put(s.token, [note("small", 1, "y"), note("c", 1, "z".repeat(free - 7))])).status).toBe(200);
+    expect((await counters(id)).bytes).toBe(LIMITS.maxBytesPerUser);
+    res = await put(s.token, [note("d", 1)]);
     expect([res.status, await errorOf(res)]).toEqual([413, "storage_quota"]);
-    expect((await put(s.token, [note("c", 1, "x".repeat(4))])).status).toBe(200);
-    // Over the quota a shrinking write (tombstone) is allowed.
-    await env.DB.prepare("UPDATE identities SET bytes = ? WHERE id = ?").bind(LIMITS.maxBytesPerUser + 1000, id).run();
-    expect((await put(s.token, [note("a", 2, "", { deleted: true })])).status).toBe(200);
+    // A shrinking write (tombstone) passes at the quota.
+    expect((await put(s.token, [note("big-0000", 2, "", { deleted: true })])).status).toBe(200);
+    expect((await put(s.token, [note("d", 1)])).status).toBe(200);
+    expect(await counters(id)).toEqual(await actual(id));
   });
 
   it("tie: equal updatedAt keeps the stored version and returns it", async () => {
@@ -363,7 +404,13 @@ describe("counters and byte quota", () => {
 
   it("GET and PUT answers carry the session's identity", async () => {
     const s = await login(freshUser(), "school-x");
-    expect((await get(s.token)).identity).toEqual({ host: s.body.identity.host, school: "school-x", userId: s.body.identity.userId });
+    expect((await get(s.token)).identity).toEqual({
+      host: s.body.identity.host,
+      school: "school-x",
+      userId: s.body.identity.userId,
+      epoch: s.body.identity.epoch,
+    });
+    expect(s.body.identity.epoch).toMatch(/^[A-Za-z0-9_-]{22}$/);
     expect((await putOk(s.token, [note("a", 1)])).identity).toEqual(s.body.identity);
   });
 });
@@ -383,8 +430,8 @@ describe("tombstone purge (cron)", () => {
     const page = await get(s.token);
     expect(page.notes.map((n) => n.key).sort()).toEqual(["new-tomb", "old-live"]);
     expect(page.latestSeq).toBe(3);
-    const c = await env.DB.prepare("SELECT note_count, bytes FROM identities WHERE id = ?").bind(id).first<{ note_count: number; bytes: number }>();
-    expect(c).toEqual({ note_count: 2, bytes: "old-live".length + 1 + "new-tomb".length });
+    expect(await counters(id)).toEqual({ note_count: 1, bytes: "old-live".length + 1 + "new-tomb".length });
+    expect(await counters(id)).toEqual(await actual(id));
   });
 });
 
@@ -452,7 +499,7 @@ describe("DELETE /api/sync/account", () => {
 
     const res = await call(req("DELETE", "/api/sync/account", { token: s1.token }));
     expect(res.status).toBe(204);
-    expect(res.headers.get("set-cookie")).toBe("bbu_sync=; Path=/api/sync; HttpOnly; Secure; SameSite=Strict; Max-Age=0");
+    expect(res.headers.get("set-cookie")).toBe("__Host-bbu_sync=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0");
     for (const t of [s1.token, s2.token]) expect((await call(req("GET", "/api/sync/notes", { token: t }))).status).toBe(401);
     for (const table of ["notes", "sessions", "e2e_headers"]) {
       const n = await env.DB.prepare(`SELECT count(*) AS c FROM ${table} WHERE identity_id = ?`).bind(id).first<{ c: number }>();

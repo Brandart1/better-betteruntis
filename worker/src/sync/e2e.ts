@@ -10,7 +10,7 @@
  */
 import type { Env } from "../env";
 import type { AuthedRequest, SyncDeps } from "./auth";
-import { nowOf } from "./auth";
+import { nowOf, unauthorized } from "./auth";
 import * as db from "./db";
 import {
   base64UrlDecode,
@@ -39,9 +39,9 @@ export interface E2eHeader {
 
 /** Server-side bounds of the Argon2id parameters (the client uses m 19456, t 2, p 1). */
 export const KDF_BOUNDS = {
-  m: { min: 19_456, max: 262_144 },
-  t: { min: 2, max: 16 },
-  p: { min: 1, max: 16 },
+  m: { min: 19_456, max: 65_536 },
+  t: { min: 2, max: 8 },
+  p: { min: 1, max: 4 },
   /** Salt length in bytes (exactly). */
   saltBytes: 16,
 } as const;
@@ -59,8 +59,10 @@ function intIn(v: unknown, min: number, max: number): v is number {
  * Validates an E2E header. Sizes: salt exactly 16 bytes; wrapped keys and
  * check 16-512 base64url chars (XChaCha20-Poly1305: 24-byte nonce + 32-byte
  * key + 16-byte tag = 96 chars); authHash 43 chars. Argon2id m in KiB
- * 19456-262144, t 2-16, p 1-16 (weaker parameters are refused so a
- * compromised or buggy client can't store an easily brute-forced header).
+ * 19456-65536, t 2-8, p 1-4 (weaker parameters are refused so a
+ * compromised or buggy client can't store an easily brute-forced header;
+ * the upper bounds keep a malicious header from making other devices
+ * derive for minutes or run out of memory, especially in the browser).
  */
 export function parseE2eHeader(v: unknown): E2eHeader {
   if (!isPlainObject(v)) throw bad("The E2E header must be a JSON object.");
@@ -95,10 +97,19 @@ export function parseE2eHeader(v: unknown): E2eHeader {
   };
 }
 
+/**
+ * Response header carrying the session identity's epoch on every /e2e
+ * answer (the body is the bare header, kept for compatibility).
+ */
+export const EPOCH_HEADER = "x-bbu-identity-epoch";
+
+const epochHeaders = (auth: AuthedRequest): Record<string, string> => ({ [EPOCH_HEADER]: auth.identity.epoch });
+
 export async function getE2e(env: Env, auth: AuthedRequest): Promise<Response> {
   const header = await db.getE2eHeader(env.DB, auth.identityId);
-  if (header === null) throw notEnabled();
-  return json(JSON.parse(header) as unknown);
+  if (header === undefined) throw unauthorized(); // identity deleted after the session lookup
+  if (header === null) throw notEnabled(epochHeaders(auth));
+  return json(JSON.parse(header) as unknown, 200, epochHeaders(auth));
 }
 
 /**
@@ -109,14 +120,15 @@ export async function getE2e(env: Env, auth: AuthedRequest): Promise<Response> {
 export async function putE2e(request: Request, env: Env, auth: AuthedRequest, deps: SyncDeps): Promise<Response> {
   const header = parseE2eHeader(await readJsonBody(request, MAX_BODY));
   const created = await db.createE2eHeader(env.DB, auth.identityId, JSON.stringify(header), nowOf(deps));
-  if (!created) {
+  if (created === "gone") throw unauthorized();
+  if (created === "exists") {
     throw new HttpError(409, "e2e_exists", "End-to-end encryption is already set up; reset the account to change it.");
   }
-  return json(header, 201);
+  return json(header, 201, epochHeaders(auth));
 }
 
-const notEnabled = () =>
-  new HttpError(404, "e2e_not_enabled", "End-to-end encryption is not set up for this account.");
+const notEnabled = (headers: Record<string, string> = {}) =>
+  new HttpError(404, "e2e_not_enabled", "End-to-end encryption is not set up for this account.", headers);
 const authFailed = () => new HttpError(403, "e2e_auth_failed", "The auth key doesn't match this account's header.");
 
 /**
@@ -138,7 +150,7 @@ export async function patchE2e(request: Request, env: Env, auth: AuthedRequest):
   const result = await db.replaceE2eHeader(env.DB, auth.identityId, JSON.stringify(header), storedHash);
   if (result === "missing") throw notEnabled();
   if (result === "mismatch") throw authFailed(); // reset + new header in between
-  return json(header);
+  return json(header, 200, epochHeaders(auth));
 }
 
 /**
@@ -155,7 +167,7 @@ export async function deleteE2e(request: Request, env: Env, auth: AuthedRequest)
   const result = await db.deleteE2e(env.DB, auth.identityId, storedHash);
   if (result === "missing") throw notEnabled();
   if (result === "mismatch") throw authFailed();
-  return noContent();
+  return noContent(epochHeaders(auth));
 }
 
 function parseAuthKey(v: unknown): Uint8Array {
@@ -166,11 +178,13 @@ function parseAuthKey(v: unknown): Uint8Array {
 
 /**
  * Checks SHA-256(authKey) against the stored header's authHash (constant
- * time); returns the stored authHash. 404 without a header, 403 on mismatch.
+ * time); returns the stored authHash. 404 without a header, 403 on
+ * mismatch, 401 if the identity is gone.
  */
 async function verifyAuthKey(env: Env, auth: AuthedRequest, keyBytes: Uint8Array): Promise<string> {
   const storedJson = await db.getE2eHeader(env.DB, auth.identityId);
-  if (storedJson === null) throw notEnabled();
+  if (storedJson === undefined) throw unauthorized();
+  if (storedJson === null) throw notEnabled(epochHeaders(auth));
   const storedHash = (JSON.parse(storedJson) as Partial<E2eHeader>).authHash;
   if (typeof storedHash !== "string") throw authFailed();
   if (!constantTimeEqual(await sha256Base64Url(keyBytes), storedHash)) throw authFailed();

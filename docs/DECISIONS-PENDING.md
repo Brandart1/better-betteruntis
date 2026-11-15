@@ -36,7 +36,7 @@ once confirmed.
   gets "signed out").
 - Daily cron at 03:17 UTC deletes expired sessions (`wrangler.jsonc`
   `triggers`).
-- Rate limits (wrangler.jsonc `ratelimits`): login 10/min per IP, relay
+- Rate limits (wrangler.jsonc `ratelimits`): login 10/min per IP (now 30, see R6), relay
   300/min per IP, other sync calls 120/min (now per identity, see R3).
 - **Switch:** values in worker/src/sync/notes.ts (`LIMITS`), db.ts
   (`MAX_SESSIONS_PER_IDENTITY`), wrangler.jsonc.
@@ -130,7 +130,7 @@ once confirmed.
   origin. To do: set the variable to the Worker / custom-domain URL.
 
 ## 6. Web version: only one account can sync
-- **Chosen:** the browser has one `bbu_sync` cookie, so on the web `enable()`
+- **Chosen:** the browser has one sync cookie (`__Host-bbu_sync`), so on the web `enable()`
   refuses while another account syncs (otherwise notes could land on the
   wrong identity).
 - **Alternative:** per-account bearer tokens in localStorage on the web
@@ -171,11 +171,12 @@ once confirmed.
 
 ## R1. Per-identity byte quota: 5 MiB
 - **Chosen:** 5 MiB per identity = UTF-8 bytes of key + text/blob over all
-  stored notes incl. tombstones (413 `storage_quota`), next to the 20 000
-  notes limit. A write that only shrinks the total always passes (deleting
-  works when over quota). Counters `identities.note_count`/`bytes` are kept
-  by SQLite triggers on `notes` (same statement as every change, also for
-  E2E on/off, tombstone purge, cascades), so no request scans notes.
+  stored notes incl. tombstones (413 `storage_quota`), next to the notes
+  limit (now 5 000 live notes, R6). A write that only shrinks the total
+  always passes (deleting works when over quota). Counters
+  `identities.note_count`/`bytes` were kept by triggers; **replaced (R6) by
+  one aggregated UPDATE per write batch** (and explicit updates for E2E
+  on/off and the tombstone purge), so no request scans notes.
 - **Alternative:** a larger quota (20 000 × 4 000 chars would be ~80 MB per
   user; 500 MB D1 total); or explicit counter statements in each batch
   instead of triggers.
@@ -211,7 +212,8 @@ once confirmed.
   `e2e_check_mismatch`): the auth key already proves the DEK, and the
   client may re-encrypt `check` with a fresh nonce. Same proof for the new
   `DELETE /api/sync/e2e` (turn E2E off, sessions stay). KDF bounds on the
-  server: m 19 456–262 144, t 2–16, p 1–16, salt exactly 16 bytes.
+  server: m 19 456–262 144, t 2–16, p 1–16, salt exactly 16 bytes (now
+  m ≤ 65 536, t ≤ 8, p ≤ 4, see R6).
 - **Alternative:** keep the `check` equality as an extra condition.
 - **Switch:** worker/src/sync/e2e.ts `patchE2e` (compare `check` with the
   stored header) and db.ts `replaceE2eHeader`.
@@ -220,8 +222,68 @@ once confirmed.
 - **Chosen:** `POST /api/sync/session` omits `token` when an `Origin`
   header is present (browsers use the HttpOnly cookie). `identities.id` is
   `AUTOINCREMENT`, so a deleted identity's id is never given to a later
-  login. More than one `bbu_sync` cookie → 401.
+  login. More than one sync cookie → 401 (cookie now `__Host-bbu_sync`, R6).
 - **Alternative:** always return the token (web client could keep it in
   memory), plain `INTEGER PRIMARY KEY`.
 - **Switch:** worker/src/sync/auth.ts `createSessionHandler`,
   migrations/0001_init.sql.
+
+## R6. D1 daily allowance: write budget, cheaper writes, review fixes
+- **Context:** the Cloudflare free plan allows **100 000 D1 rows written
+  and 5 000 000 rows read per day for the whole app**; when either is used
+  up, sync stops for everyone until 00:00 UTC. Before this change one PUT
+  of 500 notes wrote ~1 500 rows (note + seq index + a per-row trigger
+  UPDATE of `identities`) and read 7 000–8 500; overwrites weren't limited
+  by the quotas, so with RL_WRITE 20/min one user could use up the whole
+  day's writes in ~3.5 minutes.
+- **Chosen:**
+  - Triggers removed; one aggregated, guarded UPDATE of `identities` per
+    write batch (counters, `last_seq`, budget), the INSERT runs only if that
+    UPDATE matched (per-request nonce). E2E on/off and the purge update the
+    counters explicitly; identity deletion needs none. Measured per
+    500-note PUT: **1 001 rows written** (was 1 501), 2 514 / 3 014 rows
+    read for inserts / overwrites (was 7 010 / 8 510). The aimed ≤ 510
+    would need dropping the `(identity_id, seq)` index (D1 counts index
+    writes: one per written note); then every non-empty pull would scan the
+    whole account (up to 5 000 reads per page, and a 5× cheaper read-budget
+    attack via `GET ?since=0`), so the index stays.
+  - **Daily write budget: 5 000 accepted note writes per identity and UTC
+    day** (`identities.budget_day`/`budget_used`), checked inside the same
+    guarded statement (all or nothing) → 429 `daily_limit` with
+    `retry-after` until UTC midnight. Every written note counts 1
+    (inserts, overwrites, tombstones); notes not written (stored version
+    newer/equal) don't. One maximal identity then costs ≤ ~10 000 rows
+    written per day, i.e. ~10 such identities could still use up the free
+    allowance on one day; normal use (a few dozen note changes per day) is
+    far below.
+  - Notes limit lowered from 20 000 to **5 000, counting only live
+    (non-deleted) notes** (tombstones count only in the 5 MiB byte quota),
+    so a first full upload of a maximal account fits in one day's budget.
+  - Plaintext tombstones are stored blanked (`text ''`, `exam 0`).
+  - RL_AUTH charges only failed lookups (unknown/expired token); an IP over
+    the limit is marked blocked for 60 s (isolate memory + `caches.default`)
+    and gets 429 before the lookup. RL_SESSION 10 → **30/min** per IP
+    (school NAT).
+  - Cookie renamed to **`__Host-bbu_sync`, Path=/** (no Domain): siblings
+    can't set it (cookie tossing / fixation). The relay strips cookies
+    (tested). The web client needs no change (the browser sends the cookie
+    automatically). Existing `bbu_sync` cookies are ignored (nothing is
+    deployed yet).
+  - KDF upper bounds lowered to m ≤ 65 536 KiB, t ≤ 8, p ≤ 4 (minimums
+    unchanged): a malicious header can't make devices derive for minutes or
+    run out of memory. **The client must use the same bounds.**
+  - Identity epoch (`identities.epoch`, 22-char base64url, random on
+    insert, never updated) in every `identity` object and in the
+    `x-bbu-identity-epoch` header of `/e2e` answers; an identity deleted
+    while a request runs → 401 instead of an empty 200.
+- **Recommendation:** if the app grows, consider **Workers Paid ($5/month:
+  50 M rows written / 25 B rows read per month included)**. On the free
+  plan the daily budget protects availability (one account can't stop sync
+  for everyone), not cost.
+- **Alternative:** no per-identity budget (simpler, but one account can
+  stop sync app-wide), a lower budget (e.g. 2 000/day, but a full first
+  upload of 5 000 notes would then take three days), or drop the seq index
+  (≈ 500 rows written per PUT, far more reads per pull).
+- **Switch:** `LIMITS.maxWritesPerDay` / `maxNotesPerUser` in
+  worker/src/sync/notes.ts, `KDF_BOUNDS` in e2e.ts, `COOKIE_NAME` in
+  auth.ts, `ratelimits` in wrangler.jsonc.

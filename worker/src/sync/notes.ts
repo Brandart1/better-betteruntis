@@ -1,7 +1,7 @@
 /** `GET/PUT /api/sync/notes`: the user's lesson notes, last write wins per key. */
 import type { Env } from "../env";
 import type { AuthedRequest, SyncDeps } from "./auth";
-import { nowOf } from "./auth";
+import { nowOf, unauthorized } from "./auth";
 import * as db from "./db";
 import { hasBadChars, HttpError, isBase64Url, isPlainObject, json, readJsonBody } from "./http";
 
@@ -9,9 +9,16 @@ export const LIMITS = {
   pageSize: 1000,
   maxNotesPerRequest: 500,
   maxBodyBytes: 1024 * 1024,
-  maxNotesPerUser: 20_000,
+  /** Live (non-deleted) notes per user; tombstones don't count here (they do in bytes). */
+  maxNotesPerUser: 5_000,
   /** Stored bytes per user: UTF-8 key + text/blob over all notes incl. tombstones. */
   maxBytesPerUser: 5 * 1024 * 1024,
+  /**
+   * Accepted note writes per user and UTC day (inserts and overwrites,
+   * tombstones included; older/tied notes that aren't written don't count).
+   * Protects the app-wide D1 daily write allowance (docs/DECISIONS-PENDING.md R6).
+   */
+  maxWritesPerDay: 5_000,
   maxKeyLength: 256,
   maxTextLength: 4000,
   /** E2E key: base64url HMAC-SHA256 (32 bytes, unpadded). */
@@ -48,6 +55,7 @@ export async function getNotes(request: Request, env: Env, auth: AuthedRequest):
     since = Number(all[0]);
   }
   const page = await db.changes(env.DB, auth.identityId, since, LIMITS.pageSize + 1);
+  if (page === null) throw unauthorized(); // identity deleted after the session lookup
   const more = page.notes.length > LIMITS.pageSize;
   const notes = more ? page.notes.slice(0, LIMITS.pageSize) : page.notes;
   return json({
@@ -89,6 +97,8 @@ function parseNote(v: unknown, i: number, now: number): db.NoteInput {
   if (key.length > LIMITS.maxKeyLength) throw bad(`notes[${i}]: key longer than ${LIMITS.maxKeyLength} chars.`);
   if (text.length > LIMITS.maxTextLength) throw bad(`notes[${i}]: text longer than ${LIMITS.maxTextLength} chars.`);
   if (hasBadChars(key) || hasBadChars(text)) throw bad(`notes[${i}]: NUL or unpaired surrogate.`);
+  // Plaintext tombstones are stored blanked (nothing of a deleted note stays).
+  if (deleted) return { key, exam: false, text: "", blob: null, updatedAt, deleted };
   return { key, exam, text, blob: null, updatedAt, deleted };
 }
 
@@ -104,6 +114,12 @@ export function mergeDuplicates(notes: db.NoteInput[]): db.NoteInput[] {
     if (prev === undefined || n.updatedAt > prev.updatedAt) byKey.set(n.key, n);
   }
   return [...byKey.values()];
+}
+
+/** Seconds from [now] (ms) to the next UTC midnight (at least 1). */
+export function secondsToNextUtcDay(now: number): number {
+  const next = (Math.floor(now / db.DAY_MS) + 1) * db.DAY_MS;
+  return Math.max(1, Math.ceil((next - now) / 1000));
 }
 
 export async function putNotes(request: Request, env: Env, auth: AuthedRequest, deps: SyncDeps): Promise<Response> {
@@ -123,18 +139,36 @@ export async function putNotes(request: Request, env: Env, auth: AuthedRequest, 
 
   if (notes.length === 0) {
     const page = await db.changes(env.DB, auth.identityId, Number.MAX_SAFE_INTEGER, 0);
+    if (page === null) throw unauthorized();
     return json({ notes: [], latestSeq: page.latestSeq, e2e: page.e2e, identity: auth.identity });
   }
-  const out = await db.putNotes(
-    env.DB,
-    auth.identityId,
-    notes,
-    e2eMode,
-    { maxNotes: LIMITS.maxNotesPerUser, maxBytes: LIMITS.maxBytesPerUser },
-    now,
-  );
+  let out: db.PutOutcome;
+  try {
+    out = await db.writeNotes(
+      env.DB,
+      auth.identityId,
+      notes,
+      e2eMode,
+      { maxNotes: LIMITS.maxNotesPerUser, maxBytes: LIMITS.maxBytesPerUser, dailyWrites: LIMITS.maxWritesPerDay },
+      now,
+    );
+  } catch (e) {
+    if (e instanceof db.WriteContendedError) {
+      throw new HttpError(503, "busy", "Too many concurrent writes, try again.", { "retry-after": "5" });
+    }
+    throw e;
+  }
   if (!out.ok) {
     switch (out.reason) {
+      case "identity_gone":
+        throw unauthorized();
+      case "daily_limit":
+        throw new HttpError(
+          429,
+          "daily_limit",
+          `At most ${LIMITS.maxWritesPerDay} note writes per user and day (UTC).`,
+          { "retry-after": String(secondsToNextUtcDay(now)) },
+        );
       case "too_many_notes":
         throw new HttpError(413, "too_many_notes", `At most ${LIMITS.maxNotesPerUser} notes per user.`);
       case "storage_quota":

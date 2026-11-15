@@ -11,6 +11,13 @@ npx tsc --noEmit      # typecheck
 npx wrangler dev      # local dev
 ```
 
+> **Schema changes after the first deploy:** `migrations/0001_init.sql` was
+> edited in place while nothing was deployed. **Once the first deploy has
+> applied it, never edit it again: every schema change must be a NEW
+> migration file** (`migrations/0002_<what>.sql`, …), additive (new
+> tables/columns with defaults) and compatible with the version that is
+> live (alphas share the production database, see "How releases deploy").
+
 ## Sync API (`src/sync/`)
 
 All JSON, `cache-control: no-store`, errors `{"error": code, "message"}`.
@@ -18,28 +25,47 @@ Unknown paths → 404 `not_found`, wrong method → 405 with `allow`.
 
 | Endpoint | Request → answer |
 |---|---|
-| `POST /api/sync/session` | `{host, school, untisToken}` → `{token, expiresAt, identity: {host, school, userId}, e2e}` + cookie `bbu_sync`. **`token` is omitted when the request has an `Origin` header** (browsers use the HttpOnly cookie; native apps send no Origin) |
+| `POST /api/sync/session` | `{host, school, untisToken}` → `{token, expiresAt, identity, e2e}` + cookie `__Host-bbu_sync`. **`token` is omitted when the request has an `Origin` header** (browsers use the HttpOnly cookie; native apps send no Origin) |
 | `DELETE /api/sync/session` | → 204, clears the cookie (also without a session) |
 | `GET /api/sync/notes?since=<seq>` | → `{notes, latestSeq, more, e2e, identity}` (1 000 per page) |
-| `PUT /api/sync/notes` | `{notes: [...]}` (≤ 500, ≤ 1 MiB) → `{notes, latestSeq, e2e, identity}`; 413 `too_many_notes` / `storage_quota`; 400 `clock_skew` with `serverTime` |
-| `GET /api/sync/e2e` | → header, or 404 `e2e_not_enabled` |
+| `PUT /api/sync/notes` | `{notes: [...]}` (≤ 500, ≤ 1 MiB) → `{notes, latestSeq, e2e, identity}`; 413 `too_many_notes` / `storage_quota`; 429 `daily_limit` (`retry-after` = seconds to the next UTC midnight); 400 `clock_skew` with `serverTime`; 503 `busy` (`retry-after: 5`, only if a write lost 3 races in a row) |
+| `GET /api/sync/e2e` | → header, or 404 `e2e_not_enabled` (both with response header `x-bbu-identity-epoch`) |
 | `PUT /api/sync/e2e` | header (with `authHash`) → 201 (once; deletes plaintext notes), 409 `e2e_exists` |
 | `PATCH /api/sync/e2e` | `{header: {... same authHash}, authKey}` → 200; 403 `e2e_auth_failed`, 404 `e2e_not_enabled` |
 | `DELETE /api/sync/e2e` | `{authKey}` → 204: deletes the header and all notes, sessions stay (E2E off); 403 `e2e_auth_failed`, 404 `e2e_not_enabled` |
 | `DELETE /api/sync/account` | → 204, deletes identity, notes, sessions, header |
 
-`identity` in the notes answers comes from the session, so a web client can
-notice that the shared cookie now belongs to another account.
+`identity` is always `{"host": string, "school": string, "userId": string,
+"epoch": string}` (POST /session, GET/PUT /notes; host and school lower
+case, userId a string). It comes from the session, so a web client can
+notice that the shared cookie now belongs to another account. **`epoch`**
+is 16 random bytes (base64url, 22 chars) generated when the identity row is
+created and never changed: the same for every session of that identity,
+**different after `DELETE /account` + a new login** (also after an
+operator deletion), unchanged by `DELETE /e2e` and by a D1 Time Travel
+restore. A client that sees another epoch than it stored must treat the
+server account as new (e.g. not re-upload into it without asking). The
+`/e2e` answers keep their body (the bare header) and carry the epoch in the
+response header **`x-bbu-identity-epoch`** (GET 200/404, PUT 201, PATCH
+200, DELETE 204). The internal `identities.id` is never exposed.
+
+Any authenticated call whose identity row disappeared between the session
+lookup and the statement (concurrent account deletion) answers 401
+`unauthorized`, never 200 with empty data.
 
 Notes: plaintext `{key, exam, text, updatedAt, deleted}`, E2E
 `{key (43-char base64url HMAC), blob (base64url), updatedAt, deleted}`;
 answers add `seq`. Last write wins; an equal `updatedAt` keeps the stored
-version (the answer returns it). `clock_skew` (updatedAt > server time +
+version (the answer returns it). **Plaintext tombstones (`deleted: true`)
+are stored and returned blanked: `text: ""`, `exam: false`**, whatever the
+client sent; E2E tombstones are opaque blobs and stored as sent. Seqs of
+one PUT are `last_seq + position in the request + 1`, so notes of the
+request that weren't written (older/tied) leave gaps. `clock_skew` (updatedAt > server time +
 5 min) answers `{"error": "clock_skew", "message", "serverTime": <ms UTC>}`.
 
 E2E header:
 `{version: 1, kdf: {alg: "argon2id", m, t, p, salt}, wrappedDek, wrappedDekRecovery?, check, authHash}`.
-Server-side bounds: m 19 456–262 144 (KiB), t 2–16, p 1–16, salt exactly
+Server-side bounds: m 19 456–65 536 (KiB), t 2–8, p 1–4, salt exactly
 16 bytes; `authHash` = 43-char base64url of SHA-256(authKey), where
 authKey (32 bytes) = HKDF-SHA256(DEK, info `"bbu-header-auth-v1"`). PATCH and
 DELETE send `authKey` (43-char base64url); the server compares
@@ -48,31 +74,66 @@ requires the new header's `authHash` to equal the stored one. `check` is not
 compared (it may change). The server never sees the DEK; `authHash` is part
 of the header returned by GET.
 
-Limits: 500 notes / 1 MiB per request, per identity 20 000 notes and
-5 MiB (UTF-8 bytes of key + text/blob, tombstones included; a write that only
-shrinks the total is always allowed). The counters live on `identities`
-(`note_count`, `bytes`) and are kept by triggers in the same statement as
-each change, so no request scans the notes.
+Limits: 500 notes / 1 MiB per request; per identity **5 000 live
+(non-deleted) notes** (tombstones don't count here) and 5 MiB (UTF-8 bytes
+of key + text/blob, tombstones included); a write that doesn't grow the
+live count / the byte total passes even when over the limit (deleting
+always works). **Daily write budget: 5 000 accepted note writes per
+identity and UTC day** (every insert or overwrite counts 1, tombstones
+included; notes that aren't written because the stored version is newer or
+equal don't count). Over budget the whole PUT is refused (all or nothing)
+with 429 `daily_limit` and `retry-after` = seconds until the next UTC
+midnight. So the first full upload of a maximal account (5 000 notes = 10
+PUTs of 500) fits in one day. The counters live on `identities`
+(`note_count`, `bytes`, `budget_day`, `budget_used`) and are changed by ONE
+aggregated, guarded UPDATE in the same batch as each write (no triggers),
+so no request scans the notes.
+
+D1 cost per PUT of 500 plaintext notes (measured with `meta.rows_read` /
+`rows_written`, `test/sync/budget.test.ts` guards it):
+
+| | rows written | rows read |
+|---|---|---|
+| 500 new notes | 1 001 (was 1 501) | 2 514 (was 7 010) |
+| 500 overwrites | 1 001 (was 1 501) | 3 014 (was 8 510) |
+| 500 older (nothing written) | 0 (was 1) | 3 010 (was 5 512) |
+| 500 tombstones | 1 501 | 3 014 |
+
+Per written note: the note row + its entry in the `(identity_id, seq)`
+index (D1 counts index writes); tombstones also enter the partial purge
+index. Dropping the seq index would halve the writes but make every
+non-empty pull scan the whole account (up to 5 000 rows read per page).
+The read-back of stored versions only runs for keys that weren't written;
+the summary query that names a refusal only runs when nothing was written.
 
 Rate limits (`wrangler.jsonc` `ratelimits`, 429 `rate_limited` +
 `retry-after: 60`; IP keys use the IPv6 /64, see `src/ip.ts`):
 
 | Binding | Limit | Key | Applies to |
 |---|---|---|---|
-| `RL_SESSION` | 10/min | client IP | `POST /session` |
-| `RL_AUTH` | 300/min | client IP | every request presenting a token, before the D1 lookup |
+| `RL_SESSION` | 30/min | client IP | `POST /session` (a school NAT where a class turns sync on together) |
+| `RL_AUTH` | 300/min | client IP | only **failed** session lookups (unknown/expired token, also on logout); an IP over the limit is marked blocked for 60 s and gets 429 **before** the D1 lookup (mark in isolate memory + `caches.default`; the cache is a no-op on workers.dev, the memory mark and the limiter still apply) |
 | `RL_SYNC` | 120/min | identity | every authenticated call |
 | `RL_WRITE` | 20/min | identity | `PUT /notes`, `PUT/PATCH/DELETE /e2e` (on top of `RL_SYNC`) |
 | `RL_PROXY` | 300/min | client IP | `/proxy/*` |
 
 Daily cron (03:17 UTC): deletes expired sessions and **tombstones not
-written on the server for 400 days** (column `stored_at`, server time). A
+written on the server for 400 days** (column `stored_at`, server time; a
+tombstone written again later is kept), lowering each identity's `bytes`
+by the purged sizes in the same batch. A
 device that was offline longer than that may keep, or re-upload, notes that
 were deleted elsewhere.
 
 Auth: `Authorization: Bearer <token>` (apps) or the cookie (web; state-changing
-requests need `X-BBU-Sync: 1` or a same-origin `Origin`). A request with more
-than one `bbu_sync` cookie gets 401 (cookie tossing). The identity is
+requests need `X-BBU-Sync: 1` or a same-origin `Origin`). Cookie:
+`__Host-bbu_sync=<token>; Path=/; HttpOnly; Secure; SameSite=Strict;
+Max-Age=7776000` (no Domain). The `__Host-` prefix means a sibling
+(sub)domain can't set or overwrite it (no cookie tossing / fixation);
+`Path=/` (required by the prefix) means it also reaches `/proxy/*` and the
+assets, but the relay never forwards cookies upstream (tested). Logout,
+account deletion and a rejected double cookie clear it with the same
+attributes and `Max-Age=0`. A request with more than one `__Host-bbu_sync`
+cookie still gets 401; the old name `bbu_sync` is ignored. The identity is
 verified with WebUntis `app/data` on an allowlisted host (`ALLOWED_HOSTS`).
 
 Relay: requests with `Sec-Fetch-Dest` other than `empty` or
@@ -152,6 +213,11 @@ Schema: `migrations/0001_init.sql`.
 10. **Usage limits:** on the free Workers plan requests beyond the daily
     limit fail instead of being billed. Keep request logging
     (`observability`) off, as configured.
+    D1 on the free plan: 100 000 rows written and 5 M rows read per day for
+    the whole app; when used up, sync fails for everyone until 00:00 UTC.
+    The per-identity daily write budget keeps one account from using it up;
+    watch D1 → Metrics and consider Workers Paid if the app grows
+    (`docs/DECISIONS-PENDING.md` R6).
 
 ### How releases deploy
 

@@ -18,8 +18,14 @@ import {
 } from "./http";
 import { verifyUntisIdentity, type FetchFn, type SyncIdentity } from "./identity";
 
-export const COOKIE_NAME = "bbu_sync";
-export const COOKIE_PATH = "/api/sync";
+/**
+ * `__Host-` prefix: the browser only accepts it with Secure, Path=/ and no
+ * Domain, so a sibling (sub)domain can't set or overwrite it (no cookie
+ * tossing / session fixation). Path=/ means it is also sent to /proxy and
+ * the assets; the relay never forwards cookies (src/proxy.ts).
+ */
+export const COOKIE_NAME = "__Host-bbu_sync";
+export const COOKIE_PATH = "/";
 export const CSRF_HEADER = "x-bbu-sync";
 export const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_SESSION_BODY = 16 * 1024;
@@ -35,6 +41,13 @@ export interface SyncDeps {
 
 export function nowOf(deps: SyncDeps): number {
   return deps.now ? deps.now() : Date.now();
+}
+
+/** A new identity epoch: 16 random bytes, base64url without padding (22 chars). */
+export function newEpoch(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
 }
 
 /** A new session token: 32 random bytes, base64url without padding (43 chars). */
@@ -64,10 +77,9 @@ export interface PresentedToken {
 }
 
 /**
- * The bearer token, else the `bbu_sync` cookie, else null (Basic auth is
- * ignored). Throws 401 if the request carries more than one `bbu_sync`
- * cookie (cookie tossing from a sibling domain could otherwise slip in an
- * attacker's session).
+ * The bearer token, else the `__Host-bbu_sync` cookie, else null (Basic
+ * auth is ignored). Throws 401 if the request carries more than one such
+ * cookie (defence in depth; `__Host-` already stops siblings setting it).
  */
 export function presentedToken(request: Request): PresentedToken | null {
   const cookieHeader = request.headers.get("cookie");
@@ -144,6 +156,65 @@ const csrfRejected = () => new HttpError(403, "csrf_rejected", "Cross-site reque
 const rateLimited = () =>
   new HttpError(429, "rate_limited", "Too many requests, try again later.", { "retry-after": "60" });
 
+/** How long an IP stays blocked after exceeding RL_AUTH (failed lookups). */
+export const AUTH_BLOCK_MS = 60_000;
+/** Isolate-local blocked marks (IP key -> until, ms); bounded. */
+const authBlocked = new Map<string, number>();
+const AUTH_BLOCKED_MAX = 10_000;
+
+function blockCacheKey(ipKey: string): Request {
+  // Synthetic URL, never fetched; only a key for caches.default.
+  return new Request(`https://rl-auth.invalid/${encodeURIComponent(ipKey)}`);
+}
+
+/**
+ * True if [ipKey] exceeded the failed-lookup limit recently: checked in
+ * this isolate's memory and in `caches.default` (per Cloudflare location;
+ * a no-op on workers.dev, where the Map still catches repeat offenders).
+ */
+async function isAuthBlocked(ipKey: string, now: number): Promise<boolean> {
+  const until = authBlocked.get(ipKey);
+  if (until !== undefined) {
+    if (until > now) return true;
+    authBlocked.delete(ipKey);
+  }
+  try {
+    const hit = typeof caches !== "undefined" ? await caches.default.match(blockCacheKey(ipKey)) : undefined;
+    if (hit !== undefined && Number(await hit.text()) > now) return true;
+  } catch {
+    // Cache unavailable: the Map and the limiter itself still apply.
+  }
+  return false;
+}
+
+async function markAuthBlocked(ipKey: string, now: number): Promise<void> {
+  if (authBlocked.size >= AUTH_BLOCKED_MAX) authBlocked.clear();
+  authBlocked.set(ipKey, now + AUTH_BLOCK_MS);
+  try {
+    if (typeof caches !== "undefined") {
+      await caches.default.put(
+        blockCacheKey(ipKey),
+        new Response(String(now + AUTH_BLOCK_MS), { headers: { "cache-control": `max-age=${AUTH_BLOCK_MS / 1000}` } }),
+      );
+    }
+  } catch {
+    // Best effort.
+  }
+}
+
+/**
+ * Charges one failed lookup (unknown/expired token) to RL_AUTH; over the
+ * limit, the IP is marked blocked for [AUTH_BLOCK_MS].
+ */
+async function chargeAuthMiss(env: Env, ipKey: string, now: number): Promise<void> {
+  if (!(await env.RL_AUTH.limit({ key: ipKey })).success) await markAuthBlocked(ipKey, now);
+}
+
+/** Test hook: forget all blocked marks of this isolate. */
+export function resetAuthBlocks(): void {
+  authBlocked.clear();
+}
+
 export interface AuthedRequest extends db.SessionInfo {
   tokenHash: string;
 }
@@ -155,10 +226,11 @@ export interface AuthOptions {
 
 /**
  * Requires a valid session (bearer or cookie; CSRF rule for cookie +
- * state-changing method). Rate limits: RL_AUTH per client IP before D1 is
- * asked (random tokens can't cause unlimited lookups), then RL_SYNC (and
- * RL_WRITE for writes) per identity, so more sessions don't buy more
- * requests. Throws HttpError.
+ * state-changing method). Rate limits: RL_AUTH counts only FAILED lookups
+ * per client IP; an IP over that limit is marked blocked and gets 429
+ * before D1 is asked (random tokens can't cause unlimited lookups). Then
+ * RL_SYNC (and RL_WRITE for writes) per identity, so more sessions don't
+ * buy more requests. Throws HttpError.
  */
 export async function authenticate(
   request: Request,
@@ -171,10 +243,15 @@ export async function authenticate(
   if (presented.viaCookie && !SAFE_METHODS.has(request.method) && !passesCsrfCheck(request, env)) {
     throw csrfRejected();
   }
-  if (!(await env.RL_AUTH.limit({ key: clientIpKey(request) })).success) throw rateLimited();
+  const ipKey = clientIpKey(request);
+  const now = nowOf(deps);
+  if (await isAuthBlocked(ipKey, now)) throw rateLimited();
   const tokenHash = await hashSessionToken(presented.token);
-  const session = await db.findSession(env.DB, tokenHash, nowOf(deps));
-  if (session === null) throw unauthorized();
+  const session = await db.findSession(env.DB, tokenHash, now);
+  if (session === null) {
+    await chargeAuthMiss(env, ipKey, now);
+    throw unauthorized();
+  }
   const idKey = `id:${session.identityId}`;
   if (!(await env.RL_SYNC.limit({ key: idKey })).success) throw rateLimited();
   if (options.write && !(await env.RL_WRITE.limit({ key: idKey })).success) throw rateLimited();
@@ -224,13 +301,18 @@ export async function createSessionHandler(request: Request, env: Env, deps: Syn
 
   const token = newSessionToken();
   const expiresAt = now + SESSION_TTL_MS;
-  const { e2e } = await db.createSession(env.DB, await hashSessionToken(token), identity, now, expiresAt);
+  const stored = await db.createSession(env.DB, await hashSessionToken(token), identity, now, expiresAt, newEpoch());
   // Browsers (they send Origin) use the HttpOnly cookie; keeping the token
   // out of the body keeps it away from page scripts. Native apps send no
   // Origin and get the token for their bearer header.
   const browser = request.headers.has("origin");
   return json(
-    { ...(browser ? {} : { token }), expiresAt: new Date(expiresAt).toISOString(), identity, e2e },
+    {
+      ...(browser ? {} : { token }),
+      expiresAt: new Date(expiresAt).toISOString(),
+      identity: { ...identity, epoch: stored.epoch },
+      e2e: stored.e2e,
+    },
     200,
     { "set-cookie": sessionCookie(token, SESSION_TTL_MS / 1000) },
   );
@@ -239,10 +321,11 @@ export async function createSessionHandler(request: Request, env: Env, deps: Syn
 /**
  * `DELETE /api/sync/session`: deletes the presented session (if any) and
  * clears the cookie. 204 also without a valid session; a cookie-only
- * logout must pass the CSRF rule (no forced logouts). Two `bbu_sync`
- * cookies -> 401 (with the cookie cleared).
+ * logout must pass the CSRF rule (no forced logouts). Two sync cookies ->
+ * 401 (with the cookie cleared). Only logouts with an unknown token count
+ * against RL_AUTH.
  */
-export async function deleteSessionHandler(request: Request, env: Env): Promise<Response> {
+export async function deleteSessionHandler(request: Request, env: Env, deps: SyncDeps = {}): Promise<Response> {
   let presented: PresentedToken | null;
   try {
     presented = presentedToken(request);
@@ -253,8 +336,12 @@ export async function deleteSessionHandler(request: Request, env: Env): Promise<
   if (presented !== null) {
     if (presented.viaCookie && !passesCsrfCheck(request, env)) throw csrfRejected();
     if (TOKEN_SHAPE.test(presented.token)) {
-      if (!(await env.RL_AUTH.limit({ key: clientIpKey(request) })).success) throw rateLimited();
-      await db.deleteSession(env.DB, await hashSessionToken(presented.token));
+      const ipKey = clientIpKey(request);
+      const now = nowOf(deps);
+      if (await isAuthBlocked(ipKey, now)) throw rateLimited();
+      if (!(await db.deleteSession(env.DB, await hashSessionToken(presented.token)))) {
+        await chargeAuthMiss(env, ipKey, now);
+      }
     }
   }
   return noContent({ "set-cookie": CLEAR_COOKIE });

@@ -63,6 +63,14 @@ Wire details (implemented in `worker/src/sync/`, summary in `worker/README.md`):
   HMAC and `blob` = base64url ciphertext (≤ 16 KiB decoded); `exam`/`text`
   must be absent. One request is either all plaintext or all encrypted.
   Responses add `seq`. `updatedAt` > now + 5 min → 400 `clock_skew`.
+  Plaintext tombstones are stored and returned blanked (`text: ""`,
+  `exam: false`); E2E tombstones stay opaque blobs.
+- `identity` (POST /session, GET/PUT /notes) is
+  `{host, school, userId, epoch}`; `epoch` = 16 random bytes (22-char
+  base64url) set when the identity row is created and never changed, so a
+  client can tell a deleted and re-created account from the same one (the
+  `/e2e` answers carry it in the response header `x-bbu-identity-epoch`). An
+  identity deleted between session lookup and statement → 401.
 - `GET /notes` → `{notes, latestSeq, more, e2e, identity}`; `PUT /notes` →
   `{notes: stored version of each key, latestSeq, e2e, identity}` (`identity`
   from the session, so the web client can detect a cookie of another
@@ -81,9 +89,12 @@ Wire details (implemented in `worker/src/sync/`, summary in `worker/README.md`):
   from `e2e: true` and the 409s). Turning E2E off/resetting the passphrase
   without a recovery code is still `DELETE /account`.
 - Limits: 500 notes and 1 MiB per request (413 `batch_too_large` /
-  `body_too_large`), per identity 20 000 notes incl. tombstones (413
-  `too_many_notes`) and 5 MiB of key + text/blob bytes (413
-  `storage_quota`; shrinking writes always pass), at most 30 sessions per
+  `body_too_large`), per identity 5 000 live notes (tombstones don't count;
+  413 `too_many_notes`) and 5 MiB of key + text/blob bytes incl. tombstones
+  (413 `storage_quota`; writes that don't grow the count/size always pass),
+  **5 000 accepted note writes per identity and UTC day** (inserts and
+  overwrites, tombstones included; 429 `daily_limit`, `retry-after` until
+  the next UTC midnight; see DECISIONS-PENDING R6), at most 30 sessions per
   identity (oldest dropped on login). Rate limits → 429 `rate_limited` +
   `retry-after` (bindings in worker/README.md).
 - Tombstones not written on the server for 400 days are purged by the
@@ -109,10 +120,12 @@ Wire details (implemented in `worker/src/sync/`, summary in `worker/README.md`):
    (`webuntis.com`, `*.webuntis.com`), otherwise a fake server could claim any
    identity. The claimed school must match the tenant WebUntis reports.
 4. **Sessions:** 256-bit random tokens; only SHA-256 hashes stored. Web:
-   cookie `bbu_sync` (HttpOnly, Secure, SameSite=Strict, Path=/api/sync, so
-   never sent to /proxy). State-changing cookie requests need the
-   `X-BBU-Sync: 1` header (CSRF). Tokens never in URLs. 90-day expiry; logout
-   deletes.
+   cookie `__Host-bbu_sync` (HttpOnly, Secure, SameSite=Strict, Path=/, no
+   Domain): the `__Host-` prefix stops sibling (sub)domains from setting or
+   overwriting it (cookie tossing / session fixation). It is also sent to
+   /proxy, which never forwards cookies upstream. State-changing cookie
+   requests need the `X-BBU-Sync: 1` header (CSRF). Tokens never in URLs.
+   90-day expiry; logout deletes.
 5. **Accidental data loss:** reject `updatedAt` more than 5 minutes in the
    future (clock skew). D1 Time Travel as a safety net (point-in-time restore).
    Opt-out asks for confirmation; other devices getting 401 stop syncing and
@@ -120,16 +133,22 @@ Wire details (implemented in `worker/src/sync/`, summary in `worker/README.md`):
    (`INSERT … ON CONFLICT DO UPDATE … WHERE excluded.updated_at >
    notes.updated_at`); multi-statement changes via `db.batch()` (atomic).
 6. **Abuse and limits:** Workers rate-limiting bindings: session creation
-   and the relay per client IP, session lookups per client IP *before* D1
-   is asked (random tokens can't cost unlimited reads), all sync calls and,
-   stricter, writes **per identity** (more sessions don't buy more
-   requests); IPv6 clients are keyed by their /64. Plus a WAF rule.
-   Per identity 20 000 notes and a **5 MiB byte quota**, both checked from
-   counters on `identities` (maintained by triggers, no scans: D1 bills
-   rows read/written); 4 000 chars/note, 500 notes and 1 MiB per request;
-   old tombstones purged daily. Free plan stops instead of billing.
-   Multiple `bbu_sync` cookies (cookie tossing) → 401; the browser login
-   answer carries no token (cookie only).
+   (30/min) and the relay per client IP; **failed** session lookups per
+   client IP, and an IP over that limit is blocked for 60 s *before* D1 is
+   asked (random tokens can't cost unlimited reads; valid sessions behind a
+   school NAT don't use it up); all sync calls and, stricter, writes **per
+   identity** (more sessions don't buy more requests); IPv6 clients are
+   keyed by their /64. Plus a WAF rule. Per identity 5 000 live notes, a
+   **5 MiB byte quota** and a **daily budget of 5 000 note writes**, all
+   checked inside the write statement from counters on `identities`
+   (changed by one aggregated UPDATE per write batch, no triggers, no
+   scans: D1 bills rows read/written, ~1 000 rows written per 500-note PUT);
+   4 000 chars/note, 500 notes and 1 MiB per request; old tombstones purged
+   daily. The free plan's D1 allowance (100k rows written / 5M read per day
+   for the whole app) stops sync for everyone when used up; the daily
+   budget keeps one identity from using it up (R6). Multiple
+   `__Host-bbu_sync` cookies → 401; the browser login answer carries no
+   token (cookie only).
 7. **Privacy:** no logging of bodies, tokens, note keys or texts; identities
    only as a short hash. Privacy notice (draft from the deleted branch can be
    reused), Cloudflare as processor.
@@ -174,8 +193,10 @@ corrupt data. `authHash` = base64url(SHA-256(authKey)) (43 chars), with
 (PATCH) or deleting (DELETE) the header requires sending `authKey`, so a
 stolen session alone can't swap in a header for an attacker's key or turn
 E2E off. The server checks SHA-256(authKey) against the stored hash in
-constant time and never sees the DEK. Server-side KDF bounds: m 19 456–262 144
-KiB, t 2–16, p 1–16, salt exactly 16 bytes. Stored per identity, written with `PUT /api/sync/e2e` only if
+constant time and never sees the DEK. Server-side KDF bounds: m 19 456–65 536
+KiB, t 2–8, p 1–4, salt exactly 16 bytes (the upper bounds stop a malicious
+header from making devices derive for minutes or run out of memory; the
+client must use the same bounds). Stored per identity, written with `PUT /api/sync/e2e` only if
 none exists yet (or after an account reset), so two devices can't create
 different keys at the same time.
 

@@ -66,7 +66,7 @@ export function req(method: string, path: string, init: { token?: string; body?:
 export interface Login {
   token: string;
   cookie: string;
-  body: { token: string; expiresAt: string; identity: { host: string; school: string; userId: string }; e2e: boolean };
+  body: { token: string; expiresAt: string; identity: IdentityJson; e2e: boolean };
 }
 
 /** Logs [userId] of [school] in and returns the session. */
@@ -106,7 +106,15 @@ export interface Page {
   latestSeq: number;
   more: boolean;
   e2e: boolean;
-  identity: { host: string; school: string; userId: string };
+  identity: IdentityJson;
+}
+
+/** `identity` in every answer: `{host, school, userId, epoch}`. */
+export interface IdentityJson {
+  host: string;
+  school: string;
+  userId: string;
+  epoch: string;
 }
 
 export async function get(token: string, since?: number): Promise<Page> {

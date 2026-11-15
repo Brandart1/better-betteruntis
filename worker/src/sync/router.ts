@@ -51,7 +51,7 @@ const WRITE: AuthOptions = { write: true };
 const ROUTES: Record<string, Record<string, Handler>> = {
   "/api/sync/session": {
     POST: (r, env, deps) => createSessionHandler(r, env, deps),
-    DELETE: (r, env) => deleteSessionHandler(r, env),
+    DELETE: (r, env, deps) => deleteSessionHandler(r, env, deps),
   },
   "/api/sync/notes": {
     GET: authed((r, env, auth) => getNotes(r, env, auth)),
