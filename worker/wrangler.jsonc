@@ -1,0 +1,43 @@
+{
+  // BetterBetterUntis Worker: serves the Flutter web build (static assets),
+  // relays WebUntis requests (/proxy/...) and hosts the optional notes sync
+  // (/api/sync/...) on D1. See ../docs/SYNC-PLAN.md.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "better-betteruntis",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    // Filled by CI with `flutter build web` output (+ _headers).
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // The Worker runs first for /proxy/* and /api/* only; everything else
+    // is served straight from the assets.
+    "run_worker_first": ["/proxy/*", "/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bbu-sync",
+      // Placeholder until the maintainer creates the database
+      // (`wrangler d1 create bbu-sync`); local dev/tests don't need it.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // Workers rate limiting (per key, per Cloudflare location; period 10 or 60 s).
+  "ratelimits": [
+    { "name": "RL_SESSION", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_PROXY", "namespace_id": "1002", "simple": { "limit": 300, "period": 60 } },
+    { "name": "RL_SYNC", "namespace_id": "1003", "simple": { "limit": 120, "period": 60 } }
+  ],
+  "vars": {
+    "ALLOWED_HOSTS": "webuntis.com,*.webuntis.com",
+    "PUBLIC_ORIGIN": ""
+  },
+  "observability": {
+    // Invocation logs stay off: they could contain request URLs.
+    "enabled": false
+  }
+}

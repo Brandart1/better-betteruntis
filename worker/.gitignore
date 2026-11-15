@@ -1,0 +1,6 @@
+node_modules/
+.wrangler/
+.dev.vars
+/public/*
+!/public/index.html
+!/public/_headers
