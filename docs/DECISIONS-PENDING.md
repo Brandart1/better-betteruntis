@@ -111,3 +111,36 @@ once confirmed.
 - **Alternative:** a separate exported backup (e.g. `wrangler d1 export`
   to R2) with its own retention: longer safety net, but then deletions
   linger longer and the notice must say so.
+
+## 5. Sync server address in the phone apps (placeholder)
+- **Chosen:** `BBU_SYNC_URL` compile-time constant, default
+  `https://better-betteruntis.workers.dev` (placeholder: real workers.dev
+  URLs are `<worker>.<your-subdomain>.workers.dev`). The web version always
+  uses its own origin.
+- **To do:** once the Worker exists, set the real URL as the default in
+  lib/sync/sync_client.dart (or pass `--dart-define=BBU_SYNC_URL=...` in
+  release.yml). A custom domain would make this independent of the
+  Cloudflare subdomain.
+
+## 6. Web version: only one account can sync
+- **Chosen:** the browser has one `bbu_sync` cookie, so on the web `enable()`
+  refuses while another account syncs (otherwise notes could land on the
+  wrong identity).
+- **Alternative:** per-account bearer tokens in localStorage on the web
+  (readable by page scripts, weaker than the HttpOnly cookie).
+- **Switch:** lib/sync/sync_engine.dart (web guard) + client auth mode.
+
+## 7. Removing an account from the app
+- **Chosen:** ends this device's sync session and forgets its keys; the
+  server data stays (the dialog says so and points to "turn off sync" to
+  delete it).
+- **Alternative:** removing the account also turns sync off (deletes the
+  server data), which would affect the user's other devices.
+
+## 8. Small engine behaviours
+- No automatic retry/back-off after 429 (rate limit); the error is shown and
+  the next trigger (change, app start/resume, "Sync now") retries.
+- Two devices changing the same note in the same millisecond: treated as the
+  same version (practically never happens).
+- Notes over 4 000 characters are skipped (counted in the sync error); the
+  input field is now capped at 4 000.
