@@ -620,9 +620,9 @@ void main() {
         withKdf({'m': 19455}), // below default
         withKdf({'t': 1}),
         withKdf({'p': 0}),
-        withKdf({'m': 262145}), // above maximum
-        withKdf({'t': 17}),
-        withKdf({'p': 17}),
+        withKdf({'m': 65537}), // above maximum
+        withKdf({'t': 9}),
+        withKdf({'p': 5}),
         withKdf({'salt': b64uEncode(Uint8List(8))}),
       ]) {
         expect(
@@ -633,7 +633,7 @@ void main() {
       }
       // Stronger parameters are accepted.
       expect(
-        E2eHeader.fromJson(withKdf({'m': 65536, 't': 3, 'p': 2})).kdf.memoryKiB,
+        E2eHeader.fromJson(withKdf({'m': 65536, 't': 8, 'p': 4})).kdf.memoryKiB,
         65536,
       );
     });

@@ -4,28 +4,48 @@
 /// tombstones, identity in every notes answer, E2E header (create once and
 /// delete the plaintext notes; PATCH and DELETE need the auth key; DELETE
 /// keeps sessions and seqs), account deletion, clock skew with
-/// `serverTime`, storage quota, write rate limit, 401, lost answers.
+/// `serverTime`, storage quota, 5 000 live notes, daily write budget,
+/// write rate limit, 401, lost answers. Every identity has a random
+/// `epoch` (new when it is deleted and created again), sent in `identity`
+/// objects and, for /e2e answers, in the `x-bbu-identity-epoch` header
+/// (the browser cookie is `__Host-bbu_sync`; the fake keeps it per device).
 library;
 
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' show sha256;
 import 'package:dio/dio.dart';
 
+final _rnd = Random(42);
+
+/// 22-char base64url (16 random bytes), like the Worker's epochs.
+String _newEpoch() => base64Url
+    .encode([for (var i = 0; i < 16; i++) _rnd.nextInt(256)])
+    .replaceAll('=', '');
+
 class FakeIdentity {
-  FakeIdentity(this.host, this.school, this.userId);
+  FakeIdentity(this.host, this.school, this.userId) : epoch = _newEpoch();
   final String host;
   final String school;
   final String userId;
+
+  /// Changes only when the identity is deleted and created again.
+  final String epoch;
   int lastSeq = 0;
   final Map<String, Map<String, Object?>> notes = {};
   Map<String, Object?>? header;
+
+  /// Note writes on [writesDay] (UTC day number).
+  int writesToday = 0;
+  int writesDay = -1;
 
   Map<String, Object?> get json => {
     'host': host,
     'school': school,
     'userId': userId,
+    'epoch': epoch,
   };
 }
 
@@ -48,8 +68,32 @@ class FakeSyncServer {
   /// `PUT /notes` always fails with clock_skew (with serverTime).
   bool alwaysClockSkew = false;
 
+  /// `POST /session` answers with this status (e.g. 503, 429).
+  int? sessionStatus;
+
+  /// The next [busyPuts] `PUT /notes` answer 503 `busy` (retry-after 5),
+  /// without writing.
+  int busyPuts = 0;
+
   /// Stored bytes per identity (key + text/blob), like the Worker's 5 MiB.
   int maxBytes = 5 * 1024 * 1024;
+
+  /// Live notes (tombstones don't count) per identity.
+  int maxLiveNotes = 5000;
+
+  /// Note writes per identity and UTC day → 429 `daily_limit`.
+  int dailyWrites = 5000;
+
+  /// Notes written by PUT /notes (stored because they were newer).
+  int noteWrites = 0;
+
+  /// Extra response headers of the last answer (taken by the device).
+  Map<String, String> _headers = {};
+  Map<String, String> takeHeaders() {
+    final h = _headers;
+    _headers = {};
+    return h;
+  }
 
   /// Writes (PUT notes, PUT/PATCH/DELETE e2e) allowed until
   /// [resetWriteWindow]; null = unlimited. Then 429 + retry-after 60.
@@ -82,6 +126,7 @@ class FakeSyncServer {
   }) {
     final path = uri.path;
     log.add('$method $path');
+    _headers = {};
     if (forceStatus != null) {
       return (forceStatus!, {'error': 'forced', 'message': 'forced'}, null);
     }
@@ -92,6 +137,7 @@ class FakeSyncServer {
     ]) => (s, {'error': code, 'message': code, ...?extra}, null);
 
     if (path == '/api/sync/session' && method == 'POST') {
+      if (sessionStatus case final st?) return err(st, 'unavailable');
       final b = body as Map;
       final t = '${b['untisToken']}';
       if (!t.startsWith('untis:')) return err(401, 'invalid_token');
@@ -129,12 +175,19 @@ class FakeSyncServer {
     final key = t == null ? null : sessions[t];
     final ident = key == null ? null : identities[key];
     if (ident == null) return err(401, 'unauthorized');
+    // Like the Worker: the epoch header on GET 200/404, PUT 201, PATCH 200
+    // and DELETE 204 of /e2e.
+    void epochHeader() =>
+        _headers = {..._headers, 'x-bbu-identity-epoch': ident.epoch};
 
     final write =
         (method == 'PUT' && path == '/api/sync/notes') ||
         (path == '/api/sync/e2e' && method != 'GET');
     if (write && writesPerWindow != null) {
-      if (writesInWindow >= writesPerWindow!) return err(429, 'rate_limited');
+      if (writesInWindow >= writesPerWindow!) {
+        _headers = {..._headers, 'retry-after': '60'};
+        return err(429, 'rate_limited');
+      }
       writesInWindow++;
     }
 
@@ -157,6 +210,11 @@ class FakeSyncServer {
           null,
         );
       case ('PUT', '/api/sync/notes'):
+        if (busyPuts > 0) {
+          busyPuts--;
+          _headers = {'retry-after': '5'};
+          return err(503, 'busy');
+        }
         putRequests++;
         final list = (body as Map)['notes'] as List;
         if (list.length > 500) return err(413, 'batch_too_large');
@@ -181,21 +239,44 @@ class FakeSyncServer {
           final at = n['updatedAt'] as int;
           // Tie: the stored version stays.
           if (old == null || at > (old['updatedAt'] as int)) {
+            final deleted = n['deleted'] == true;
             next[k] = {
               'key': k,
               if (e2e)
                 'blob': n['blob']
               else ...{
-                'exam': n['exam'],
-                'text': n['text'],
+                // Plaintext tombstones are stored without content.
+                'exam': deleted ? false : n['exam'],
+                'text': deleted ? '' : n['text'],
               },
               'updatedAt': at,
-              'deleted': n['deleted'],
+              'deleted': deleted,
             };
             changedKeys
               ..remove(k)
               ..add(k);
           }
+        }
+        final day = now().toUtc().millisecondsSinceEpoch ~/ 86400000;
+        if (ident.writesDay != day) {
+          ident
+            ..writesDay = day
+            ..writesToday = 0;
+        }
+        if (changedKeys.isNotEmpty &&
+            ident.writesToday + changedKeys.length > dailyWrites) {
+          final midnight = (day + 1) * 86400000;
+          _headers = {
+            'retry-after':
+                '${((midnight - now().millisecondsSinceEpoch) / 1000).ceil()}',
+          };
+          return err(429, 'daily_limit');
+        }
+        int live(Map<String, Map<String, Object?>> m) =>
+            m.values.where((n) => n['deleted'] != true).length;
+        final liveAfter = live(next);
+        if (liveAfter > maxLiveNotes && liveAfter > live(ident.notes)) {
+          return err(413, 'too_many_notes');
         }
         var bytes = 0;
         for (final n in next.values) {
@@ -203,6 +284,8 @@ class FakeSyncServer {
           bytes += utf8.encode('${n['blob'] ?? n['text'] ?? ''}').length;
         }
         if (bytes > maxBytes) return err(413, 'storage_quota');
+        ident.writesToday += changedKeys.length;
+        noteWrites += changedKeys.length;
         for (final k in changedKeys) {
           next[k] = {...next[k]!, 'seq': ++ident.lastSeq};
         }
@@ -220,6 +303,7 @@ class FakeSyncServer {
           null,
         );
       case ('GET', '/api/sync/e2e'):
+        epochHeader();
         if (ident.header == null) return err(404, 'e2e_not_enabled');
         return (200, ident.header, null);
       case ('PUT', '/api/sync/e2e'):
@@ -231,6 +315,7 @@ class FakeSyncServer {
         if (ident.header != null) return err(409, 'e2e_exists');
         ident.header = h;
         ident.notes.removeWhere((_, n) => n['blob'] == null);
+        epochHeader();
         return (201, ident.header, null);
       case ('PATCH', '/api/sync/e2e'):
         final b = body as Map;
@@ -245,6 +330,7 @@ class FakeSyncServer {
           return err(403, 'e2e_auth_failed');
         }
         ident.header = h;
+        epochHeader();
         return (200, h, null);
       case ('DELETE', '/api/sync/e2e'):
         final b = body as Map?;
@@ -258,6 +344,7 @@ class FakeSyncServer {
         // Sessions and lastSeq stay.
         ident.header = null;
         ident.notes.clear();
+        epochHeader();
         return (204, null, null);
       case ('DELETE', '/api/sync/account'):
         identities.remove(key);
@@ -318,6 +405,7 @@ class FakeDevice implements HttpClientAdapter {
     if (browser && setCookie != null) {
       cookie = setCookie.isEmpty ? null : setCookie;
     }
+    final extra = server.takeHeaders();
     server.onHandled?.call('${options.method} ${options.uri.path}');
     if (server.loseAnswer.remove('${options.method} ${options.uri.path}')) {
       throw DioException.connectionError(
@@ -330,7 +418,7 @@ class FakeDevice implements HttpClientAdapter {
       status,
       headers: {
         Headers.contentTypeHeader: ['application/json'],
-        if (status == 429) 'retry-after': ['60'],
+        for (final e in extra.entries) e.key: [e.value],
       },
     );
   }

@@ -73,7 +73,13 @@ Future<void> turnOnSync(
   final result = done?.value;
   if (result == null) return;
   if (result.recoveryCode case final code?) {
-    if (root.mounted) await showRecoveryCode(root.context, code);
+    if (root.mounted) {
+      await showRecoveryCode(
+        root.context,
+        code,
+        onSaved: () => sync.acknowledgeRecoveryCode(accountId),
+      );
+    }
   }
   if (!context.mounted) return;
   if (result.state.phase == SyncPhase.locked) {
@@ -100,15 +106,28 @@ Future<bool> unlockSync(
   return done != null;
 }
 
-/// Shows [code] once with a copy button; closes only after "I saved it".
-/// Uses the root navigator of [context].
-Future<void> showRecoveryCode(BuildContext context, String code) =>
-    showDialog<void>(
-      context: context,
-      useRootNavigator: true,
-      barrierDismissible: false,
-      builder: (_) => RecoveryCodeDialog(code: code),
-    );
+/// Shows [code] once with a copy button; closes only after "I saved it",
+/// then calls [onSaved] (the engine stops reminding about the code; pass
+/// `SyncController.acknowledgeRecoveryCode`). Uses the root navigator of
+/// [context].
+Future<void> showRecoveryCode(
+  BuildContext context,
+  String code, {
+  Future<void> Function()? onSaved,
+}) async {
+  final saved = await showDialog<bool>(
+    context: context,
+    useRootNavigator: true,
+    barrierDismissible: false,
+    builder: (_) => RecoveryCodeDialog(code: code),
+  );
+  // The dialog can only close once "I saved it" is ticked.
+  if (saved ?? true) {
+    try {
+      await onSaved?.call();
+    } catch (_) {}
+  }
+}
 
 /// A yes/no question; [destructive] colors the confirm button red.
 Future<bool> confirmSync(
@@ -827,7 +846,7 @@ class _RecoveryCodeDialogState extends State<RecoveryCodeDialog> {
         actions: [
           FilledButton(
             key: const ValueKey('sync-recovery-done'),
-            onPressed: _saved ? () => Navigator.of(context).pop() : null,
+            onPressed: _saved ? () => Navigator.of(context).pop(true) : null,
             child: const Text('Done'),
           ),
         ],

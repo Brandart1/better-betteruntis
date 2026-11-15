@@ -114,6 +114,9 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
 
   Future<void> _turnOnE2e() async {
     final root = Navigator.of(context, rootNavigator: true);
+    // Kept: this section may be gone when the code is confirmed.
+    final sync = _sync;
+    final id = _id;
     final done = await showDialog<SyncDone<SyncEnableResult>>(
       context: context,
       barrierDismissible: false,
@@ -130,7 +133,11 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
     );
     final code = done?.value.recoveryCode;
     if (code != null && root.mounted) {
-      await showRecoveryCode(root.context, code);
+      await showRecoveryCode(
+        root.context,
+        code,
+        onSaved: () => sync.acknowledgeRecoveryCode(id),
+      );
     }
   }
 
@@ -162,13 +169,19 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
       if (!ok || !mounted) return;
     }
     final root = Navigator.of(context, rootNavigator: true);
+    final sync = _sync;
+    final id = _id;
     final done = await runSyncAction(
       context,
       title: 'Creating a recovery code',
       action: () => _sync.regenerateRecoveryCode(_id),
     );
     if (done != null && root.mounted) {
-      await showRecoveryCode(root.context, done.value);
+      await showRecoveryCode(
+        root.context,
+        done.value,
+        onSaved: () => sync.acknowledgeRecoveryCode(id),
+      );
     }
   }
 
@@ -413,8 +426,14 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
                 OutlinedButton.icon(
                   key: const ValueKey('sync-e2e-on'),
                   icon: const Icon(Icons.lock_outline),
-                  label: const Text('Turn on encryption'),
-                  onPressed: _turnOnE2e,
+                  // A setup started on this device finishes at the next
+                  // sync; a second one can't be started meanwhile.
+                  label: Text(
+                    s.e2eSetupPending
+                        ? 'Turning on encryption…'
+                        : 'Turn on encryption',
+                  ),
+                  onPressed: s.e2eSetupPending ? null : _turnOnE2e,
                 ),
               ],
       ),

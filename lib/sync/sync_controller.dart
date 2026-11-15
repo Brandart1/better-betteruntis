@@ -32,10 +32,16 @@ class SyncIdentity {
     required this.host,
     required this.school,
     required this.userId,
+    this.epoch,
   });
   final String host;
   final String school;
   final String userId;
+
+  /// Random id of this incarnation of the identity on the server: it
+  /// changes when the identity is deleted (sync turned off or reset) and
+  /// created again. Null if the server didn't send one.
+  final String? epoch;
 
   @override
   String toString() => '$school · $userId · $host';
@@ -52,6 +58,7 @@ class SyncAccountState {
     this.lastSync,
     this.syncing = false,
     this.error,
+    this.e2eSetupPending = false,
   });
 
   final String accountId;
@@ -71,6 +78,10 @@ class SyncAccountState {
 
   /// Last error as user-facing text (null after a successful sync).
   final String? error;
+
+  /// Turning on E2E started on this device and finishes at the next sync
+  /// (the UI doesn't offer to turn it on again meanwhile).
+  final bool e2eSetupPending;
 
   bool get enabled => phase != SyncPhase.off;
 }
@@ -160,6 +171,11 @@ abstract class SyncController extends Notifier<Map<String, SyncAccountState>> {
 
   /// Creates a new recovery code (the old one stops working).
   Future<String> regenerateRecoveryCode(String accountId);
+
+  /// The user confirmed saving the recovery code returned by [enable],
+  /// [enableE2e] or [regenerateRecoveryCode] ("I saved it"). Until then the
+  /// engine keeps reminding that the code may not be known.
+  Future<void> acknowledgeRecoveryCode(String accountId);
 }
 
 /// The app-wide sync controller. The real engine is installed by overriding
@@ -210,4 +226,6 @@ class UnavailableSyncController extends SyncController {
   @override
   Future<String> regenerateRecoveryCode(String accountId) async =>
       _unavailable();
+  @override
+  Future<void> acknowledgeRecoveryCode(String accountId) async {}
 }

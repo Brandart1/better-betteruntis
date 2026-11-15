@@ -82,7 +82,7 @@
 ///
 /// Headers are accepted only with `version == 1`, `alg == "argon2id"`,
 /// a 43-character `authHash`, a 16-byte salt and KDF parameters at least the defaults (m ≥ 19456,
-/// t ≥ 2, p ≥ 1) and at most m ≤ 262144 (256 MiB), t ≤ 16, p ≤ 16. Weaker
+/// t ≥ 2, p ≥ 1) and at most m ≤ 65536 (64 MiB), t ≤ 8, p ≤ 4. Weaker
 /// parameters are refused (a malicious server must not be able to downgrade
 /// new devices); absurdly high ones are refused so a server can't freeze the
 /// app. Violations throw [E2eUnsupported]. The server enforces the same
@@ -123,14 +123,14 @@ const int e2eDefaultIterations = 2;
 /// Default (and minimum accepted) Argon2id parallelism.
 const int e2eDefaultParallelism = 1;
 
-/// Maximum accepted Argon2id memory in KiB (256 MiB).
-const int e2eMaxMemoryKiB = 262144;
+/// Maximum accepted Argon2id memory in KiB (64 MiB).
+const int e2eMaxMemoryKiB = 65536;
 
 /// Maximum accepted Argon2id iterations.
-const int e2eMaxIterations = 16;
+const int e2eMaxIterations = 8;
 
 /// Maximum accepted Argon2id parallelism.
-const int e2eMaxParallelism = 16;
+const int e2eMaxParallelism = 4;
 
 /// Minimum passphrase length (Unicode code points) for new passphrases.
 const int e2eMinPassphraseLength = 8;

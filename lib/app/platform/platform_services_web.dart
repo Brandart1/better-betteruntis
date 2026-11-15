@@ -22,10 +22,7 @@ const bool supportsDirectDownload = true;
 
 /// Saves [bytes] via a temporary blob link (the browser's download prompt).
 Future<void> downloadFile(String name, String mimeType, Uint8List bytes) async {
-  final blob = web.Blob(
-    [bytes.toJS].toJS,
-    web.BlobPropertyBag(type: mimeType),
-  );
+  final blob = web.Blob([bytes.toJS].toJS, web.BlobPropertyBag(type: mimeType));
   final url = web.URL.createObjectURL(blob);
   final a = web.HTMLAnchorElement()
     ..href = url
@@ -57,17 +54,48 @@ class LocalStorageSettingsStore implements SettingsStore {
 
   final _values = <String, Object?>{};
 
+  /// Current contents of localStorage (another tab may have written since
+  /// this one loaded), or null if it can't be read.
+  Map<String, Object?>? _fresh() {
+    try {
+      final raw = web.window.localStorage.getItem(_settingsKey);
+      final decoded = raw == null ? null : jsonDecode(raw);
+      if (decoded is Map) {
+        return {for (final e in decoded.entries) '${e.key}': e.value};
+      }
+      return raw == null ? <String, Object?>{} : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   Object? peek(String key) => _values[key];
 
+  /// Re-reads localStorage so changes from other tabs are seen (e.g. the
+  /// sync state).
   @override
-  Future<Object?> read(String key) async => _values[key];
+  Future<Object?> read(String key) async {
+    final fresh = _fresh();
+    if (fresh != null) {
+      if (fresh.containsKey(key)) {
+        _values[key] = fresh[key];
+      } else {
+        _values.remove(key);
+      }
+    }
+    return _values[key];
+  }
 
+  /// Writes only [key] into the current localStorage contents, so other
+  /// tabs' changes to other keys aren't overwritten with stale values.
   @override
   Future<void> write(String key, Object? value) async {
     _values[key] = value;
     try {
-      web.window.localStorage.setItem(_settingsKey, jsonEncode(_values));
+      final merged = _fresh() ?? {..._values};
+      merged[key] = value;
+      web.window.localStorage.setItem(_settingsKey, jsonEncode(merged));
     } catch (_) {
       // Quota or private mode: keep in memory only.
     }

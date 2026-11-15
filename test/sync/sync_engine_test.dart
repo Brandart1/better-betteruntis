@@ -19,12 +19,18 @@ class _Api implements UntisApi {
   /// Simulates WebUntis answering for another user.
   String? user;
 
+  /// Thrown by the WebUntis login when set.
+  Object? error;
+
   @override
   Future<String> restAuthToken({
     required String host,
     required String school,
     required UntisCredentials auth,
-  }) async => 'untis:${user ?? auth.username}';
+  }) async {
+    if (error case final e?) throw e;
+    return 'untis:${user ?? auth.username}';
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -85,6 +91,7 @@ class Device {
             sleep: (d) async {
               slept.add(d);
               server.resetWriteWindow();
+              onSleep?.call();
             },
           ),
         ),
@@ -98,6 +105,9 @@ class Device {
   final String syncUrl;
   final api = _Api();
   final slept = <Duration>[];
+
+  /// Called during each rate-limit wait.
+  void Function()? onSleep;
   final MemorySettingsStore store;
   final MemorySecretStore secrets;
   final FakeDevice adapter;
@@ -121,8 +131,19 @@ class Device {
   };
 
   Future<SyncAccountState> sync() => engine.syncNow(accountId);
-  Future<SyncEnableResult> enable([String? passphrase]) =>
-      engine.enable(accountId, SyncEnableOptions(passphrase: passphrase));
+
+  /// Turns sync on and waits for the follow-up upload.
+  Future<SyncEnableResult> enable([String? passphrase]) async {
+    final r = await engine.enable(
+      accountId,
+      SyncEnableOptions(passphrase: passphrase),
+    );
+    await idle();
+    return r;
+  }
+
+  /// Waits until no operation or (follow-up) sync runs.
+  Future<void> idle() => engine.whenIdle(accountId);
 
   Map<String, LessonNote> get all => c.read(lessonNotesProvider);
 
@@ -299,6 +320,7 @@ void main() {
     await b.sync();
 
     final r = await a.engine.enableE2e('acc1', 'first passphrase');
+    await a.idle();
     expect(r.state.e2e, isTrue);
     expect(r.recoveryCode, isNotNull);
     expect(
@@ -416,14 +438,21 @@ void main() {
       expect(a.secrets.values, isEmpty);
       expect(a.store.values[SyncEngine.storeKey], isEmpty);
 
-      // b signs in again, sees the reset and stops without uploading.
+      // b signs in again, gets another epoch of the identity and stops
+      // without uploading (C1/H1).
       final s = await b.sync();
       expect(s.phase, SyncPhase.signedOut);
-      expect(s.error, contains('turned off or reset on another device'));
+      expect(
+        s.error,
+        contains('Sync was turned off or reset on another device'),
+      );
       expect(b.live, {'1': 'keep me'});
+      // Only its own fresh session is deleted, never the identity (H3).
       expect(server.sessions, isEmpty);
-      // The empty account the re-login created is removed again.
-      expect(_ident(server), isNull);
+      expect(_ident(server)!.notes, isEmpty);
+      expect(server.log.where((l) => l == 'DELETE /api/sync/account'), [
+        'DELETE /api/sync/account',
+      ]);
       expect(server.putRequests, puts);
     },
   );
@@ -523,24 +552,25 @@ void main() {
     expect(server.putRequests, before + 1);
   });
 
-  test('clock ahead: stamps are clamped and retried with the server time '
-      '(H2)', () async {
+  test('clock ahead: unsynced stamps are clamped to the server time + 4 '
+      'min and retried; edits never go below the replaced version '
+      '(H2/M4)', () async {
     final a = Device(server);
+    final b = Device(server);
     addTearDown(a.dispose);
+    addTearDown(b.dispose);
     await a.enable();
     final real = clock;
     clock = clock.add(const Duration(minutes: 10));
     a.write('1', 'from the future');
-    // Further edits on a note from the future don't run away.
+    final future = a.all[a.key('1')]!.updatedAt;
     for (var i = 0; i < 5; i++) {
       a.write('1', 'from the future $i');
     }
     clock = real;
     a.write('1', 'now');
-    expect(
-      a.all[a.key('1')]!.updatedAt,
-      lessThanOrEqualTo(clock.millisecondsSinceEpoch + 60 * 1000),
-    );
+    // Still above the version it replaced.
+    expect(a.all[a.key('1')]!.updatedAt, future + 6);
     clock = clock.add(const Duration(minutes: 10));
     a.write('2', 'ahead again');
     clock = real;
@@ -548,10 +578,29 @@ void main() {
     expect(s.phase, SyncPhase.on);
     expect(s.error, isNull);
     expect(a.notes.hasDirty('acc1'), isFalse);
+    final limit = clock.add(const Duration(minutes: 4)).millisecondsSinceEpoch;
+    expect(_ident(server)!.notes['2026-11-16|0800|1|3']!['updatedAt'], limit);
+    expect(_ident(server)!.notes['2026-11-16|0800|2|3']!['updatedAt'], limit);
+    expect(_ident(server)!.notes['2026-11-16|0800|1|3']!['text'], 'now');
+
+    // A version from a device whose clock is 4.5 minutes ahead: an edit
+    // here is stamped above it and wins.
+    await b.enable();
+    clock = real.add(const Duration(minutes: 4, seconds: 30));
+    b.write('3', 'from b');
+    await b.sync();
+    clock = real;
+    await a.sync();
+    a.write('3', 'from a');
     expect(
-      _ident(server)!.notes['2026-11-16|0800|2|3']!['updatedAt'],
-      lessThanOrEqualTo(clock.millisecondsSinceEpoch),
+      a.all[a.key('3')]!.updatedAt,
+      greaterThan(
+        _ident(server)!.notes['2026-11-16|0800|3|3']!['updatedAt']! as int,
+      ),
     );
+    expect((await a.sync()).error, isNull);
+    await b.sync();
+    expect(b.live['3'], 'from a');
   });
 
   test('clock skew that persists is reported and keeps sync on', () async {
@@ -732,8 +781,10 @@ void main() {
     expect(s.e2e, isTrue);
     expect(s.error, contains('recovery code'));
     expect(_ident(server)!.notes.values.single['blob'], isA<String>());
-    // A new code clears the hint.
+    // A new code clears the hint once the user confirms saving it.
     await b.engine.regenerateRecoveryCode('acc1');
+    expect((await b.sync()).error, contains('recovery code'));
+    await b.engine.acknowledgeRecoveryCode('acc1');
     expect((await b.sync()).error, isNull);
   });
 
@@ -756,6 +807,7 @@ void main() {
     expect(s.error, contains('encryption'));
     // Finishing it: turn on encryption again.
     await b.engine.enableE2e('acc1', 'a passphrase');
+    await b.idle();
     expect(_ident(server)!.notes.values.single['blob'], isA<String>());
   });
 
@@ -1048,6 +1100,433 @@ void main() {
     expect(_ident(server)!.notes.length, 600);
     expect(a.notes.hasDirty('acc1'), isFalse);
   });
+
+  // ------------------------------------------------------- second review
+
+  test(
+    'C1/H1: web, another tab turned sync on again after a reset (new '
+    'epoch, same identity) → stop, nothing pushed, nothing deleted',
+    () async {
+      final a = Device(server, web: true);
+      final other = Device(server);
+      final tab2 = Device(server, web: true);
+      addTearDown(a.dispose);
+      addTearDown(other.dispose);
+      addTearDown(tab2.dispose);
+      a.write('1', 'max note');
+      await a.enable();
+      final epoch = a.state.identity!.epoch;
+      expect(epoch, hasLength(22));
+      expect(a.store.values[SyncEngine.storeKey], isA<Map>());
+      // Reset on another device, then another tab turns sync on again.
+      await other.enable();
+      await other.engine.disable('acc1');
+      await tab2.enable();
+      expect(_ident(server)!.epoch, isNot(epoch));
+      a.adapter.cookie = tab2.adapter.cookie;
+      tick();
+      a.write('2', 'only here');
+      final puts = server.putRequests;
+      final sessions = server.sessions.length;
+      final s = await a.sync();
+      expect(s.phase, SyncPhase.signedOut);
+      expect(
+        s.error,
+        contains('Sync was turned off or reset on another device'),
+      );
+      expect(server.putRequests, puts);
+      // The other tab's session (the shared cookie) is not deleted.
+      expect(server.sessions.length, sessions);
+      expect(a.live, {'1': 'max note', '2': 'only here'});
+    },
+  );
+
+  test('H1: a re-login into the same epoch pulls from 0 and re-uploads what '
+      'the server lacks (e.g. after a database restore)', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    a.write('1', 'one');
+    a.write('2', 'two');
+    await a.enable();
+    // Restore to a point where note 2 didn't exist; seqs went back.
+    final ident = _ident(server)!;
+    ident.notes.remove('2026-11-16|0800|2|3');
+    ident.lastSeq = 1;
+    server.sessions.clear();
+    final writes = server.noteWrites;
+    final s = await a.sync();
+    expect(s.phase, SyncPhase.on);
+    expect(s.error, isNull);
+    expect(ident.notes.keys, contains('2026-11-16|0800|2|3'));
+    // Only the missing note was written again.
+    expect(server.noteWrites, writes + 1);
+  });
+
+  test(
+    'full push skips notes the server already has in that version',
+    () async {
+      final a = Device(server);
+      final b = Device(server);
+      addTearDown(a.dispose);
+      addTearDown(b.dispose);
+      for (var i = 0; i < 5; i++) {
+        a.write('$i', 'n$i');
+      }
+      await a.enable();
+      expect(server.noteWrites, 5);
+      final puts = server.putRequests;
+      await b.enable();
+      expect(b.live.length, 5);
+      expect(server.putRequests, puts);
+      expect(server.noteWrites, 5);
+      // Unlocking / mode changes also do a full push: nothing to write.
+      server.sessions.clear();
+      await a.sync();
+      expect(server.noteWrites, 5);
+    },
+  );
+
+  test('daily write limit: no waiting, a clear message, continues at the '
+      'next trigger', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    a.write('1', 'one');
+    a.write('2', 'two');
+    server.dailyWrites = 1;
+    final r = await a.enable();
+    expect(r.state.phase, SyncPhase.on);
+    expect(a.state.error, 'Daily sync limit reached, continues tomorrow.');
+    expect(a.slept, isEmpty);
+    expect(a.notes.hasDirty('acc1'), isTrue);
+    server.dailyWrites = 5000;
+    final s = await a.sync();
+    expect(s.error, isNull);
+    expect(_ident(server)!.notes.length, 2);
+    expect(
+      SyncClient.errorFor(429, {'error': 'daily_limit'}).kind,
+      SyncErrorKind.dailyLimit,
+    );
+  });
+
+  test('M5: a transient re-login failure keeps sync on and retries; a '
+      'definite one signs out', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    a.write('1', 'one');
+    await a.enable();
+    server.sessions.clear();
+    server.sessionStatus = 503;
+    tick();
+    a.write('2', 'two');
+    var s = await a.sync();
+    expect(s.phase, SyncPhase.on);
+    expect(s.error, contains('signing in again failed'));
+    server.sessionStatus = 429;
+    s = await a.sync();
+    expect(s.phase, SyncPhase.on);
+    server.sessionStatus = null;
+    a.api.error = const UntisException(0, 'offline');
+    s = await a.sync();
+    expect(s.phase, SyncPhase.on);
+    a.api.error = null;
+    s = await a.sync();
+    expect(s.phase, SyncPhase.on);
+    expect(s.error, isNull);
+    expect(_ident(server)!.notes.length, 2);
+
+    server.sessions.clear();
+    a.api.error = const UntisException(
+      UntisException.invalidPassword,
+      'bad credentials',
+    );
+    s = await a.sync();
+    expect(s.phase, SyncPhase.signedOut);
+    expect(a.live, {'1': 'one', '2': 'two'});
+  });
+
+  test(
+    'M5: WebUntis rejected the token at the sync server → signed out',
+    () async {
+      final a = Device(server);
+      addTearDown(a.dispose);
+      await a.enable();
+      server.sessions.clear();
+      server.sessionStatus = 401;
+      expect((await a.sync()).phase, SyncPhase.signedOut);
+    },
+  );
+
+  test('M6: enable returns the recovery code before the upload; the hint '
+      'stays until the code is acknowledged', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    a.write('1', 'one');
+    final r = await a.engine.enable(
+      'acc1',
+      const SyncEnableOptions(passphrase: 'a passphrase'),
+    );
+    expect(r.recoveryCode, isNotNull);
+    expect(r.state.e2e, isTrue);
+    // The upload runs as a follow-up.
+    expect(_ident(server)!.notes, isEmpty);
+    await a.idle();
+    expect(_ident(server)!.notes.values.single['blob'], isA<String>());
+    // Killed before "I saved it": reminded.
+    expect(a.state.error, contains('recovery code'));
+    await a.engine.acknowledgeRecoveryCode('acc1');
+    expect(a.state.error, isNull);
+    expect((await a.sync()).error, isNull);
+    // Persisted.
+    final st = (a.store.values[SyncEngine.storeKey]! as Map)['acc1'] as Map;
+    expect(st.containsKey('recoveryUnseen'), isFalse);
+  });
+
+  test('M9: while a setup is pending, enableE2e finishes it first', () async {
+    final a = Device(server);
+    final b = Device(server);
+    addTearDown(a.dispose);
+    addTearDown(b.dispose);
+    a.write('1', 'secret');
+    server.loseAnswer.addAll({'PUT /api/sync/e2e', 'GET /api/sync/e2e'});
+    await expectLater(a.enable('a passphrase'), throwsA(isA<SyncException>()));
+    expect(a.state.e2eSetupPending, isTrue);
+    final r = await a.engine.enableE2e('acc1', 'other passphrase');
+    await a.idle();
+    expect(r.state.e2e, isTrue);
+    expect(r.recoveryCode, isNull);
+    expect(a.state.e2eSetupPending, isFalse);
+    // The first passphrase is the one in use; the code is flagged.
+    expect(a.state.error, contains('recovery code'));
+    await b.enable();
+    await b.engine.unlock('acc1', 'a passphrase');
+    expect(b.live, {'1': 'secret'});
+  });
+
+  test(
+    'M7: a user operation cancels a sync waiting for the rate limit',
+    () async {
+      final a = Device(server);
+      addTearDown(a.dispose);
+      for (var i = 0; i < 600; i++) {
+        a.write('$i', 'n$i');
+      }
+      server.writesPerWindow = 1;
+      Future<void>? off;
+      a.onSleep = () => off ??= a.engine.disable('acc1');
+      await a.engine.enable('acc1', const SyncEnableOptions());
+      await a.idle();
+      await off;
+      expect(a.slept, hasLength(1));
+      expect(server.putRequests, 1);
+      expect(a.state.phase, SyncPhase.off);
+      expect(_ident(server), isNull);
+    },
+  );
+
+  test('M8: a failed notes write does not advance lastSeq', () async {
+    final store = _FailingNotesStore();
+    final a = Device(server, store: store);
+    final b = Device(server);
+    addTearDown(a.dispose);
+    addTearDown(b.dispose);
+    await a.enable();
+    await b.enable();
+    b.write('1', 'from b');
+    await b.sync();
+    int seq() =>
+        ((store.values[SyncEngine.storeKey]! as Map)['acc1'] as Map)['lastSeq']
+            as int;
+    final before = seq();
+    store.failNotes = true;
+    final s = await a.sync();
+    expect(s.error, contains('could not be saved'));
+    expect(seq(), before);
+    store.failNotes = false;
+    expect((await a.sync()).error, isNull);
+    expect(seq(), greaterThan(before));
+    expect(
+      (store.values[LessonNotesNotifier.storeKey]! as Map).keys,
+      contains(a.key('1')),
+    );
+  });
+
+  test(
+    '10: saving merges per account (another engine on the same store)',
+    () async {
+      final store = MemorySettingsStore();
+      final secrets = MemorySecretStore();
+      final one = Device(server, store: store, secrets: secrets);
+      final two = Device(
+        server,
+        accountId: 'acc2',
+        user: 'moritz',
+        store: store,
+        secrets: secrets,
+      );
+      addTearDown(one.dispose);
+      addTearDown(two.dispose);
+      await one.enable();
+      await two.enable(); // its in-memory state doesn't know acc1
+      final st = store.values[SyncEngine.storeKey]! as Map;
+      expect(st.keys, unorderedEquals(['acc1', 'acc2']));
+    },
+  );
+
+  test('10: web, another tab turned sync off → this tab re-reads it', () async {
+    final store = MemorySettingsStore();
+    final secrets = MemorySecretStore();
+    final tab1 = Device(server, web: true, store: store, secrets: secrets);
+    await tab1.enable();
+    final tab2 = Device(server, web: true, store: store, secrets: secrets);
+    tab2.adapter.cookie = tab1.adapter.cookie;
+    addTearDown(tab1.dispose);
+    addTearDown(tab2.dispose);
+    expect(tab2.state.phase, SyncPhase.on);
+    await tab1.engine.disable('acc1');
+    final requests = server.log.length;
+    final s = await tab2.sync();
+    expect(s.phase, SyncPhase.off);
+    expect(server.log.length, requests);
+    expect(store.values[SyncEngine.storeKey], isEmpty);
+  });
+
+  test('11: E2E turned off elsewhere clears a stale setup intent', () async {
+    final a = Device(server);
+    final b = Device(server);
+    addTearDown(b.dispose);
+    await a.enable('a passphrase');
+    await b.enable();
+    await b.engine.unlock('acc1', 'a passphrase');
+    final st = Map<String, Object?>.from(
+      a.store.values[SyncEngine.storeKey]! as Map,
+    );
+    st['acc1'] = {...(st['acc1']! as Map), 'e2ePending': true};
+    a.store.values[SyncEngine.storeKey] = st;
+    a.dispose();
+    final a2 = Device(server, store: a.store, secrets: a.secrets);
+    addTearDown(a2.dispose);
+    await b.engine.disableE2e('acc1');
+    tick();
+    a2.write('1', 'plain now');
+    final s = await a2.sync();
+    expect(s.e2e, isFalse);
+    expect(s.error, isNull);
+    expect(_ident(server)!.notes['2026-11-16|0800|1|3']!['text'], 'plain now');
+  });
+
+  test('12: E2E turned off between the login and GET /e2e: enable with a '
+      'passphrase sets it up', () async {
+    final a = Device(server);
+    final b = Device(server);
+    addTearDown(a.dispose);
+    addTearDown(b.dispose);
+    await b.enable('b passphrase');
+    a.write('1', 'secret');
+    server.onHandled = (r) {
+      if (r == 'POST /api/sync/session') {
+        _ident(server)!
+          ..header = null
+          ..notes.clear();
+        server.onHandled = null;
+      }
+    };
+    final r = await a.enable('a passphrase');
+    expect(r.state.e2e, isTrue);
+    expect(r.recoveryCode, isNotNull);
+    expect(_ident(server)!.notes.values.single['blob'], isA<String>());
+  });
+
+  test('14: a note the server keeps an unreadable newer version of is not '
+      're-sent until it changes; other notes still go', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    a.write('1', 'one');
+    await a.enable('a passphrase');
+    tick();
+    a.write('1', 'edited');
+    final at = a.all[a.key('1')]!.updatedAt;
+    // The server's version is newer and can't be read (its stamp doesn't
+    // match the blob).
+    final n = _ident(server)!.notes.values.single;
+    n['updatedAt'] = at + 60000;
+    n['seq'] = ++_ident(server)!.lastSeq;
+    final puts = server.putRequests;
+    var s = await a.sync();
+    expect(s.error, contains('could not be synced'));
+    s = await a.sync();
+    expect(server.putRequests, puts);
+    expect(a.notes.hasDirty('acc1'), isTrue);
+    // Normal changes still go.
+    tick();
+    a.write('2', 'two');
+    s = await a.sync();
+    expect(server.putRequests, puts + 1);
+    expect(_ident(server)!.notes.length, 2);
+    // Changing the note sends it again (the server keeps its newer one).
+    tick();
+    a.write('1', 'again');
+    await a.sync();
+    expect(server.putRequests, puts + 2);
+    await a.sync();
+    expect(server.putRequests, puts + 2);
+  });
+
+  test('H3: disable never deletes an identity of another epoch', () async {
+    final a = Device(server);
+    final c = Device(server);
+    final d = Device(server);
+    addTearDown(a.dispose);
+    addTearDown(c.dispose);
+    addTearDown(d.dispose);
+    a.write('1', 'one');
+    await a.enable();
+    await c.enable();
+    await c.engine.disable('acc1');
+    d.write('2', 'new start');
+    await d.enable();
+    await expectLater(
+      a.engine.disable('acc1'),
+      throwsA(
+        isA<SyncException>().having(
+          (e) => e.message,
+          'message',
+          contains('nothing was deleted'),
+        ),
+      ),
+    );
+    expect(a.state.phase, SyncPhase.off);
+    expect(_ident(server)!.notes.keys, ['2026-11-16|0800|2|3']);
+    expect(d.state.phase, SyncPhase.on);
+  });
+
+  test('503 busy on PUT /notes is retried once', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    await a.enable();
+    server.busyPuts = 1;
+    a.write('1', 'one');
+    expect((await a.sync()).error, isNull);
+    expect(a.slept, [const Duration(seconds: 5)]);
+    expect(_ident(server)!.notes.length, 1);
+    server.busyPuts = 2;
+    tick();
+    a.write('1', 'two');
+    expect((await a.sync()).error, isNotNull);
+    expect(a.notes.hasDirty('acc1'), isTrue);
+  });
+
+  test('client: epoch from identity objects and the /e2e header', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    await a.enable();
+    final client = a.c.read(syncClientProvider);
+    final token = a.secrets.values['sync-token|acc1'];
+    final epoch = _ident(server)!.epoch;
+    expect((await client.getNotes(token, 0)).identity!.epoch, epoch);
+    expect((await client.getE2eState(token)).epoch, epoch);
+    expect((await client.getE2eState(token)).header, isNull);
+    expect(a.state.identity!.epoch, epoch);
+  });
 }
 
 class _ThrowingSecrets extends MemorySecretStore {
@@ -1071,6 +1550,18 @@ class _RecordingStore extends MemorySettingsStore {
       order.add('$key:${acc is Map ? acc['lastSeq'] : 0}');
     }
     await Future<void>.delayed(Duration.zero);
+    await super.write(key, value);
+  }
+}
+
+/// Fails writes of the lesson notes while [failNotes].
+class _FailingNotesStore extends MemorySettingsStore {
+  bool failNotes = false;
+  @override
+  Future<void> write(String key, Object? value) async {
+    if (failNotes && key == LessonNotesNotifier.storeKey) {
+      throw StateError('disk full');
+    }
     await super.write(key, value);
   }
 }

@@ -153,6 +153,10 @@ class FakeSync extends SyncController {
     calls.add('regenerateRecoveryCode');
     return _code;
   }
+
+  @override
+  Future<void> acknowledgeRecoveryCode(String id) async =>
+      calls.add('acknowledgeRecoveryCode');
 }
 
 void main() {
@@ -255,6 +259,8 @@ void main() {
     await tap(tester, key('sync-recovery-saved'));
     await tap(tester, key('sync-recovery-done'));
     expect(key('sync-recovery-dialog'), findsNothing);
+    // Only "I saved it" tells the engine the code is known (M6).
+    expect(sync.calls, ['enable:$_passphrase:true', 'acknowledgeRecoveryCode']);
 
     expect(find.text('Sync is on'), findsOneWidget);
     expect(find.text('Sync account'), findsOneWidget);
@@ -379,7 +385,9 @@ void main() {
     await tap(tester, key('sync-confirm'));
     expect(sync.calls, [
       'enableE2e:$_passphrase:true',
+      'acknowledgeRecoveryCode',
       'regenerateRecoveryCode',
+      'acknowledgeRecoveryCode',
       'changePassphrase:new passphrase!',
       'disableE2e',
     ]);
@@ -441,6 +449,45 @@ void main() {
     expect(find.byType(SyncAccountSection), findsNothing);
     expect(key('sync-recovery-dialog'), findsOneWidget);
     expect(find.text(_code), findsOneWidget);
+  });
+
+  testWidgets('a pending E2E setup: "Turn on encryption" is disabled (M9)', (
+    tester,
+  ) async {
+    FakeSync.initial = {
+      'demo': const SyncAccountState(
+        accountId: 'demo',
+        phase: SyncPhase.on,
+        identity: _identity,
+        e2eSetupPending: true,
+      ),
+    };
+    final sync = await pump(tester);
+    expect(find.text('Turning on encryption…'), findsOneWidget);
+    await tap(tester, key('sync-e2e-on'));
+    expect(key('sync-passphrase-dialog'), findsNothing);
+    expect(sync.calls, isEmpty);
+  });
+
+  testWidgets('the recovery code is confirmed even if the section is gone', (
+    tester,
+  ) async {
+    FakeSync.initial = {
+      'demo': const SyncAccountState(
+        accountId: 'demo',
+        phase: SyncPhase.on,
+        identity: _identity,
+      ),
+    };
+    FakeSync.duringEnableE2e = () => repo.delete(account.id);
+    final sync = await pump(tester);
+    await tap(tester, key('sync-e2e-on'));
+    await tester.enterText(key('sync-passphrase'), _passphrase);
+    await tester.enterText(key('sync-passphrase-repeat'), _passphrase);
+    await tap(tester, key('sync-passphrase-submit'));
+    await tap(tester, key('sync-recovery-saved'));
+    await tap(tester, key('sync-recovery-done'));
+    expect(sync.calls.last, 'acknowledgeRecoveryCode');
   });
 
   testWidgets('turning off encryption says other devices switch', (

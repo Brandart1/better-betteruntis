@@ -166,6 +166,9 @@ once confirmed.
 - Clock ahead: changes are never stamped more than 60 s ahead of the
   device clock; on 400 `clock_skew` the offending notes are stamped with
   the server's `serverTime` and the upload is retried once.
+  *(Superseded by R7 below: the seq heuristic and the deletion of the
+  re-created account are gone; the epoch decides. The 60 s stamp cap is
+  gone; see R7 for the clamping rule.)*
 - Notes over 4 000 characters are skipped (counted in the sync error); the
   input field is now capped at 4 000.
 
@@ -287,3 +290,49 @@ once confirmed.
 - **Switch:** `LIMITS.maxWritesPerDay` / `maxNotesPerUser` in
   worker/src/sync/notes.ts, `KDF_BOUNDS` in e2e.ts, `COOKIE_NAME` in
   auth.ts, `ratelimits` in wrangler.jsonc.
+
+## R7. Engine, second review round (identity epoch, budget, stamps)
+
+- **Identity epoch** (server R6): stored with the identity at enable /
+  unlock / re-login. Any answer (notes, session, `/e2e` header
+  `x-bbu-identity-epoch`) with another epoch → signed out with "Sync was
+  turned off or reset on another device"; nothing is applied or pushed,
+  only the session this operation just created is deleted, **never
+  `DELETE /account`** (also `disable` refuses to delete an identity of
+  another epoch: it turns sync off locally and says nothing was deleted).
+  A re-login into the same epoch pulls from 0 and does a full push (last
+  write wins makes that safe, also after a Time Travel restore). State
+  stored without an epoch adopts the first one seen; a re-login that can't
+  be checked never switches the account to plaintext in that operation.
+- **Re-login failures:** network / 5xx / 429 (also WebUntis unreachable)
+  keep sync on with an error and retry at the next trigger; only a
+  WebUntis rejection (wrong password etc., or the server's
+  `untisRejected`), `host_not_allowed`, another identity or epoch sign out.
+- **Stamps:** an edit is always stamped above the version it replaces
+  (no cap any more; the replaced acknowledged version is kept as
+  `LessonNote.base`). On `clock_skew` only unsynced notes are clamped, to
+  `serverTime` + 4 min, never to or below `base` + 1; retried once.
+- **Daily budget:** 429 `daily_limit` is not waited for: "Daily sync limit
+  reached, continues tomorrow.", next trigger retries. Full pushes (after
+  enable / unlock / re-login / mode change) pull from 0 and send only notes
+  the server lacks or has older, so re-logins don't burn the budget. Notes
+  the server keeps a version of that this device can't read are marked
+  "unsendable" (persisted, per updatedAt) and not re-sent until they change.
+  503 `busy` on a note upload is retried once after ≤ 5 s.
+- **Recovery code:** `enable` / `enableE2e` return the code as soon as the
+  header is on the server; the full upload runs as a background follow-up
+  sync. "Your recovery code may not have been saved" is shown until the
+  recovery dialog's "I saved it" calls `acknowledgeRecoveryCode` (also after
+  `regenerateRecoveryCode`). "Turn on encryption" is disabled while a setup
+  of this device is pending; `enableE2e` finishes a pending setup first.
+- **User operations** (turn off, forget, E2E on/off, passphrase, new code)
+  cancel a background sync that waits for the rate limit; `enable` and
+  `unlock` sync in the foreground (no waits) and leave a rate-limited rest
+  to a background follow-up.
+- **Web tabs:** each operation re-reads the persisted state of its account
+  first and saving replaces only that account's entry.
+  `LocalStorageSettingsStore` (lib/app/platform/platform_services_web.dart)
+  now re-reads localStorage on `read` and merges writes per key, so other
+  tabs' changes are seen and not overwritten (two tabs writing the same key
+  at the same moment: last one wins).
+- **Switch:** `_clampLead` / `_resetMessage` in lib/sync/sync_engine.dart.

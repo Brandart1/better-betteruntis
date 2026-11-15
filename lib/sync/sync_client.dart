@@ -2,7 +2,7 @@
 /// (worker/src/sync/, docs/SYNC-PLAN.md).
 ///
 /// Native apps authenticate with `Authorization: Bearer <token>`; the web
-/// app (served by the same Worker) uses the HttpOnly `bbu_sync` cookie that
+/// app (served by the same Worker) uses the HttpOnly `__Host-bbu_sync` cookie that
 /// `POST /api/sync/session` sets. Every request carries `X-BBU-Sync: 1`
 /// (CSRF rule for cookie requests; harmless with a bearer token).
 library;
@@ -36,6 +36,10 @@ enum SyncErrorKind {
   /// The WebUntis host isn't allowed by the server.
   hostNotAllowed,
   rateLimited,
+
+  /// 429 daily_limit: the identity's note writes for today (UTC) are used
+  /// up; sync continues tomorrow (not worth waiting for).
+  dailyLimit,
   clockSkew,
 
   /// 413: too many notes, request too large.
@@ -67,9 +71,14 @@ class SyncApiException implements Exception {
     this.status,
     this.serverTime,
     this.retryAfter,
+    this.identityEpoch,
   });
   final SyncErrorKind kind;
   final String message;
+
+  /// The identity epoch the server reported with this error (header
+  /// `x-bbu-identity-epoch` or `identity.epoch` in the body), if any.
+  final String? identityEpoch;
 
   /// The server's clock (ms since the epoch) of a `clock_skew` answer.
   final int? serverTime;
@@ -146,6 +155,26 @@ class RemoteNote {
   }
 }
 
+/// The `identity` object of an answer (`{host, school, userId, epoch}`).
+SyncIdentity? parseSyncIdentity(Object? id, {String? host, String? school}) {
+  if (id is! Map) return null;
+  final epoch = id['epoch'];
+  return SyncIdentity(
+    host: '${id['host'] ?? host ?? ''}',
+    school: '${id['school'] ?? school ?? ''}',
+    userId: '${id['userId'] ?? ''}',
+    epoch: epoch is String && epoch.isNotEmpty ? epoch : null,
+  );
+}
+
+/// Answer of `GET /api/sync/e2e`: the header (null: E2E not enabled) and
+/// the identity epoch the server answered for (null if not sent).
+class E2eState {
+  const E2eState(this.header, this.epoch);
+  final E2eHeader? header;
+  final String? epoch;
+}
+
 /// Answer of `POST /api/sync/session`.
 class SyncSession {
   const SyncSession({
@@ -215,7 +244,11 @@ class SyncClient {
     return '$base$path$q';
   }
 
-  Future<(int, Object?)> _send(
+  /// Response header with the identity epoch (`GET /e2e` may carry it
+  /// there instead of in the body).
+  static const epochHeader = 'x-bbu-identity-epoch';
+
+  Future<(int, Object?, String?)> _send(
     String method,
     String path, {
     String? token,
@@ -256,13 +289,15 @@ class SyncClient {
         json = null;
       }
     }
-    if (status >= 200 && status < 300) return (status, json);
+    final epoch = resp.headers.value(epochHeader);
+    if (status >= 200 && status < 300) return (status, json, epoch);
     final retry = int.tryParse(resp.headers.value('retry-after') ?? '');
     throw errorFor(
       status,
       json,
       login: path == '/api/sync/session',
       retryAfter: retry == null ? null : Duration(seconds: retry),
+      identityEpoch: epoch,
     );
   }
 
@@ -272,11 +307,17 @@ class SyncClient {
     Object? json, {
     bool login = false,
     Duration? retryAfter,
+    String? identityEpoch,
   }) {
     final code = json is Map && json['error'] is String
         ? json['error'] as String
         : null;
     final st = json is Map ? json['serverTime'] : null;
+    final epoch =
+        (identityEpoch != null && identityEpoch.isNotEmpty
+            ? identityEpoch
+            : null) ??
+        (json is Map ? parseSyncIdentity(json['identity'])?.epoch : null);
     SyncApiException e(SyncErrorKind k, String m) => SyncApiException(
       k,
       m,
@@ -284,6 +325,7 @@ class SyncClient {
       status: status,
       serverTime: st is num ? st.toInt() : null,
       retryAfter: retryAfter,
+      identityEpoch: epoch,
     );
     switch ((status, code)) {
       case (401, _) when login:
@@ -305,6 +347,11 @@ class SyncClient {
           SyncErrorKind.hostNotAllowed,
           'Sync is not available for this WebUntis server.',
         );
+      case (429, 'daily_limit'):
+        return e(
+          SyncErrorKind.dailyLimit,
+          'Daily sync limit reached, continues tomorrow.',
+        );
       case (429, _):
         return e(
           SyncErrorKind.rateLimited,
@@ -319,7 +366,7 @@ class SyncClient {
       case (413, 'too_many_notes'):
         return e(
           SyncErrorKind.quota,
-          'Too many notes to sync (at most 20 000 per account).',
+          'Too many notes to sync (at most 5 000 per account).',
         );
       case (413, 'storage_quota'):
         return e(
@@ -378,7 +425,7 @@ class SyncClient {
     required String school,
     required String untisToken,
   }) async {
-    final (_, j) = await _send(
+    final (_, j, _) = await _send(
       'POST',
       '/api/sync/session',
       body: {'host': host, 'school': school, 'untisToken': untisToken},
@@ -397,11 +444,7 @@ class SyncClient {
           : exp is num
           ? DateTime.fromMillisecondsSinceEpoch(exp.toInt(), isUtc: true)
           : null,
-      identity: SyncIdentity(
-        host: '${id['host'] ?? host}',
-        school: '${id['school'] ?? school}',
-        userId: '${id['userId'] ?? ''}',
-      ),
+      identity: parseSyncIdentity(id, host: host, school: school)!,
       e2e: j['e2e'] == true,
     );
   }
@@ -421,19 +464,13 @@ class SyncClient {
       latestSeq: latest is num ? latest.toInt() : 0,
       more: j['more'] == true,
       e2e: e2e is bool ? e2e : null,
-      identity: id is Map
-          ? SyncIdentity(
-              host: '${id['host'] ?? ''}',
-              school: '${id['school'] ?? ''}',
-              userId: '${id['userId'] ?? ''}',
-            )
-          : null,
+      identity: parseSyncIdentity(id),
     );
   }
 
   /// `GET /api/sync/notes?since=` (one page).
   Future<NotesPage> getNotes(String? token, int since) async {
-    final (_, j) = await _send(
+    final (_, j, _) = await _send(
       'GET',
       '/api/sync/notes',
       token: token,
@@ -445,7 +482,7 @@ class SyncClient {
   /// `PUT /api/sync/notes` (one batch; see [batches]). Returns the stored
   /// version of every note.
   Future<NotesPage> putNotes(String? token, List<RemoteNote> notes) async {
-    final (_, j) = await _send(
+    final (_, j, _) = await _send(
       'PUT',
       '/api/sync/notes',
       token: token,
@@ -479,12 +516,26 @@ class SyncClient {
 
   /// `GET /api/sync/e2e`; null if E2E isn't set up (404 `e2e_not_enabled`;
   /// any other error is thrown).
-  Future<E2eHeader?> getE2e(String? token) async {
+  Future<E2eHeader?> getE2e(String? token) async =>
+      (await getE2eState(token)).header;
+
+  /// `GET /api/sync/e2e` with the identity epoch. Accepts the header as
+  /// the body, or `{header, identity}`; the epoch comes from
+  /// `identity.epoch` or the `x-bbu-identity-epoch` response header.
+  Future<E2eState> getE2eState(String? token) async {
     try {
-      final (_, j) = await _send('GET', '/api/sync/e2e', token: token);
-      return E2eHeader.fromJson(j);
+      final (_, j, epochHdr) = await _send(
+        'GET',
+        '/api/sync/e2e',
+        token: token,
+      );
+      final wrapped = j is Map && j['header'] is Map;
+      final epoch =
+          (wrapped ? parseSyncIdentity(j['identity'])?.epoch : null) ??
+          (epochHdr != null && epochHdr.isNotEmpty ? epochHdr : null);
+      return E2eState(E2eHeader.fromJson(wrapped ? j['header'] : j), epoch);
     } on SyncApiException catch (e) {
-      if (e.code == 'e2e_not_enabled') return null;
+      if (e.code == 'e2e_not_enabled') return E2eState(null, e.identityEpoch);
       rethrow;
     } on E2eException {
       throw const SyncApiException(
@@ -499,32 +550,47 @@ class SyncClient {
 
   /// `PUT /api/sync/e2e` (create once; also deletes the plaintext notes on
   /// the server). Throws [SyncErrorKind.e2eExists] if a header exists.
-  Future<void> putE2e(String? token, E2eHeader header) async {
-    await _send('PUT', '/api/sync/e2e', token: token, body: header.toJson());
+  /// Returns the identity epoch of the answer (null if not sent).
+  Future<String?> putE2e(String? token, E2eHeader header) async {
+    final (_, _, epoch) = await _send(
+      'PUT',
+      '/api/sync/e2e',
+      token: token,
+      body: header.toJson(),
+    );
+    return epoch;
   }
 
   /// `PATCH /api/sync/e2e`: replaces the header with one for the same data
   /// key; [authKey] (`E2eKeys.authKeyB64`) proves this device has it.
   /// Throws [SyncErrorKind.e2eAuthFailed] otherwise.
-  Future<void> patchE2e(String? token, E2eHeader header, String authKey) async {
-    await _send(
+  /// Returns the identity epoch of the answer (null if not sent).
+  Future<String?> patchE2e(
+    String? token,
+    E2eHeader header,
+    String authKey,
+  ) async {
+    final (_, _, epoch) = await _send(
       'PATCH',
       '/api/sync/e2e',
       token: token,
       body: {'header': header.toJson(), 'authKey': authKey},
     );
+    return epoch;
   }
 
   /// `DELETE /api/sync/e2e`: turns E2E off (deletes the header and all
   /// notes on the server; sessions stay, other devices switch to plaintext
   /// when they see `e2e: false`).
-  Future<void> deleteE2e(String? token, String authKey) async {
-    await _send(
+  /// Returns the identity epoch of the answer (null if not sent).
+  Future<String?> deleteE2e(String? token, String authKey) async {
+    final (_, _, epoch) = await _send(
       'DELETE',
       '/api/sync/e2e',
       token: token,
       body: {'authKey': authKey},
     );
+    return epoch;
   }
 
   /// `DELETE /api/sync/account`: deletes the identity and all its data.

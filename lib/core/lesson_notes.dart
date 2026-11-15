@@ -24,10 +24,11 @@ class LessonNote {
     this.updatedAt = 0,
     this.deleted = false,
     this.dirty = false,
+    this.base,
   });
 
   /// A deleted note, kept so the deletion can be synced.
-  const LessonNote.tombstone(this.updatedAt, {this.dirty = false})
+  const LessonNote.tombstone(this.updatedAt, {this.dirty = false, this.base})
     : exam = false,
       text = '',
       deleted = true;
@@ -48,6 +49,11 @@ class LessonNote {
   /// Changed on this device and not yet acknowledged by the sync server.
   final bool dirty;
 
+  /// For a [dirty] note: [updatedAt] of the acknowledged (synced or
+  /// pre-sync) version this change replaces, if there was one. A change is
+  /// always stamped above it, also when its stamp is clamped later.
+  final int? base;
+
   bool get isEmpty => deleted || (!exam && text.trim().isEmpty);
 
   LessonNote copyWith({bool? exam, String? text}) => LessonNote(
@@ -55,6 +61,7 @@ class LessonNote {
     text: text ?? this.text,
     updatedAt: updatedAt,
     dirty: dirty,
+    base: base,
   );
 
   Map<String, Object?> toJson() => {
@@ -63,16 +70,20 @@ class LessonNote {
     if (updatedAt != 0) 'updatedAt': updatedAt,
     if (deleted) 'deleted': true,
     if (dirty) 'dirty': true,
+    if (dirty && base != null) 'base': base,
   };
 
   factory LessonNote.fromJson(Map<String, Object?> j) {
     final at = j['updatedAt'];
+    final base = j['base'];
+    final dirty = j['dirty'] == true;
     return LessonNote(
       exam: j['exam'] == true,
       text: '${j['text'] ?? ''}',
       updatedAt: at is num ? at.toInt() : 0,
       deleted: j['deleted'] == true,
-      dirty: j['dirty'] == true,
+      dirty: dirty,
+      base: dirty && base is num ? base.toInt() : null,
     );
   }
 
@@ -152,15 +163,9 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
   /// Tombstones of accounts that don't sync are dropped after this long.
   static const tombstoneMaxAge = Duration(days: 180);
 
-  /// A change is never stamped more than this far ahead of the clock, so
-  /// the "+1 over the old version" rule can't run away after a note came
-  /// from a device whose clock was ahead (the server rejects stamps more
-  /// than 5 minutes in the future).
-  static const maxStampAhead = Duration(seconds: 60);
-
   bool _changed = false;
   Future<void> _loading = Future.value();
-  Future<void> _lastWrite = Future.value();
+  Future<bool> _lastWrite = Future.value(true);
 
   @override
   Map<String, LessonNote> build() {
@@ -177,8 +182,16 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
   /// Completes once the stored notes are loaded.
   Future<void> get ready => _loading;
 
-  /// Completes once the latest change is written to the settings store.
-  Future<void> get saved => _lastWrite;
+  /// Completes once the latest change is written to the settings store:
+  /// true if it was stored, false if writing failed (the change is then
+  /// only in memory). After a failed write the current notes are written
+  /// again once.
+  Future<bool> get saved async {
+    final ok = await _lastWrite;
+    if (ok || !ref.mounted) return ok;
+    _persist(state);
+    return _lastWrite;
+  }
 
   static Map<String, LessonNote> _decode(Object? raw) {
     if (raw is! Map) return const {};
@@ -206,33 +219,42 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
   void _commit(Map<String, LessonNote> next) {
     _changed = true;
     state = next;
-    final write = ref
-        .read(settingsStoreProvider)
-        .write(storeKey, {
-          for (final e in next.entries) e.key: e.value.toJson(),
-        })
-        .catchError((_) {});
+    _persist(next);
+  }
+
+  void _persist(Map<String, LessonNote> next) {
+    Future<bool> write;
+    try {
+      write = ref
+          .read(settingsStoreProvider)
+          .write(storeKey, {
+            for (final e in next.entries) e.key: e.value.toJson(),
+          })
+          .then((_) => true, onError: (Object _) => false);
+    } catch (_) {
+      write = Future.value(false);
+    }
+    // Every write stores the whole map, so the latest one decides.
     final before = _lastWrite;
-    _lastWrite = Future.wait([before, write]).then((_) {});
+    _lastWrite = Future.wait([before, write]).then((r) => r[1]);
   }
 
   /// Sets the note of each of [keys] (all periods of a merged lesson);
   /// an empty note removes it (leaving a tombstone for sync).
   void set(Iterable<String> keys, LessonNote note) {
     final now = ref.read(lessonNotesClockProvider)().millisecondsSinceEpoch;
-    final limit = now + maxStampAhead.inMilliseconds;
     final next = {...state};
     for (final k in keys) {
       final old = next[k];
-      // A change wins over the version it replaces, but is never stamped
-      // more than [maxStampAhead] in the future.
-      final bumped = old == null || now > old.updatedAt
-          ? now
-          : old.updatedAt + 1;
-      final at = bumped > limit ? limit : bumped;
+      // A change always wins over the version it replaces (never stamped
+      // at or below it, even if that came from a clock that was ahead;
+      // [clampFuture] fixes stamps the server finds too far ahead).
+      final at = old == null || now > old.updatedAt ? now : old.updatedAt + 1;
+      // The acknowledged version this change replaces.
+      final base = old == null ? null : (old.dirty ? old.base : old.updatedAt);
       if (note.isEmpty) {
         if (old != null && !old.deleted) {
-          next[k] = LessonNote.tombstone(at, dirty: true);
+          next[k] = LessonNote.tombstone(at, dirty: true, base: base);
         }
       } else {
         next[k] = LessonNote(
@@ -240,6 +262,7 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
           text: note.text.trim(),
           updatedAt: at,
           dirty: true,
+          base: base,
         );
       }
     }
@@ -320,30 +343,44 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
     return n;
   }
 
-  /// Lowers [LessonNote.updatedAt] of notes of [accountId] stamped after
-  /// [max] (the server's time after a clock-skew rejection) to [max].
+  /// Lowers [LessonNote.updatedAt] of the unsynced ([LessonNote.dirty])
+  /// notes of [accountId] stamped after [max] (derived from the server's
+  /// time after a clock-skew rejection) to [max], but never to or below
+  /// the version a note replaces ([LessonNote.base] + 1). Acknowledged
+  /// notes are never touched (the server has exactly that version).
   /// Returns how many were changed.
   int clampFuture(String accountId, int max) {
     final prefix = '$accountId|';
     final next = {...state};
     var n = 0;
     for (final e in state.entries) {
-      if (e.value.updatedAt <= max || !e.key.startsWith(prefix)) continue;
-      next[e.key] = _restamp(e.value, max);
+      final note = e.value;
+      if (!note.dirty || note.updatedAt <= max || !e.key.startsWith(prefix)) {
+        continue;
+      }
+      final floor = note.base == null ? null : note.base! + 1;
+      final at = floor != null && floor > max ? floor : max;
+      if (at >= note.updatedAt) continue;
+      next[e.key] = _restamp(note, at);
       n++;
     }
     if (n > 0) _commit(next);
     return n;
   }
 
-  static LessonNote _restamp(LessonNote n, int at, {bool? dirty}) => n.deleted
-      ? LessonNote.tombstone(at, dirty: dirty ?? n.dirty)
-      : LessonNote(
-          exam: n.exam,
-          text: n.text,
-          updatedAt: at,
-          dirty: dirty ?? n.dirty,
-        );
+  static LessonNote _restamp(LessonNote n, int at, {bool? dirty}) {
+    final d = dirty ?? n.dirty;
+    final base = d ? n.base : null;
+    return n.deleted
+        ? LessonNote.tombstone(at, dirty: d, base: base)
+        : LessonNote(
+            exam: n.exam,
+            text: n.text,
+            updatedAt: at,
+            dirty: d,
+            base: base,
+          );
+  }
 
   static LessonNote _clean(LessonNote n) => n.deleted
       ? LessonNote.tombstone(n.updatedAt)

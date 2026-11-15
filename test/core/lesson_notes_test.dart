@@ -193,7 +193,9 @@ void main() {
     },
   );
 
-  test('set never stamps far ahead; clampFuture and stampLegacy (H2/H3)', () {
+  test('set stamps above the replaced version; clampFuture only lowers '
+      'unsynced notes, never below the replaced version; stampLegacy '
+      '(H2/M4/H3)', () {
     final now = DateTime.utc(2026, 11, 16, 10);
     final c = ProviderContainer(
       overrides: [
@@ -208,13 +210,31 @@ void main() {
     n.applyRemote({
       'a|k': LessonNote(text: 'future', updatedAt: ms + 3600 * 1000),
     });
+    final future = ms + 3600 * 1000;
     for (var i = 0; i < 3; i++) {
       n.set(['a|k'], LessonNote(text: 'edit $i'));
+      // Never at or below the version it replaces.
+      expect(c.read(lessonNotesProvider)['a|k']!.updatedAt, future + i + 1);
     }
-    expect(c.read(lessonNotesProvider)['a|k']!.updatedAt, ms + 60 * 1000);
+    expect(c.read(lessonNotesProvider)['a|k']!.base, future);
+    // Clamping can't go below the replaced version + 1.
     expect(n.clampFuture('a', ms), 1);
-    expect(c.read(lessonNotesProvider)['a|k']!.updatedAt, ms);
+    expect(c.read(lessonNotesProvider)['a|k']!.updatedAt, future + 1);
     expect(c.read(lessonNotesProvider)['a|k']!.dirty, isTrue);
+    // A new note (no replaced version) is clamped to the limit.
+    n.applyRemote({'a|j': LessonNote(text: 'synced', updatedAt: ms - 10)});
+    n.set(['a|n'], const LessonNote(text: 'new'));
+    n.set(['a|j'], const LessonNote(text: 'changed'));
+    expect(c.read(lessonNotesProvider)['a|j']!.base, ms - 10);
+    expect(n.clampFuture('a', ms - 100), 2);
+    expect(c.read(lessonNotesProvider)['a|n']!.updatedAt, ms - 100);
+    // a|j stays above the version it replaces.
+    expect(c.read(lessonNotesProvider)['a|j']!.updatedAt, ms - 9);
+    // Acknowledged notes are never clamped.
+    n.applyRemote({'a|s': LessonNote(text: 'server', updatedAt: ms + 999)});
+    expect(n.clampFuture('a', ms - 100), 0);
+    expect(c.read(lessonNotesProvider)['a|s']!.updatedAt, ms + 999);
+    expect(c.read(lessonNotesProvider)['a|s']!.dirty, isFalse);
 
     n.applyRemote({'a|old': const LessonNote(text: 'legacy')});
     expect(c.read(lessonNotesProvider)['a|old']!.updatedAt, 0);
@@ -239,4 +259,30 @@ void main() {
     n.pruneTombstones((id) => id == 'b');
     expect(c.read(lessonNotesProvider).keys, ['b|k']);
   });
+
+  test('saved reports whether the latest change was stored (M8)', () async {
+    final store = _FailingStore();
+    final c = ProviderContainer(
+      overrides: [settingsStoreProvider.overrideWithValue(store)],
+    );
+    addTearDown(c.dispose);
+    final n = c.read(lessonNotesProvider.notifier);
+    n.set(['k'], const LessonNote(text: 'x'));
+    expect(await n.saved, isTrue);
+    store.fail = true;
+    n.set(['k'], const LessonNote(text: 'y'));
+    expect(await n.saved, isFalse);
+    store.fail = false;
+    n.set(['k'], const LessonNote(text: 'z'));
+    expect(await n.saved, isTrue);
+  });
+}
+
+class _FailingStore extends MemorySettingsStore {
+  bool fail = false;
+  @override
+  Future<void> write(String key, Object? value) async {
+    if (fail) throw StateError('disk full');
+    await super.write(key, value);
+  }
 }
