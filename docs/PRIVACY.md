@@ -6,17 +6,17 @@
 > it is published. Check it against what the Worker code (`worker/`) actually
 > does at release time.
 
-Last updated: [DATE]
+Last updated: 2026-11-16
 
 **Scope:** this notice covers the BetterBetterUntis service at
-`[HOSTNAME, e.g. bbu.example.org]`: the hosted web version, its WebUntis
+`better-betteruntis.brandart1.workers.dev`: the hosted web version, its WebUntis
 relay and the optional sync. The service runs on Cloudflare Workers; there is
 no self-hosted or home server. The phone apps (Android, iOS) talk to WebUntis
 directly and only contact this service if you turn on sync.
 
 ## Who is responsible
 
-[NAME], [POSTAL ADDRESS], e-mail [CONTACT E-MAIL] ("we"), runs this service
+Arthur Brandstätter, 4040 Linz, Österreich; e-mail arthur.brandstaetter@gmail.com ("we"), runs this service
 privately and free of charge. BetterBetterUntis is an unofficial open-source
 app. It is not made by, endorsed by or affiliated with Untis GmbH or your
 school.
@@ -91,18 +91,17 @@ confirm who you are and then discards it.
   database immediately. Your devices keep their local copy.
 - **Backups:** the database (Cloudflare D1) keeps an automatic point-in-time
   history ("Time Travel") so it can be restored after an error. Deleted data
-  stays in that history for up to **[7 DAYS on the free plan / 30 DAYS on a
-  paid plan: PLACEHOLDER, pick the one that applies]** and is then gone. We
+  stays in that history for up to **7 days** (Cloudflare free plan) and is then gone. We
   only use it to restore the whole database after a fault, not to look up
-  individual users. If we ever have to restore, data you deleted in the
-  meantime is deleted again [PLACEHOLDER: describe the procedure, see
-  worker/README.md].
+  individual users. If we ever have to restore, data deleted between the
+  restore point and the restore could come back; we would announce such a
+  restore in the release notes, and turning sync off again deletes it.
 
 Please don't write sensitive personal data (e.g. health information, or
 information about other people) into notes you sync without end-to-end
 encryption.
 
-## 3. End-to-end encryption (optional)
+## 3. End-to-end encryption (optional, highly recommended)
 
 With end-to-end encryption on, your notes are encrypted on your device with a
 key that is protected by your sync passphrase (and optionally a recovery
@@ -144,10 +143,10 @@ Limits:
 
 ## 5. Children and teenagers
 
-Many users are students under 18. [PLACEHOLDER: In Austria, consent under
-Art. 8 GDPR can be given from age 14 (§ 4(4) DSG); in Germany from 16. Users
-below that age need a parent's or guardian's consent to turn sync on.] The
-sync dialog in the app asks users to confirm this. We don't knowingly collect
+Many users are students under 18. In Austria, consent under Art. 8 GDPR can
+be given from age 14 (§ 4(4) DSG) [PLACEHOLDER: confirm; other countries
+differ, e.g. 16 in Germany]. Users below that age need a parent's or
+guardian's consent to turn sync on; the sync dialog in the app says so. We don't knowingly collect
 more than described above, regardless of age.
 
 ## 6. Your rights
@@ -155,18 +154,18 @@ more than described above, regardless of age.
 You have the right to access, rectify and erase your data, to restrict or
 object to processing, to data portability, and to withdraw consent at any
 time. The quickest way to erase your sync data is to turn sync off in the
-app. For everything else, contact [CONTACT E-MAIL]. Because we store only
+app. For everything else, contact arthur.brandstaetter@gmail.com. Because we store only
 your school and a numeric WebUntis user id, we may ask for the sync identity
 shown in the app's sync settings to find your data.
 
 You can also complain to a data protection authority, e.g. the Austrian
-Datenschutzbehörde (https://www.dsb.gv.at) [PLACEHOLDER: adapt to the
-maintainer's jurisdiction].
+Datenschutzbehörde (https://www.dsb.gv.at), or the authority in the EU
+country where you live.
 
 ## 7. Changes
 
 We update this notice when the service changes. The current version is at
-[URL]; its history is in the project's repository.
+https://github.com/Brandart1/better-betteruntis/blob/main/docs/PRIVACY.md; its history is in the project's repository.
 
 ---
 

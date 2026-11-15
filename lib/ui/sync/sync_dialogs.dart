@@ -292,6 +292,12 @@ class SyncDisclaimerDialog extends StatelessWidget {
               'Turning sync off deletes them on the server. The notes on '
               'your devices stay.',
             ),
+            const SizedBox(height: 12),
+            const Text(
+              'If you are under 14, ask a parent or guardian before turning '
+              'sync on.',
+              key: ValueKey('sync-age-note'),
+            ),
             const SizedBox(height: 4),
             Align(
               alignment: AlignmentDirectional.centerStart,
