@@ -106,6 +106,17 @@ class SyncEnableResult {
   final String? recoveryCode;
 }
 
+/// Latest release page (Android/iOS apps), linked where the web version
+/// can't do something the apps can.
+const kLatestReleaseUrl =
+    'https://github.com/Brandart1/better-betteruntis/releases/latest';
+
+/// Shown when the web version refuses to sync a second account.
+const kWebSingleAccountMessage =
+    'The web version of BetterBetterUntis only supports one synced account. '
+    'To sync more accounts, use the Android or iOS app '
+    '($kLatestReleaseUrl).';
+
 /// Thrown by [SyncController] methods with a user-facing [message].
 class SyncException implements Exception {
   const SyncException(this.message, {this.wrongSecret = false});
@@ -130,6 +141,9 @@ abstract class SyncController extends Notifier<Map<String, SyncAccountState>> {
   /// URL at build time). Unavailable: the UI says so instead of offering
   /// the opt-in, and [enable] throws.
   bool get available => true;
+
+  /// Only one account can sync at a time (web version: one browser cookie).
+  bool get singleAccountOnly => false;
 
   /// Turns sync on for [accountId]: logs in to the sync server with the
   /// account's WebUntis token, optionally sets up E2E, then syncs.

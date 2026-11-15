@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models.dart';
 import '../../core/providers.dart';
@@ -256,6 +257,8 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: switch (s.phase) {
                   SyncPhase.off when !_sync.available => _unavailable(),
+                  SyncPhase.off when _otherAccountSyncs() =>
+                    _webSecondAccount(),
                   SyncPhase.off => _off(),
                   SyncPhase.on => _on(s),
                   SyncPhase.locked => _locked(s),
@@ -317,6 +320,35 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
       'are only stored on this device.',
       key: ValueKey('sync-unavailable'),
     ),
+  ];
+
+  /// Web version: another account already syncs (one browser cookie).
+  bool _otherAccountSyncs() =>
+      _sync.singleAccountOnly &&
+      ref
+          .watch(syncControllerProvider)
+          .values
+          .any((o) => o.accountId != _id && o.enabled);
+
+  List<Widget> _webSecondAccount() => [
+    _status(Icons.cloud_off, 'Sync is off'),
+    const SizedBox(height: 8),
+    const Text(
+      'The web version of BetterBetterUntis only supports one synced '
+      'account. To sync more accounts, use the Android or iOS app.',
+      key: ValueKey('sync-web-single-account'),
+    ),
+    _buttons([
+      OutlinedButton.icon(
+        key: const ValueKey('sync-get-apps'),
+        icon: const Icon(Icons.open_in_new),
+        label: const Text('Get the Android / iOS app'),
+        onPressed: () => launchUrl(
+          Uri.parse(kLatestReleaseUrl),
+          mode: LaunchMode.externalApplication,
+        ),
+      ),
+    ]),
   ];
 
   List<Widget> _off() => [

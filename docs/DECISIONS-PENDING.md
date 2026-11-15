@@ -132,7 +132,10 @@ once confirmed.
 ## 6. Web version: only one account can sync
 - **Chosen:** the browser has one sync cookie (`__Host-bbu_sync`), so on the web `enable()`
   refuses while another account syncs (otherwise notes could land on the
-  wrong identity).
+  wrong identity). The Sync screen tells the user for the other accounts:
+  "The web version of BetterBetterUntis only supports one synced account.
+  To sync more accounts, use the Android or iOS app", with a button to the
+  latest release.
 - **Alternative:** per-account bearer tokens in localStorage on the web
   (readable by page scripts, weaker than the HttpOnly cookie).
 - **Switch:** lib/sync/sync_engine.dart (web guard) + client auth mode.

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:better_betteruntis/app/app_update.dart';
 import 'package:better_betteruntis/core/providers.dart';
+import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/dev/fake_accounts.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
 import 'package:better_betteruntis/sync/sync_controller.dart';
@@ -35,6 +36,12 @@ class FakeSync extends SyncController {
 
   /// Whether this build has a sync server.
   static bool isAvailable = true;
+
+  /// Web version: only one account can sync.
+  static bool singleAccount = false;
+
+  @override
+  bool get singleAccountOnly => singleAccount;
 
   /// Runs inside enableE2e before it returns.
   static Future<void> Function()? duringEnableE2e;
@@ -166,6 +173,7 @@ void main() {
     FakeSync.initial = const {};
     FakeSync.serverHasE2e = false;
     FakeSync.isAvailable = true;
+    FakeSync.singleAccount = false;
     FakeSync.duringEnableE2e = null;
   });
 
@@ -175,6 +183,7 @@ void main() {
     WidgetTester tester, {
     Widget? home,
     Size size = const Size(900, 2400),
+    List<Account>? accounts,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -195,7 +204,7 @@ void main() {
       ProviderScope(
         overrides: [
           accountRepositoryProvider.overrideWithValue(
-            repo = InMemoryAccountRepository(initial: [account]),
+            repo = InMemoryAccountRepository(initial: accounts ?? [account]),
           ),
           appVersionProvider.overrideWith(
             (ref) async => const AppVersion('0.6.0', '1'),
@@ -563,5 +572,37 @@ void main() {
     await tester.pumpAndSettle();
     await tap(tester, key('drawer-sync'));
     expect(find.text('Sync is off'), findsOneWidget);
+  });
+
+  testWidgets('web: a second account explains the single-account limit', (
+    tester,
+  ) async {
+    final other = Account(
+      id: 'second',
+      school: account.school,
+      username: 'second.user',
+      anonymous: false,
+      displayName: 'Second User',
+    );
+    FakeSync.singleAccount = true;
+    FakeSync.initial = {
+      account.id: SyncAccountState(
+        accountId: account.id,
+        phase: SyncPhase.on,
+        identity: const SyncIdentity(
+          host: 'demo.webuntis.com',
+          school: 'demo',
+          userId: '1',
+        ),
+      ),
+    };
+    await pump(tester, accounts: [account, other]);
+    expect(
+      find.byKey(const ValueKey('sync-web-single-account')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('sync-get-apps')), findsOneWidget);
+    // Only the synced account's section offers sync actions.
+    expect(find.byKey(const ValueKey('sync-turn-on')), findsNothing);
   });
 }

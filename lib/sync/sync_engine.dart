@@ -193,6 +193,9 @@ class SyncEngine extends SyncController {
   bool get available => _client.available;
 
   @override
+  bool get singleAccountOnly => web;
+
+  @override
   Map<String, SyncAccountState> build() {
     ref.listen(lessonNotesProvider, (_, _) => _onNotesChanged());
     ref.onDispose(() => _debounceTimer?.cancel());
@@ -1392,10 +1395,7 @@ class SyncEngine extends SyncController {
     } catch (_) {}
     ids.remove(accountId);
     if (ids.isNotEmpty) {
-      throw const SyncException(
-        'In the web version sync can be on for one account at a time. '
-        'Turn it off for the other account first.',
-      );
+      throw const SyncException(kWebSingleAccountMessage);
     }
   }
 

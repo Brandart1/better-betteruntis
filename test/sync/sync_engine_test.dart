@@ -630,7 +630,7 @@ void main() {
         isA<SyncException>().having(
           (e) => e.message,
           'message',
-          contains('one account'),
+          contains('only supports one synced account'),
         ),
       ),
     );
@@ -986,7 +986,7 @@ void main() {
         isA<SyncException>().having(
           (e) => e.message,
           'message',
-          contains('one account'),
+          contains('only supports one synced account'),
         ),
       ),
     );
