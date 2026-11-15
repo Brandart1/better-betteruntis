@@ -9,3 +9,24 @@
 - Sections under it as needed: `### New`, `### Improved`, `### Fixed`,
   `### Changed`, `### Known issues`, `### Behind the scenes`.
 - The install instructions (`default.md`) are appended automatically.
+
+## In the app ("What's new")
+
+The app bundles the notes of every released version (tag-named files only:
+`vX.Y.Z.md`, `vX.Y.Z-beta.md`, `vX.Y.Z-alpha[.N].md`; not `next*.md`,
+`default.md` or this README) and shows the ones a user missed after an
+update, plus a "What's new" entry in the menu. Asset bundles can't read this
+dot-directory reliably, so the notes are copied to `assets/release_notes/`
+(with an `index.json`):
+
+    dart run tool/sync_release_notes.dart
+
+Run it whenever a release notes file is added or changed (e.g. right after
+renaming `next.md`) and commit `assets/release_notes/` together with the notes.
+`test/app/release_notes_bundle_test.dart` fails while the copy is stale, and
+the release workflow regenerates it before building. Never edit the copies.
+
+In the app, `## New in this release` and `## Install` sections are left out;
+headings, lists, **bold**, *italic*, `code` and links are rendered. Alpha
+builds show alpha, beta and stable notes; beta and stable builds skip alpha
+notes, so a beta's notes must cover everything since the previous beta.

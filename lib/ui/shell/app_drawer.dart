@@ -83,6 +83,13 @@ class AppDrawer extends StatelessWidget {
           title: const Text('Accessibility'),
           onTap: () => go('/accessibility'),
         ),
+        ListTile(
+          key: const ValueKey('drawer-whats-new'),
+          leading: const Icon(Icons.new_releases_outlined),
+          title: const Text("What's new"),
+          subtitle: const Text('Release notes'),
+          onTap: () => go('/whats-new'),
+        ),
         if (debugToolsEnabled) ...[
           const Divider(indent: 28, endIndent: 28),
           ListTile(

@@ -365,3 +365,16 @@ once confirmed.
 - **Switch:** `WebKeyRetention` in lib/sync/sync_controller.dart
   (options, default `standard`), `_expired` / `_cacheKeys` /
   `setWebKeyRetention` in lib/sync/sync_engine.dart.
+
+## Confirmed by the maintainer (2026-11-15, evening)
+- **Free Cloudflare plan** is fine (R6 budget stays).
+- **Alphas:** instead of a separate alpha database, the repository
+  variable `ALPHA_SYNC` (`on` while sync is developed in the 0.5.0 alphas;
+  remove it after 0.5.0 ships → alphas have no sync and no web preview).
+- **Identity keyed on host + school + user id** stays (keying on the tenant
+  id would let a rogue `*.webuntis.com` subdomain claim identities; cost:
+  a school moving servers starts a new, empty sync account).
+- **Web key retention:** the user chooses (R8), default 30 days.
+- **Tombstones kept 400 days (R2):** fine.
+- **Silent re-login (R7) and real-load behaviour (rate limits, preview
+  alias, CPU limits):** to be checked at the first real deployment.
