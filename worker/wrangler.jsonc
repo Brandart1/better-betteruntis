@@ -51,7 +51,7 @@
   ],
   "vars": {
     "ALLOWED_HOSTS": "webuntis.com,*.webuntis.com",
-    "PUBLIC_ORIGIN": ""
+    "PUBLIC_ORIGIN": "https://better-betteruntis.brandart1.workers.dev"
   },
   "observability": {
     // Invocation logs stay off: they could contain request URLs.

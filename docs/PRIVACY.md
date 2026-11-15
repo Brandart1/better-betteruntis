@@ -35,7 +35,7 @@ school.
 ## 1. Web version and WebUntis relay
 
 Browsers can't talk to WebUntis directly, so the web version (served from
-`[HOSTNAME]`) sends its WebUntis requests to `[HOSTNAME]/proxy/...`, which
+`better-betteruntis.brandart1.workers.dev`) sends its WebUntis requests to `better-betteruntis.brandart1.workers.dev/proxy/...`, which
 forwards them to your school's WebUntis server (only `*.webuntis.com`) and
 returns the answer.
 
@@ -127,14 +127,14 @@ Limits:
 - **Cloudflare, Inc.** (101 Townsend St, San Francisco, CA 94107, USA) runs
   the service for us as our processor: Cloudflare Workers (web version,
   relay, sync), Cloudflare D1 (sync database) and its network (TLS, DDoS
-  protection). All traffic to `[HOSTNAME]` passes through Cloudflare, which
+  protection). All traffic to `better-betteruntis.brandart1.workers.dev` passes through Cloudflare, which
   processes your IP address and request data under its Data Processing
   Addendum: https://www.cloudflare.com/cloudflare-customer-dpa/ . Cloudflare's
   privacy policy: https://www.cloudflare.com/privacypolicy/
 - **Where data is processed:** Cloudflare handles requests in the data centre
   closest to you, which can be outside the EU. The D1 database is stored in
-  [PLACEHOLDER: the location chosen when creating it, e.g. Western Europe
-  (location hint "weur") / EU jurisdiction]. Transfers outside the EU/EEA are
+  the EU (Cloudflare D1 "EU jurisdiction": the data is stored and processed
+  only inside the EU). Transfers outside the EU/EEA are
   based on [PLACEHOLDER: e.g. the EU-US Data Privacy Framework, under which
   Cloudflare is certified, and the Standard Contractual Clauses in its DPA].
 - **GitHub** (source code and app downloads) is not part of this service and

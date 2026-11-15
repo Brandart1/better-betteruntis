@@ -95,7 +95,7 @@ timetables**.
 | --- | --- |
 | **Android** | Download the `.apk` from the [latest release](https://github.com/Brandart1/better-betteruntis/releases) and install it. |
 | **iOS / iPadOS** | The release contains an **unsigned** `.ipa`. Sign it yourself with [Sideloadly](https://sideloadly.io), [AltStore](https://altstore.io) or your own developer account. With a free Apple ID, apps have to be re-signed every 7 days. |
-| **Web** | Open `[PRODUCTION URL]` in your browser. |
+| **Web** | Open `https://better-betteruntis.brandart1.workers.dev` in your browser. |
 
 ### 🌐 The web version
 

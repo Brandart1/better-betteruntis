@@ -22,7 +22,7 @@ Deployment, local development, rollback and database operations are in
 
 ## Which version
 
-- **Production** (beta and stable releases): `[PRODUCTION URL]`.
+- **Production** (beta and stable releases): `https://better-betteruntis.brandart1.workers.dev`.
 - **Alpha preview**: every alpha release is uploaded under the preview alias
   `alpha`, `https://alpha-better-betteruntis.<subdomain>.workers.dev`. It
   shares the sync database with production.
