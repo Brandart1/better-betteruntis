@@ -19,6 +19,12 @@ env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
   # alpha builds keep the Debug screen; beta/stable hide it (lib/core/build_channel.dart).
   BBU_CHANNEL: ${{ contains(github.event.inputs.tag || github.ref_name, '-alpha') && 'alpha' || (contains(github.event.inputs.tag || github.ref_name, '-beta') && 'beta' || 'stable') }}
+  # Sync in alpha builds only while the repository variable ALPHA_SYNC is
+  # "on" (while sync itself is being developed). Otherwise alpha apps are
+  # built without a sync server ("Sync isn't available in this build") and
+  # alphas don't deploy the web preview, so alpha bugs can't touch the
+  # production sync database.
+  BBU_SYNC_URL: ${{ (!contains(github.event.inputs.tag || github.ref_name, '-alpha') || vars.ALPHA_SYNC == 'on') && vars.BBU_SYNC_URL || '' }}
 
 jobs:
   version:
@@ -88,7 +94,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: flutter build apk --release --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }} --dart-define=BBU_SYNC_URL=${{ vars.BBU_SYNC_URL }}
+        run: flutter build apk --release --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }} --dart-define=BBU_SYNC_URL=${{ env.BBU_SYNC_URL }}
       - name: Verify release signature
         run: |
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
@@ -115,7 +121,7 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
-      - run: flutter build ios --release --no-codesign --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }} --dart-define=BBU_SYNC_URL=${{ vars.BBU_SYNC_URL }}
+      - run: flutter build ios --release --no-codesign --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }} --dart-define=BBU_SYNC_URL=${{ env.BBU_SYNC_URL }}
       - name: Package IPA
         run: |
           mkdir -p Payload
@@ -141,7 +147,7 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
-      - run: flutter build web --release --no-web-resources-cdn --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }} --dart-define=BBU_SYNC_URL=${{ vars.BBU_SYNC_URL }}
+      - run: flutter build web --release --no-web-resources-cdn --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }} --dart-define=BBU_SYNC_URL=${{ env.BBU_SYNC_URL }}
       # Not a release asset (the web version is hosted on Cloudflare, see
       # deploy-worker); only handed to the deploy job.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -166,12 +172,16 @@ jobs:
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ALPHA_SYNC: ${{ vars.ALPHA_SYNC }}
         run: |
           if [ "${{ github.event_name }}" != push ]; then
             echo "Manual rebuild: not deploying to Cloudflare."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           elif [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ]; then
             echo "::notice::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set: skipping the Worker deploy."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [ "$BBU_CHANNEL" = alpha ] && [ "$ALPHA_SYNC" != on ]; then
+            echo "::notice::Alpha release and ALPHA_SYNC is not 'on': no web preview deploy."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=true" >> "$GITHUB_OUTPUT"

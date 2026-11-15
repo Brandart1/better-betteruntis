@@ -182,6 +182,17 @@ Schema: `migrations/0001_init.sql`.
      writes it into `wrangler.jsonc` in place of the placeholder
      `00000000-…`; the repository keeps the placeholder so local dev and
      tests never touch the real database.
+   - **variable** `BBU_SYNC_URL`: the Worker's public URL (e.g.
+     `https://better-betteruntis.<subdomain>.workers.dev` or your custom
+     domain). The Android/iOS builds sync with it; without it they show
+     "Sync isn't available in this build". (The web version always uses its
+     own origin.)
+   - **variable** `ALPHA_SYNC`: `on` lets alpha releases deploy the web
+     preview and build the apps with sync. Keep it `on` only while sync
+     itself is being developed (0.5.0 alphas); afterwards remove it (or set
+     anything else): alphas then have no sync and no web preview, so alpha
+     bugs can't reach the production sync database. Betas and stable
+     releases are unaffected.
 6. **First deploy** (once, by hand, so the Worker exists before an alpha
    tries to upload a preview version to it):
 
