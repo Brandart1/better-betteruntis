@@ -58,7 +58,7 @@ class _WeekDataViewState extends ConsumerState<WeekDataView> {
 
   void _retry() {
     setState(() => _refreshError = null);
-    ref.invalidate(weekPeriodsProvider(_req));
+    ref.invalidate(rawWeekPeriodsProvider(_req));
     unawaited(_refresh());
   }
 

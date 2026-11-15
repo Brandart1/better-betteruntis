@@ -16,7 +16,8 @@ enum ExportFormat {
     'Excel (.xlsx)',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   ),
-  pdf('pdf', 'PDF', 'application/pdf');
+  pdf('pdf', 'PDF', 'application/pdf'),
+  ics('ics', 'Calendar (.ics)', 'text/calendar');
 
   const ExportFormat(this.extension, this.label, this.mimeType);
   final String extension;
@@ -46,6 +47,7 @@ class ExportLesson {
     this.lessonNumbers = '',
     this.subject = '',
     this.subjectLong = '',
+    this.title = '',
     this.teachers = const [],
     this.teachersShort = const [],
     this.rooms = const [],
@@ -72,6 +74,10 @@ class ExportLesson {
   final String subject;
   final String subjectLong;
 
+  /// Name of a lesson without a subject ([Period.customTitle]), as the
+  /// timetable shows it; empty when the lesson has a subject.
+  final String title;
+
   /// "MUE (Anna Müller)" where a long name is known, else "MUE".
   final List<String> teachers;
   final List<String> teachersShort;
@@ -97,8 +103,11 @@ class ExportLesson {
 
   int get weekday => date.weekday;
 
-  /// Display name of the subject: short name, else long name.
-  String get subjectLabel => subject.isNotEmpty ? subject : subjectLong;
+  /// Display name of the subject: short name, else long name, else the
+  /// lesson's [title].
+  String get subjectLabel => subject.isNotEmpty
+      ? subject
+      : (subjectLong.isNotEmpty ? subjectLong : title);
 }
 
 /// Everything a generator needs.
@@ -116,6 +125,8 @@ class ExportTimetable {
     this.holidays = const {},
     this.locale,
     this.targetType = ElementType.klasse,
+    this.repeatUntil,
+    this.skipDays = const [],
   });
 
   final ExportKind kind;
@@ -145,6 +156,13 @@ class ExportTimetable {
   /// Type of the exported element; teacher and room timetables also show
   /// the classes of each lesson.
   final ElementType targetType;
+
+  /// Regular export: last day (inclusive) the weekly lessons repeat on in a
+  /// calendar export (end of the school year); null = open-ended.
+  final DateTime? repeatUntil;
+
+  /// Regular export: days without lessons (holidays) up to [repeatUntil].
+  final List<DateTime> skipDays;
 
   bool get regular => kind == ExportKind.regular;
 
@@ -545,6 +563,7 @@ List<ExportLesson> buildExportLessons(
         p.substitutionText,
         p.infoText,
         if (p.exam case final x?) ...[x.name, x.text],
+        p.userNote,
       ],
     ].map((t) => t.trim()).where((t) => t.isNotEmpty).toSet().join(' · ');
 
@@ -569,6 +588,7 @@ List<ExportLesson> buildExportLessons(
         lessonNumbers: unitLabels(g, p.start.weekday, s, e),
         subject: subject,
         subjectLong: subjectLong,
+        title: p.customTitle,
         teachers: namesOf(ElementType.teacher, (r) => _teacherLabel(names, r)),
         teachersShort: namesOf(ElementType.teacher, (r) => _short(names, r)),
         rooms: namesOf(ElementType.room, (r) => _short(names, r)),

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/accessibility.dart';
 import '../../core/class_register.dart';
 import '../../core/interfaces.dart';
+import '../../core/lesson_notes.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/settings.dart';
@@ -198,9 +199,13 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
             : addDays(weekStart, weekdays.first - 1));
     final List<Period> periods;
     try {
-      periods = await ref.read(
-        weekPeriodsProvider(WeekRequest(account, target, mondayOf(date)))
-            .future,
+      periods = applyLessonNotes(
+        await ref.read(
+          rawWeekPeriodsProvider(WeekRequest(account, target, mondayOf(date)))
+              .future,
+        ),
+        account.id,
+        ref.read(lessonNotesProvider),
       );
     } catch (_) {
       return;
@@ -530,26 +535,17 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                 onPressed: _pickDate,
                 icon: const Icon(Icons.calendar_month),
               ),
-              PopupMenuButton<void>(
-                key: const ValueKey('timetable-menu'),
-                tooltip: 'More',
-                itemBuilder: (_) => [
-                  PopupMenuItem<void>(
-                    key: const ValueKey('export-action'),
-                    onTap: () => showExportSheet(
-                      context,
-                      account: account,
-                      target: target,
-                      initialWeek: day ?? ws,
-                      elementName: child?.displayName,
-                    ),
-                    child: const ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.ios_share),
-                      title: Text('Export…'),
-                    ),
-                  ),
-                ],
+              IconButton(
+                key: const ValueKey('export-action'),
+                tooltip: 'Export',
+                onPressed: () => showExportSheet(
+                  context,
+                  account: account,
+                  target: target,
+                  initialWeek: day ?? ws,
+                  elementName: child?.displayName,
+                ),
+                icon: const Icon(Icons.ios_share),
               ),
             ],
           ),

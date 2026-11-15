@@ -7,7 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('app bar menu opens the export sheet', (tester) async {
+  testWidgets('app bar export button opens the export sheet', (tester) async {
     tester.view.physicalSize = const Size(1000, 1600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -25,9 +25,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('timetable-menu')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Export…'));
+    expect(find.byKey(const ValueKey('timetable-menu')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('export-action')));
     await tester.pumpAndSettle();
     expect(find.byType(ExportSheet), findsOneWidget);
     expect(find.text('Regular timetable'), findsOneWidget);

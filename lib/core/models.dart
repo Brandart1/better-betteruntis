@@ -167,6 +167,9 @@ class Period {
     this.exam,
     this.isOnline = false,
     this.onlineLink,
+    this.userExam = false,
+    this.userNote = '',
+    this.noteKey,
   });
 
   final int id;
@@ -185,6 +188,42 @@ class Period {
   final bool isOnline;
   final String? onlineLink;
 
+  /// Marked as an exam by the user (stored on the device only).
+  final bool userExam;
+
+  /// Lesson details the user entered (stored on the device only).
+  final String userNote;
+
+  /// Key of this lesson in the user's lesson notes; set once notes were
+  /// applied (see lib/core/lesson_notes.dart).
+  final String? noteKey;
+
+  /// Copy with the user's exam mark and details.
+  Period withUserNote({
+    required String noteKey,
+    bool userExam = false,
+    String userNote = '',
+  }) => Period(
+    id: id,
+    lessonId: lessonId,
+    start: start,
+    end: end,
+    elements: elements,
+    flags: flags,
+    lessonText: lessonText,
+    substitutionText: substitutionText,
+    infoText: infoText,
+    foreColor: foreColor,
+    backColor: backColor,
+    homework: homework,
+    exam: exam,
+    isOnline: isOnline,
+    onlineLink: onlineLink,
+    userExam: userExam,
+    userNote: userNote,
+    noteKey: noteKey,
+  );
+
   /// Copy with a different element list (e.g. teachers merged from REST).
   Period copyWithElements(List<ElementRef> elements) => Period(
     id: id,
@@ -202,13 +241,26 @@ class Period {
     exam: exam,
     isOnline: isOnline,
     onlineLink: onlineLink,
+    userExam: userExam,
+    userNote: userNote,
+    noteKey: noteKey,
   );
 
   Iterable<ElementRef> ofType(ElementType t) =>
       elements.where((e) => e.type == t);
 
+  /// Title of a lesson without a subject (event, excursion, …): its lesson
+  /// text, shown in place of the subject in the timetable and exports.
+  /// Empty when the lesson has a subject (or no text).
+  String get customTitle => elements.any((e) => e.type == ElementType.subject)
+      ? ''
+      : lessonText.trim();
+
   bool get isCancelled => flags.contains(PeriodFlag.cancelled);
-  bool get isExam => flags.contains(PeriodFlag.exam) || exam != null;
+  bool get isExam => isSchoolExam || userExam;
+
+  /// An exam according to the school (not just marked by the user).
+  bool get isSchoolExam => flags.contains(PeriodFlag.exam) || exam != null;
   bool get isIrregular =>
       flags.contains(PeriodFlag.irregular) ||
       elements.any((e) => e.change != ElementChange.regular);

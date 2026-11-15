@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Your timetable is added to calendars you choose and kept up to date.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Your timetable is added to calendars you choose and kept up to date.</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>Your timetable is added to calendars you choose and kept up to date.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>The camera is used to scan your school's Untis QR code for login.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>

@@ -46,7 +46,7 @@ List<List<String>> lessonTable(ExportTimetable t) {
         hhmmOf(l.start),
         hhmmOf(l.end),
         l.lessonNumbers,
-        l.subject,
+        l.subject.isEmpty && l.subjectLong.isEmpty ? l.title : l.subject,
         l.subjectLong,
         l.teachers.join(', '),
         l.rooms.join(', '),

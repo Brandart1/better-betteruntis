@@ -135,5 +135,8 @@ class _PreviewNames implements NameResolver {
   List<Holiday> get holidays => const [];
 
   @override
+  List<SchoolYear> get schoolYears => const [];
+
+  @override
   TimeGrid get timeGrid => TimeGrid.fallback();
 }

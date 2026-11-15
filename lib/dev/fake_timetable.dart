@@ -600,6 +600,7 @@ class FakeNameResolver implements NameResolver {
   FakeNameResolver({
     this.elements = demoElements,
     this.holidays = const [],
+    this.schoolYears = const [],
     this.timeGrid = demoTimeGrid,
   }) : _byKey = {for (final e in elements) (e.type, e.id): e};
 
@@ -608,6 +609,8 @@ class FakeNameResolver implements NameResolver {
 
   @override
   final List<Holiday> holidays;
+  @override
+  final List<SchoolYear> schoolYears;
   @override
   final TimeGrid timeGrid;
 

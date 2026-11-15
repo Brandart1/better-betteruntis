@@ -12,9 +12,11 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/interfaces.dart';
+import '../../core/lesson_notes.dart';
 import '../../core/models.dart';
 import '../../export/csv_export.dart';
 import '../../export/export_model.dart';
+import '../../export/ics_export.dart';
 import '../../export/pdf_export.dart';
 import '../../export/pdf_fonts.dart';
 import '../../export/regular_timetable.dart';
@@ -101,7 +103,8 @@ class ExportException implements Exception {
   String toString() => message;
 }
 
-/// Loads one week cache-first: the first emission of [TimetableRepository.watchWeek]
+/// Loads one week cache-first, with the user's lesson [notes] applied: the
+/// first emission of [TimetableRepository.watchWeek]
 /// (cached data, or fresh data once fetched).
 Future<List<Period>> loadWeek(
   TimetableRepository repo,
@@ -109,7 +112,12 @@ Future<List<Period>> loadWeek(
   TimetableTarget target,
   DateTime weekStart, {
   Duration timeout = const Duration(seconds: 90),
-}) => repo.watchWeek(account, target, weekStart).first.timeout(timeout);
+  Map<String, LessonNote> notes = const {},
+}) async => applyLessonNotes(
+  await repo.watchWeek(account, target, weekStart).first.timeout(timeout),
+  account.id,
+  notes,
+);
 
 DateTime _addDays(DateTime d, int n) => DateTime(d.year, d.month, d.day + n);
 
@@ -126,6 +134,7 @@ Future<ExportTimetable> prepareExport({
   String? locale,
   DateTime? now,
   void Function(String message)? onProgress,
+  Map<String, LessonNote> notes = const {},
 }) async {
   final grid = names.timeGrid;
   final ws = options.weekStart;
@@ -135,7 +144,7 @@ Future<ExportTimetable> prepareExport({
   final Map<int, String> holidays = {};
   if (options.kind == ExportKind.week) {
     onProgress?.call('Loading week…');
-    periods = await loadWeek(repo, account, target, ws);
+    periods = await loadWeek(repo, account, target, ws, notes: notes);
     for (var d = 1; d <= 7; d++) {
       final day = _addDays(ws, d - 1);
       for (final h in names.holidays) {
@@ -154,7 +163,9 @@ Future<ExportTimetable> prepareExport({
       final w = _addDays(ws, 7 * i);
       onProgress?.call('Loading week ${i + 1} of $kRegularSampleWeeks…');
       try {
-        samples.add(SampleWeek(w, await loadWeek(repo, account, target, w)));
+        samples.add(
+          SampleWeek(w, await loadWeek(repo, account, target, w, notes: notes)),
+        );
       } catch (e) {
         lastError = e;
       }
@@ -194,7 +205,12 @@ Future<ExportTimetable> prepareExport({
           _addDays(ws, days.last - 1),
           locale,
         );
+  final until = regular ? schoolYearEnd(names.schoolYears, ws) : null;
   return ExportTimetable(
+    repeatUntil: until,
+    skipDays: regular && until != null
+        ? holidayDays(names.holidays, ws, until)
+        : const [],
     kind: options.kind,
     elementName: elementName,
     schoolName: account.school.displayName,
@@ -217,6 +233,7 @@ Future<Uint8List> generateExport(
   Future<PdfFonts?> Function()? fonts,
 }) async => switch (options.format) {
   ExportFormat.csv => buildCsv(t, separator: options.separator),
+  ExportFormat.ics => buildIcs(t),
   ExportFormat.xlsx => buildXlsx(t, colors: options.colors, text: options.text),
   ExportFormat.pdf => buildPdf(
     t,
@@ -247,4 +264,33 @@ Future<ExportedFile> writeExport(
   final file = File('${dir.path}/$name');
   await file.writeAsBytes(bytes, flush: true);
   return ExportedFile(file.path, name, options.format.mimeType, bytes);
+}
+
+/// End of the school year that contains [day] (or the next one); without
+/// school years from the server, 31 July of the school year (Aug – Jul).
+DateTime schoolYearEnd(List<SchoolYear> years, DateTime day) {
+  final d = DateTime(day.year, day.month, day.day);
+  for (final y in years) {
+    final end = DateTime(y.end.year, y.end.month, y.end.day);
+    if (!end.isBefore(d)) return end;
+  }
+  return DateTime(d.month >= 8 ? d.year + 1 : d.year, 7, 31);
+}
+
+/// Every day from [from] to [until] (inclusive) that lies in a holiday.
+List<DateTime> holidayDays(
+  List<Holiday> holidays,
+  DateTime from,
+  DateTime until,
+) {
+  final days = <DateTime>{};
+  for (final h in holidays) {
+    var d = DateTime(h.start.year, h.start.month, h.start.day);
+    final e = DateTime(h.end.year, h.end.month, h.end.day);
+    while (!d.isAfter(e)) {
+      if (!d.isBefore(from) && !d.isAfter(until)) days.add(d);
+      d = DateTime(d.year, d.month, d.day + 1);
+    }
+  }
+  return days.toList()..sort();
 }

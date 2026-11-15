@@ -56,6 +56,36 @@ class LessonStyle {
   final bool cancelled;
   final bool exam;
 
+  /// How far a past lesson's background is blended towards the (past-tinted)
+  /// grid background.
+  static const pastBackgroundFade = 0.55;
+
+  /// How far a past lesson's text is blended towards its dimmed background
+  /// (kept low so the text stays readable).
+  static const pastForegroundFade = 0.3;
+
+  /// How far a past lesson's border is blended towards the grid background
+  /// (less than the fill, so exam/substitution borders stay recognisable).
+  static const pastBorderFade = 0.4;
+
+  /// Muted version of this style for lessons that are already over: fill and
+  /// border fade towards [surface] (the grid background behind past lessons),
+  /// text towards the faded fill. Cancelled hatching/strike-through and the
+  /// exam icon are untouched, so the lesson state stays recognisable.
+  LessonStyle dimmed(Color surface) {
+    final bg = Color.lerp(background, surface, pastBackgroundFade)!;
+    return LessonStyle(
+      background: bg,
+      foreground: Color.lerp(foreground, bg, pastForegroundFade)!,
+      border: border == null
+          ? null
+          : Color.lerp(border, surface, pastBorderFade),
+      borderWidth: borderWidth,
+      cancelled: cancelled,
+      exam: exam,
+    );
+  }
+
   /// A custom state color: background, readable foreground and a border that
   /// is a stronger shade of the same color.
   static (Color, Color, Color) _custom(int argb) {

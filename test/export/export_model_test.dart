@@ -1,3 +1,4 @@
+import 'package:better_betteruntis/core/lesson_notes.dart';
 import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/core/settings.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
@@ -61,6 +62,43 @@ void main() {
     expect(l.teachers, isEmpty);
     expect(l.rooms, isEmpty);
     expect(l.subject, 'M');
+  });
+
+  test('a lesson without a subject is named by its lesson text', () {
+    final p = period(
+      mon,
+      1,
+      subject: null,
+      lessonText: 'E-Theater',
+      flags: const {PeriodFlag.irregular},
+    );
+    expect(p.customTitle, 'E-Theater');
+    final l = buildExportLessons([p], names, regular: false).single;
+    expect(l.subject, isEmpty);
+    expect(l.title, 'E-Theater');
+    expect(l.subjectLabel, 'E-Theater');
+    expect(l.info, 'E-Theater');
+
+    // With a subject the lesson text is only a note.
+    final withSubject = period(mon, 1, lessonText: 'E-Theater');
+    expect(withSubject.customTitle, isEmpty);
+    final m = buildExportLessons([withSubject], names, regular: false).single;
+    expect(m.title, isEmpty);
+    expect(m.subjectLabel, 'M');
+  });
+
+  test('custom exam and details are exported (not in the regular plan)', () {
+    final p = applyLessonNotes([period(mon, 1)], 'acc', const {}).single;
+    final marked = p.withUserNote(
+      noteKey: p.noteKey!,
+      userExam: true,
+      userNote: 'mündliche Wiederholung',
+    );
+    final l = buildExportLessons([marked], names, regular: false).single;
+    expect(l.status, LessonStatus.exam);
+    expect(l.info, contains('mündliche Wiederholung'));
+    final r = buildExportLessons([marked], names, regular: true).single;
+    expect(r.info, isNot(contains('mündliche Wiederholung')));
   });
 
   test('regular mode reports everything as regular, no one-off texts', () {

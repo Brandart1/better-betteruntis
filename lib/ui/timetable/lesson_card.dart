@@ -21,6 +21,8 @@ class LessonCard extends ConsumerWidget {
     required this.block,
     required this.names,
     this.detailed = false,
+    this.past = false,
+    this.pastSurface,
     this.onTap,
   });
 
@@ -29,6 +31,13 @@ class LessonCard extends ConsumerWidget {
 
   /// Larger card with long names and info text (day view).
   final bool detailed;
+
+  /// The lesson is over: drawn muted (see [LessonStyle.dimmed]).
+  final bool past;
+
+  /// Background behind past lessons that [past] cards fade towards; defaults
+  /// to [pastSurfaceOf] the theme.
+  final Color? pastSurface;
   final VoidCallback? onTap;
 
   @override
@@ -38,7 +47,8 @@ class LessonCard extends ConsumerWidget {
     final highContrast = ref.watch(
       accessibilityProvider.select((a) => a.highContrast),
     );
-    final style = LessonStyle.of(cs, block, settings, names, highContrast);
+    var style = LessonStyle.of(cs, block, settings, names, highContrast);
+    if (past) style = style.dimmed(pastSurface ?? pastSurfaceOf(cs));
     final radius = BorderRadius.circular(detailed ? 10 : 6);
     final fg = style.foreground;
     final centered = settings.centerText;
@@ -115,7 +125,7 @@ class LessonCard extends ConsumerWidget {
           ),
         ),
       if (subjects.isEmpty)
-        TextSpan(text: p.lessonText.isNotEmpty ? p.lessonText : '—')
+        TextSpan(text: p.customTitle.isNotEmpty ? p.customTitle : '—')
       else
         ...elementSpans(names, subjects, long: detailed, oldStyle: oldStyle),
     ];
@@ -170,6 +180,7 @@ class LessonCard extends ConsumerWidget {
           q.substitutionText,
           q.lessonText,
           q.infoText,
+          q.userNote,
         ],
       }.where((t) => t.trim().isNotEmpty);
       for (final t in texts) {
@@ -185,6 +196,14 @@ class LessonCard extends ConsumerWidget {
     return spans;
   }
 }
+
+/// Tint painted over the grid background of past days and of the part of
+/// today that is over.
+Color pastTintOf(ColorScheme cs) => cs.onSurface.withValues(alpha: 0.10);
+
+/// The grid background behind past lessons ([pastTintOf] over the surface).
+Color pastSurfaceOf(ColorScheme cs) =>
+    Color.alphaBlend(pastTintOf(cs), cs.surface);
 
 /// Diagonal cross-hatch drawn over cancelled lessons.
 class CancelledHatchPainter extends CustomPainter {

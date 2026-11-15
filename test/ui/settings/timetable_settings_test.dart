@@ -534,18 +534,29 @@ void main() {
         final notifier = container.read(timetableSettingsProvider.notifier);
         notifier.update((s) => s.copyWith(regularColor: 0xFF00796B));
         await tester.pumpAndSettle();
+        final cardFinder = find.descendant(
+          of: find.byKey(ValueKey('lesson-${regular.id}')),
+          matching: find.byType(LessonCard),
+        );
         final material = tester.widget<Material>(
           find
-              .descendant(
-                of: find.descendant(
-                  of: find.byKey(ValueKey('lesson-${regular.id}')),
-                  matching: find.byType(LessonCard),
-                ),
-                matching: find.byType(Material),
-              )
+              .descendant(of: cardFinder, matching: find.byType(Material))
               .first,
         );
-        expect(material.color, const Color(0xFF00796B));
+        // The demo week is the current one: the lesson may already be over
+        // and drawn dimmed.
+        final card = tester.widget<LessonCard>(cardFinder);
+        const custom = Color(0xFF00796B);
+        expect(
+          material.color,
+          card.past
+              ? Color.lerp(
+                  custom,
+                  card.pastSurface,
+                  LessonStyle.pastBackgroundFade,
+                )
+              : custom,
+        );
 
         notifier.update((s) => s.copyWith(showCancelled: false));
         await tester.pumpAndSettle();

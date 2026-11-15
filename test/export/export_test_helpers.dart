@@ -19,7 +19,7 @@ Period period(
   int m = 0,
   int minutes = 45,
   int lesson = 1,
-  int subject = 10,
+  int? subject = 10,
   List<ElementRef>? teachers,
   ElementRef? room,
   List<ElementRef> extra = const [],
@@ -27,6 +27,7 @@ Period period(
   Exam? exam,
   String infoText = '',
   String substitutionText = '',
+  String lessonText = '',
   int? backColor,
 }) {
   final d = dayOf(weekStart, weekday);
@@ -38,7 +39,7 @@ Period period(
     end: start.add(Duration(minutes: minutes)),
     elements: [
       el(ElementType.klasse, 40),
-      el(ElementType.subject, subject),
+      if (subject != null) el(ElementType.subject, subject),
       ...?teachers,
       if (teachers == null) el(ElementType.teacher, 1),
       room ?? el(ElementType.room, 30),
@@ -48,6 +49,7 @@ Period period(
     exam: exam,
     infoText: infoText,
     substitutionText: substitutionText,
+    lessonText: lessonText,
     backColor: backColor,
   );
 }
