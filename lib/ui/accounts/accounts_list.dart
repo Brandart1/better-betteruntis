@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/models.dart';
 import '../../core/providers.dart';
+import '../../sync/sync_controller.dart';
 import 'account_avatar.dart';
 
 /// Returns [a] with [profileName] set, or cleared when null/empty.
@@ -217,6 +218,8 @@ Future<bool> confirmDeleteAccount(
   Account account,
 ) async {
   final repo = ref.read(accountRepositoryProvider);
+  final sync = ref.read(syncControllerProvider.notifier);
+  final syncing = sync.stateOf(account.id).enabled;
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) {
@@ -227,7 +230,10 @@ Future<bool> confirmDeleteAccount(
         content: Text(
           '${account.label} at ${account.school.displayName} will be removed '
           'from this device, including its offline timetable. You can add it '
-          'again anytime.',
+          'again anytime.'
+          '${syncing ? '\n\nYour synced notes stay on the sync server. To '
+                    'delete them there, turn off sync for this account '
+                    'first.' : ''}',
         ),
         actions: [
           TextButton(
@@ -247,6 +253,13 @@ Future<bool> confirmDeleteAccount(
     },
   );
   if (ok != true) return false;
+  if (syncing) {
+    // Ends this device's sync session and forgets its secrets (server data
+    // stays, see the dialog).
+    try {
+      await sync.signOutDevice(account.id);
+    } catch (_) {}
+  }
   await repo.delete(account.id);
   // Last account gone: back to the welcome screen (the router's redirect
   // may do this too; going twice is harmless).
