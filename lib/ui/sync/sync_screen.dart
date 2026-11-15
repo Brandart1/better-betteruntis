@@ -145,13 +145,19 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
   );
 
   Future<void> _newRecoveryCode() async {
-    final ok = await confirmSync(
-      context,
-      title: 'Create a new recovery code?',
-      body: 'Your old recovery code stops working.',
-      confirmLabel: 'Create',
-    );
-    if (!ok || !mounted) return;
+    // Only replacing an existing code needs a confirmation.
+    if (ref
+        .read(syncControllerProvider.notifier)
+        .stateOf(_id)
+        .hasRecoveryCode) {
+      final ok = await confirmSync(
+        context,
+        title: 'Create a new recovery code?',
+        body: 'Your old recovery code stops working.',
+        confirmLabel: 'Create',
+      );
+      if (!ok || !mounted) return;
+    }
     final done = await runSyncAction(
       context,
       title: 'Creating a recovery code',
@@ -354,7 +360,11 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
                 OutlinedButton(
                   key: const ValueKey('sync-new-recovery'),
                   onPressed: _newRecoveryCode,
-                  child: const Text('New recovery code'),
+                  child: Text(
+                    s.hasRecoveryCode
+                        ? 'New recovery code'
+                        : 'Create recovery code',
+                  ),
                 ),
                 TextButton(
                   key: const ValueKey('sync-e2e-off'),

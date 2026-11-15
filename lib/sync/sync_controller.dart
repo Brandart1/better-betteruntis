@@ -48,6 +48,7 @@ class SyncAccountState {
     this.phase = SyncPhase.off,
     this.identity,
     this.e2e = false,
+    this.hasRecoveryCode = false,
     this.lastSync,
     this.syncing = false,
     this.error,
@@ -59,6 +60,10 @@ class SyncAccountState {
 
   /// End-to-end encryption is on for this identity.
   final bool e2e;
+
+  /// The E2E header has a recovery-code wrap (UI: "Create recovery code" vs
+  /// "New recovery code").
+  final bool hasRecoveryCode;
   final DateTime? lastSync;
 
   /// A sync is running right now.

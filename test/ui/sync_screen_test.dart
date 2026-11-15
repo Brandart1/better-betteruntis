@@ -38,13 +38,15 @@ class FakeSync extends SyncController {
 
   void _set(SyncAccountState s) => state = {...state, s.accountId: s};
 
-  SyncAccountState _on(String id, {required bool e2e}) => SyncAccountState(
-    accountId: id,
-    phase: SyncPhase.on,
-    identity: _identity,
-    e2e: e2e,
-    lastSync: DateTime(2026, 11, 15, 10, 30),
-  );
+  SyncAccountState _on(String id, {required bool e2e, bool recovery = false}) =>
+      SyncAccountState(
+        accountId: id,
+        phase: SyncPhase.on,
+        identity: _identity,
+        e2e: e2e,
+        hasRecoveryCode: e2e && recovery,
+        lastSync: DateTime(2026, 11, 15, 10, 30),
+      );
 
   @override
   Future<SyncEnableResult> enable(String id, SyncEnableOptions o) async {
@@ -115,7 +117,7 @@ class FakeSync extends SyncController {
     bool withRecoveryCode = true,
   }) async {
     calls.add('enableE2e:$passphrase:$withRecoveryCode');
-    final s = _on(id, e2e: true);
+    final s = _on(id, e2e: true, recovery: withRecoveryCode);
     _set(s);
     return SyncEnableResult(
       state: s,
@@ -342,6 +344,8 @@ void main() {
     await tap(tester, key('sync-recovery-done'));
     expect(find.text('End-to-end encryption is on'), findsOneWidget);
 
+    // A code exists: replacing it asks first.
+    expect(find.text('New recovery code'), findsOneWidget);
     await tap(tester, key('sync-new-recovery'));
     await tap(tester, key('sync-confirm'));
     expect(find.text(_code), findsOneWidget);
