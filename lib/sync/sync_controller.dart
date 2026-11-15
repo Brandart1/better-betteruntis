@@ -1,0 +1,196 @@
+/// Contract between the sync engine (lib/sync/sync_engine.dart) and the sync
+/// UI (lib/ui/sync/). Optional sync of the user's lesson notes (custom exams,
+/// lesson details; lib/core/lesson_notes.dart) through the Cloudflare Worker,
+/// see docs/SYNC-PLAN.md. Sync is per app account (each account is its own
+/// WebUntis identity on the server).
+library;
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+/// Where sync stands for one app account.
+enum SyncPhase {
+  /// Never turned on (or turned off).
+  off,
+
+  /// On and working (or idle between syncs).
+  on,
+
+  /// E2E is on for this identity and this device has no key yet: the user
+  /// must enter the passphrase or recovery code ([SyncController.unlock]).
+  locked,
+
+  /// The server no longer accepts this device's session (expired, or sync
+  /// was turned off / reset on another device). Local notes are untouched;
+  /// the user decides whether to turn sync on again.
+  signedOut,
+}
+
+/// Who the server thinks this account is (shown in the sync settings so
+/// deletion requests can be matched).
+class SyncIdentity {
+  const SyncIdentity({
+    required this.host,
+    required this.school,
+    required this.userId,
+  });
+  final String host;
+  final String school;
+  final String userId;
+
+  @override
+  String toString() => '$school · $userId · $host';
+}
+
+/// State of sync for one app account.
+class SyncAccountState {
+  const SyncAccountState({
+    required this.accountId,
+    this.phase = SyncPhase.off,
+    this.identity,
+    this.e2e = false,
+    this.lastSync,
+    this.syncing = false,
+    this.error,
+  });
+
+  final String accountId;
+  final SyncPhase phase;
+  final SyncIdentity? identity;
+
+  /// End-to-end encryption is on for this identity.
+  final bool e2e;
+  final DateTime? lastSync;
+
+  /// A sync is running right now.
+  final bool syncing;
+
+  /// Last error as user-facing text (null after a successful sync).
+  final String? error;
+
+  bool get enabled => phase != SyncPhase.off;
+}
+
+/// What the user chose when turning sync on.
+class SyncEnableOptions {
+  const SyncEnableOptions({this.passphrase, this.withRecoveryCode = true});
+
+  /// Non-null: turn on end-to-end encryption with this passphrase
+  /// (min. 8 characters). Ignored if the server already has E2E for this
+  /// identity (then [SyncController.unlock] is needed instead).
+  final String? passphrase;
+  final bool withRecoveryCode;
+}
+
+/// Result of turning sync or E2E on.
+class SyncEnableResult {
+  const SyncEnableResult({required this.state, this.recoveryCode});
+  final SyncAccountState state;
+
+  /// Shown to the user once (E2E with recovery code only).
+  final String? recoveryCode;
+}
+
+/// Thrown by [SyncController] methods with a user-facing [message].
+class SyncException implements Exception {
+  const SyncException(this.message, {this.wrongSecret = false});
+  final String message;
+
+  /// The passphrase / recovery code was wrong (UI keeps the dialog open).
+  final bool wrongSecret;
+  @override
+  String toString() => message;
+}
+
+/// The sync engine as seen by the UI: a Riverpod notifier whose state is the
+/// [SyncAccountState] per account id (accounts missing from the map are
+/// [SyncPhase.off]). Implemented by `SyncEngine`; tests override
+/// [syncControllerProvider] with a fake subclass.
+abstract class SyncController extends Notifier<Map<String, SyncAccountState>> {
+  /// State of [accountId] ([SyncPhase.off] if unknown).
+  SyncAccountState stateOf(String accountId) =>
+      state[accountId] ?? SyncAccountState(accountId: accountId);
+
+  /// Turns sync on for [accountId]: logs in to the sync server with the
+  /// account's WebUntis token, optionally sets up E2E, then syncs.
+  /// If the server already has E2E for this identity, the result's phase is
+  /// [SyncPhase.locked].
+  Future<SyncEnableResult> enable(String accountId, SyncEnableOptions options);
+
+  /// Unlocks E2E on this device with the passphrase or the recovery code.
+  Future<SyncAccountState> unlock(String accountId, String passphraseOrCode);
+
+  /// Syncs now (pull then push). No-op when off/locked/signed out.
+  Future<SyncAccountState> syncNow(String accountId);
+
+  /// Turns sync off: deletes everything about this identity on the server
+  /// (notes, E2E header, sessions); local notes stay.
+  Future<void> disable(String accountId);
+
+  /// Forgets this device's session only (server data stays), e.g. before
+  /// removing the account from the app.
+  Future<void> signOutDevice(String accountId);
+
+  /// Turns E2E on for an account that syncs in plaintext: resets the server
+  /// data and uploads everything encrypted.
+  Future<SyncEnableResult> enableE2e(
+    String accountId,
+    String passphrase, {
+    bool withRecoveryCode = true,
+  });
+
+  /// Turns E2E off: resets the server data and uploads in plaintext.
+  Future<void> disableE2e(String accountId);
+
+  /// Changes the passphrase (re-wraps the key; notes stay as they are).
+  Future<void> changePassphrase(String accountId, String newPassphrase);
+
+  /// Creates a new recovery code (the old one stops working).
+  Future<String> regenerateRecoveryCode(String accountId);
+}
+
+/// The app-wide sync controller. The real engine is installed by overriding
+/// this provider in main.dart (`syncControllerProvider.overrideWith(
+/// SyncEngine.new)`); without an override sync is unavailable.
+final syncControllerProvider =
+    NotifierProvider<SyncController, Map<String, SyncAccountState>>(
+      UnavailableSyncController.new,
+    );
+
+/// Default when no engine is installed (e.g. widget tests): everything off,
+/// every action fails.
+class UnavailableSyncController extends SyncController {
+  @override
+  Map<String, SyncAccountState> build() => const {};
+
+  Never _unavailable() =>
+      throw const SyncException('Sync is not available in this build.');
+
+  @override
+  Future<SyncEnableResult> enable(
+    String accountId,
+    SyncEnableOptions o,
+  ) async => _unavailable();
+  @override
+  Future<SyncAccountState> unlock(String accountId, String s) async =>
+      _unavailable();
+  @override
+  Future<SyncAccountState> syncNow(String accountId) async => _unavailable();
+  @override
+  Future<void> disable(String accountId) async => _unavailable();
+  @override
+  Future<void> signOutDevice(String accountId) async => _unavailable();
+  @override
+  Future<SyncEnableResult> enableE2e(
+    String accountId,
+    String passphrase, {
+    bool withRecoveryCode = true,
+  }) async => _unavailable();
+  @override
+  Future<void> disableE2e(String accountId) async => _unavailable();
+  @override
+  Future<void> changePassphrase(String accountId, String p) async =>
+      _unavailable();
+  @override
+  Future<String> regenerateRecoveryCode(String accountId) async =>
+      _unavailable();
+}
