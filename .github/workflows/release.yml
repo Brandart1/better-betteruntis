@@ -9,8 +9,10 @@ on:
         description: "Existing tag to (re)build and release, e.g. v0.2.0-alpha"
         required: true
 
+# Read-only by default; only the job that creates the GitHub release can
+# write (security review L5).
 permissions:
-  contents: write
+  contents: read
 
 env:
   FLUTTER_VERSION: "3.47.9"
@@ -23,9 +25,16 @@ jobs:
     name: Tag matches pubspec version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
+      - name: Tag format
+        # TAG ends up in shell commands (e.g. the wrangler deploy command), so
+        # only plain release tags are accepted.
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta)(\.[0-9]+)?)?$'; then
+            echo "::error::Unexpected tag format: $TAG"; exit 1
+          fi
       - name: Compare
         run: |
           V=$(sed -n 's/^version: *\([^+]*\)+.*/\1/p' pubspec.yaml)
@@ -50,14 +59,14 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: "21"
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
@@ -79,14 +88,14 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: flutter build apk --release --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }}
+        run: flutter build apk --release --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }} --dart-define=BBU_SYNC_URL=${{ vars.BBU_SYNC_URL }}
       - name: Verify release signature
         run: |
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk | tee signer.txt
           if grep -q "CN=Android Debug" signer.txt; then echo "::error::APK is debug-signed"; exit 1; fi
           mv build/app/outputs/flutter-apk/app-release.apk "better-betteruntis-${TAG}.apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: apk
           path: better-betteruntis-*.apk
@@ -96,23 +105,23 @@ jobs:
     needs: version
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
-      - run: flutter build ios --release --no-codesign --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }}
+      - run: flutter build ios --release --no-codesign --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }} --dart-define=BBU_SYNC_URL=${{ vars.BBU_SYNC_URL }}
       - name: Package IPA
         run: |
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
           zip -qr "better-betteruntis-${TAG}-unsigned.ipa" Payload
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ipa
           path: better-betteruntis-*-unsigned.ipa
@@ -122,20 +131,20 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
-      - run: flutter build web --release --no-web-resources-cdn --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }}
+      - run: flutter build web --release --no-web-resources-cdn --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }} --dart-define=BBU_SYNC_URL=${{ vars.BBU_SYNC_URL }}
       # Not a release asset (the web version is hosted on Cloudflare, see
       # deploy-worker); only handed to the deploy job.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: web-build
           path: build/web
@@ -189,7 +198,7 @@ jobs:
       run:
         working-directory: worker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
       - name: Use the real D1 database id
@@ -202,7 +211,7 @@ jobs:
           fi
           sed -i "s/00000000-0000-0000-0000-000000000000/$D1_ID/" wrangler.jsonc
           grep -q "\"database_id\": \"$D1_ID\"" wrangler.jsonc
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: web-build
           path: worker/public
@@ -211,7 +220,7 @@ jobs:
           test -f public/index.html
           test -f public/main.dart.js
           test -f public/_headers || { echo "::error::worker/public/_headers missing"; exit 1; }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
       - name: npm 11 (install-script allowlist in package.json "allowScripts")
@@ -237,15 +246,17 @@ jobs:
     name: GitHub release
     needs: [android, ios, web]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: apk
           path: dist
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: ipa
           path: dist
