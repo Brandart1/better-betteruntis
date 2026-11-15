@@ -78,3 +78,64 @@ class _NowLinePainter extends CustomPainter {
   @override
   bool shouldRepaint(_NowLinePainter old) => old.color != color;
 }
+
+/// Past tint over the part of today's column that is over (top to now).
+/// Must be a direct child of a [Stack], below the lessons. Ticks once a
+/// minute on its own, like [NowIndicator].
+class TodayPastTint extends StatefulWidget {
+  const TodayPastTint({
+    super.key,
+    required this.scale,
+    required this.left,
+    required this.width,
+    required this.height,
+    required this.color,
+  });
+
+  final TimeScale scale;
+  final double left;
+  final double width;
+
+  /// Full canvas height (covered completely once the day's grid is over).
+  final double height;
+  final Color color;
+
+  @override
+  State<TodayPastTint> createState() => _TodayPastTintState();
+}
+
+class _TodayPastTintState extends State<TodayPastTint> {
+  Timer? _timer;
+  DateTime _now = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() => _now = DateTime.now());
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.scale;
+    final m = minuteOfDay(_now);
+    final h = m >= s.endMinute
+        ? widget.height
+        : s.y(m.clamp(s.startMinute, s.endMinute)).clamp(0.0, widget.height);
+    return Positioned(
+      key: const ValueKey('today-past-tint'),
+      left: widget.left,
+      width: widget.width,
+      top: 0,
+      height: h,
+      child: IgnorePointer(child: ColoredBox(color: widget.color)),
+    );
+  }
+}

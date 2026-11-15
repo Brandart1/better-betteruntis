@@ -6,6 +6,7 @@ import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/core/settings.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
 import 'package:better_betteruntis/export/csv_export.dart';
+import 'package:better_betteruntis/export/export_grid.dart';
 import 'package:better_betteruntis/export/export_model.dart';
 import 'package:better_betteruntis/export/pdf_export.dart';
 import 'package:better_betteruntis/export/pdf_fonts.dart';
@@ -102,6 +103,17 @@ void main() {
       );
       // "MUE (Anna Müller)" has no comma -> unquoted; info with comma quoted.
       expect(text, contains('Monday,07:45,09:20,1–2,M,Mathematik,'));
+    });
+
+    test('a lesson without a subject shows its lesson text', () {
+      final t = demoExport(
+        periods: [period(mon, 1, subject: null, lessonText: 'E-Theater')],
+      );
+      expect(lessonTable(t)[1][5], 'E-Theater'); // Subject column
+      expect(
+        cellLines(t.lessons.single, showClasses: false).first,
+        'E-Theater',
+      );
     });
 
     test('default separator follows the decimal separator', () {

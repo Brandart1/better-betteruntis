@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -27,7 +28,11 @@ class DayColumnData {
 /// painter, inside an always-scrollable vertical scroll view (so pull-to-
 /// refresh works). Fits the viewport height unless that would make lessons
 /// shorter than [minPxPerMinute].
-class TimetableCanvas extends StatelessWidget {
+///
+/// Past days and the part of today that is over get a grey tint; lessons that
+/// have ended are drawn muted. The canvas rebuilds itself when the next
+/// displayed lesson ends (a few times a day, not every minute).
+class TimetableCanvas extends StatefulWidget {
   const TimetableCanvas({
     super.key,
     required this.days,
@@ -48,6 +53,50 @@ class TimetableCanvas extends StatelessWidget {
   final double minPxPerMinute;
   final bool detailed;
   final LessonTapCallback? onLessonTap;
+
+  @override
+  State<TimetableCanvas> createState() => _TimetableCanvasState();
+}
+
+class _TimetableCanvasState extends State<TimetableCanvas> {
+  Timer? _timer;
+
+  List<DayColumnData> get days => widget.days;
+  NameResolver get names => widget.names;
+  int get startMinute => widget.startMinute;
+  int get endMinute => widget.endMinute;
+  double get timeColumnWidth => widget.timeColumnWidth;
+  double get minPxPerMinute => widget.minPxPerMinute;
+  bool get detailed => widget.detailed;
+  LessonTapCallback? get onLessonTap => widget.onLessonTap;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  /// Rebuild when the next displayed lesson ends, so it gets dimmed.
+  void _scheduleNextEnd(DateTime now) {
+    _timer?.cancel();
+    _timer = null;
+    DateTime? next;
+    for (final d in days) {
+      for (final b in d.blocks) {
+        if (b.end.isAfter(now) && (next == null || b.end.isBefore(next))) {
+          next = b.end;
+        }
+      }
+    }
+    if (next == null) return;
+    final wait = next.difference(now) + const Duration(seconds: 1);
+    // Far-future lessons: the canvas is rebuilt long before (page changes,
+    // refreshes); no need for a day-long timer.
+    if (wait > const Duration(hours: 18)) return;
+    _timer = Timer(wait, () {
+      if (mounted) setState(() {});
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -78,7 +127,11 @@ class TimetableCanvas extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final colW = (width - timeColumnWidth) / math.max(1, days.length);
-    final today = dateOnly(DateTime.now());
+    final now = DateTime.now();
+    final today = dateOnly(now);
+    _scheduleNextEnd(now);
+    final pastTint = pastTintOf(cs);
+    final pastSurface = pastSurfaceOf(cs);
     final units = days.isEmpty
         ? const <TimeUnit>[]
         : unitsFor(names.timeGrid, days.first.date.weekday);
@@ -98,11 +151,19 @@ class TimetableCanvas extends StatelessWidget {
             pastColumns: pastCols,
             todayColumn: todayCol,
             lineColor: cs.outlineVariant.withValues(alpha: 0.5),
-            pastTint: cs.onSurface.withValues(alpha: 0.04),
+            pastTint: pastTint,
             todayTint: cs.primary.withValues(alpha: 0.05),
           ),
         ),
       ),
+      if (todayCol >= 0)
+        TodayPastTint(
+          scale: scale,
+          left: timeColumnWidth + todayCol * colW,
+          width: colW,
+          height: height,
+          color: pastTint,
+        ),
       for (final u in units)
         Positioned(
           left: 0,
@@ -142,6 +203,8 @@ class TimetableCanvas extends StatelessWidget {
               block: b,
               names: names,
               detailed: detailed,
+              past: !b.end.isAfter(now),
+              pastSurface: pastSurface,
               onTap: onLessonTap == null
                   ? null
                   : () {

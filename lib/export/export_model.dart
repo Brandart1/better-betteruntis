@@ -47,6 +47,7 @@ class ExportLesson {
     this.lessonNumbers = '',
     this.subject = '',
     this.subjectLong = '',
+    this.title = '',
     this.teachers = const [],
     this.teachersShort = const [],
     this.rooms = const [],
@@ -73,6 +74,10 @@ class ExportLesson {
   final String subject;
   final String subjectLong;
 
+  /// Name of a lesson without a subject ([Period.customTitle]), as the
+  /// timetable shows it; empty when the lesson has a subject.
+  final String title;
+
   /// "MUE (Anna Müller)" where a long name is known, else "MUE".
   final List<String> teachers;
   final List<String> teachersShort;
@@ -98,8 +103,11 @@ class ExportLesson {
 
   int get weekday => date.weekday;
 
-  /// Display name of the subject: short name, else long name.
-  String get subjectLabel => subject.isNotEmpty ? subject : subjectLong;
+  /// Display name of the subject: short name, else long name, else the
+  /// lesson's [title].
+  String get subjectLabel => subject.isNotEmpty
+      ? subject
+      : (subjectLong.isNotEmpty ? subjectLong : title);
 }
 
 /// Everything a generator needs.
@@ -579,6 +587,7 @@ List<ExportLesson> buildExportLessons(
         lessonNumbers: unitLabels(g, p.start.weekday, s, e),
         subject: subject,
         subjectLong: subjectLong,
+        title: p.customTitle,
         teachers: namesOf(ElementType.teacher, (r) => _teacherLabel(names, r)),
         teachersShort: namesOf(ElementType.teacher, (r) => _short(names, r)),
         rooms: namesOf(ElementType.room, (r) => _short(names, r)),

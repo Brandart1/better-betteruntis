@@ -169,6 +169,24 @@ void main() {
     });
   });
 
+  test('a lesson without a subject is titled by its lesson text', () {
+    final w = wanted([
+      period(
+        mon,
+        1,
+        h: 9,
+        m: 50,
+        subject: null,
+        lessonText: 'E-Theater',
+        flags: const {PeriodFlag.irregular},
+      ),
+    ]);
+    final e = w.values.single;
+    expect(e.data.title, 'E-Theater');
+    expect(e.data.description, contains('E-Theater'));
+    expect(w.keys.single, contains('E-Theater'));
+  });
+
   test('sync round-trips through JSON', () {
     final s = CalendarSync(
       id: 'a:CLASS:40',

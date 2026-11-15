@@ -156,6 +156,32 @@ void main() {
     expect(prop(ev[i], 'EXDATE'), '20261224T${start}00,20261231T${start}00');
   });
 
+  test('a lesson without a subject is titled by its lesson text', () {
+    final names = FakeNameResolver();
+    final l = buildExportLessons(
+      [
+        period(
+          mon,
+          1,
+          subject: null,
+          lessonText: 'E-Theater',
+          flags: const {PeriodFlag.irregular},
+        ),
+      ],
+      names,
+      regular: false,
+    ).single;
+    expect(lessonEventTitle(l), 'E-Theater');
+    expect(lessonEventDescription(l), contains('E-Theater'));
+    // No subject and no text: generic title.
+    final bare = buildExportLessons(
+      [period(mon, 1, subject: null)],
+      names,
+      regular: false,
+    ).single;
+    expect(lessonEventTitle(bare), 'Lesson');
+  });
+
   test('school year end falls back to 31 July', () {
     expect(
       schoolYearEnd(const [], DateTime(2026, 11, 9)),

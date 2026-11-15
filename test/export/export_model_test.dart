@@ -63,6 +63,29 @@ void main() {
     expect(l.subject, 'M');
   });
 
+  test('a lesson without a subject is named by its lesson text', () {
+    final p = period(
+      mon,
+      1,
+      subject: null,
+      lessonText: 'E-Theater',
+      flags: const {PeriodFlag.irregular},
+    );
+    expect(p.customTitle, 'E-Theater');
+    final l = buildExportLessons([p], names, regular: false).single;
+    expect(l.subject, isEmpty);
+    expect(l.title, 'E-Theater');
+    expect(l.subjectLabel, 'E-Theater');
+    expect(l.info, 'E-Theater');
+
+    // With a subject the lesson text is only a note.
+    final withSubject = period(mon, 1, lessonText: 'E-Theater');
+    expect(withSubject.customTitle, isEmpty);
+    final m = buildExportLessons([withSubject], names, regular: false).single;
+    expect(m.title, isEmpty);
+    expect(m.subjectLabel, 'M');
+  });
+
   test('regular mode reports everything as regular, no one-off texts', () {
     final p = period(mon, 1, infoText: 'Heute in der Aula');
     final l = buildExportLessons([p], names, regular: true).single;

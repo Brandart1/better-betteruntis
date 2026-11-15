@@ -134,7 +134,7 @@ class LessonDetailsPage extends ConsumerWidget {
     final subjects = p.ofType(ElementType.subject).toList();
     final title = subjects.isNotEmpty
         ? subjects.map((s) => names.longName(s, original: s.id == 0)).join(', ')
-        : (p.lessonText.isNotEmpty ? p.lessonText : 'Lesson');
+        : (p.customTitle.isNotEmpty ? p.customTitle : 'Lesson');
     final numbers = lessonNumbers(names.timeGrid, block.start, block.end);
     final when = [
       dateFormat(context, 'EEE d MMM').format(block.start),
@@ -149,7 +149,7 @@ class LessonDetailsPage extends ConsumerWidget {
         q.infoText,
       ],
       if (p.exam != null) ...[p.exam!.name, p.exam!.text],
-    }.where((t) => t.trim().isNotEmpty && t != title).toList();
+    }.where((t) => t.trim().isNotEmpty && t.trim() != title).toList();
     final homework = <int, Homework>{
       for (final h in block.periods.expand((q) => q.homework)) h.id: h,
     }.values.toList();

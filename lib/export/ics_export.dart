@@ -60,13 +60,13 @@ String _slug(String v) => v
     .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
     .replaceAll(RegExp(r'^-+|-+$'), '');
 
-/// Event title: subject (long name if known), with the classes when
+/// Event title: subject (long name if known), else the lesson's title (as
+/// in the timetable), with the classes when
 /// [showClasses] (teacher/room timetables), prefixed for cancelled lessons
 /// and exams.
 String lessonEventTitle(ExportLesson l, {bool showClasses = false}) {
-  var s = l.subjectLong.isNotEmpty
-      ? l.subjectLong
-      : (l.subject.isNotEmpty ? l.subject : 'Lesson');
+  var s = l.subjectLong.isNotEmpty ? l.subjectLong : l.subjectLabel;
+  if (s.isEmpty) s = 'Lesson';
   if (showClasses && l.classes.isNotEmpty) s += ' – ${l.classes.join(', ')}';
   return switch (l.status) {
     LessonStatus.cancelled => 'Cancelled: $s',

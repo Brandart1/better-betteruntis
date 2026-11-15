@@ -207,6 +207,13 @@ class Period {
   Iterable<ElementRef> ofType(ElementType t) =>
       elements.where((e) => e.type == t);
 
+  /// Title of a lesson without a subject (event, excursion, …): its lesson
+  /// text, shown in place of the subject in the timetable and exports.
+  /// Empty when the lesson has a subject (or no text).
+  String get customTitle => elements.any((e) => e.type == ElementType.subject)
+      ? ''
+      : lessonText.trim();
+
   bool get isCancelled => flags.contains(PeriodFlag.cancelled);
   bool get isExam => flags.contains(PeriodFlag.exam) || exam != null;
   bool get isIrregular =>
