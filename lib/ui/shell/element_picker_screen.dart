@@ -6,13 +6,15 @@ import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../common/search_field.dart';
+import '../common/large_text.dart';
 
 /// Search + tabs over master data; tapping opens that element's timetable.
 class ElementPickerScreen extends ConsumerStatefulWidget {
   const ElementPickerScreen({super.key});
 
   @override
-  ConsumerState<ElementPickerScreen> createState() => _ElementPickerScreenState();
+  ConsumerState<ElementPickerScreen> createState() =>
+      _ElementPickerScreenState();
 }
 
 class _ElementPickerScreenState extends ConsumerState<ElementPickerScreen> {
@@ -37,13 +39,22 @@ class _ElementPickerScreenState extends ConsumerState<ElementPickerScreen> {
             child: AppSearchField(
               fieldKey: const ValueKey('browse-search'),
               hintText: 'Search classes, teachers, rooms',
-              onChanged: (v) =>
-                  setState(() => _query = v.trim().toLowerCase()),
+              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
             ),
           ),
-          bottom: TabBar(
-            tabs: [for (final t in _tabs) Tab(icon: Icon(t.$3), text: t.$2)],
-          ),
+          // Large text: text-only tabs that scroll, instead of clipped
+          // labels and an overflowing icon + text column.
+          bottom: isLargeText(context)
+              ? TabBar(
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  tabs: [for (final t in _tabs) Tab(text: t.$2)],
+                )
+              : TabBar(
+                  tabs: [
+                    for (final t in _tabs) Tab(icon: Icon(t.$3), text: t.$2),
+                  ],
+                ),
         ),
         body: names == null
             ? const Center(child: CircularProgressIndicator())
@@ -215,7 +226,9 @@ class _ElementList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (elements.isEmpty && header.isEmpty) {
-      return const Center(child: Text('Nothing here — your school may not share this list.'));
+      return const Center(
+        child: Text('Nothing here — your school may not share this list.'),
+      );
     }
     return ListView.builder(
       itemCount: header.length + (elements.isEmpty ? 1 : elements.length),

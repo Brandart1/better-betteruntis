@@ -44,12 +44,15 @@ class LessonPreview extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    _labels[kind]!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                  // Scaled down rather than cut to "Sub…" with large text.
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      _labels[kind]!,
+                      maxLines: 1,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ],

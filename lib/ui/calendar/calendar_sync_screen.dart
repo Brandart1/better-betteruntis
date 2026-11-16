@@ -16,6 +16,7 @@ import '../../core/build_channel.dart';
 import '../../core/models.dart';
 import '../../core/settings.dart';
 import '../../export/export_model.dart';
+import '../common/large_text.dart';
 
 /// What to set up: a timetable of an account (new or existing sync).
 class CalendarSetupArgs {
@@ -316,7 +317,7 @@ class _CalendarSyncScreenState extends ConsumerState<CalendarSyncScreen> {
                   selected: {_weeks},
                   onSelectionChanged: (v) => setState(() => _weeks = v.first),
                 ),
-                SwitchListTile(
+                AdaptiveSwitchTile(
                   key: const ValueKey('calendar-auto'),
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Keep up to date'),

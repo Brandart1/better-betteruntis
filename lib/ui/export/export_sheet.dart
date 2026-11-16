@@ -12,6 +12,7 @@ import '../../export/csv_export.dart';
 import '../../export/export_model.dart';
 import '../calendar/calendar_sync_screen.dart';
 import 'export_service.dart';
+import '../common/large_text.dart';
 
 /// Display name of the exported element: classes and rooms by short name,
 /// teachers and students by long name, the own timetable by the account.
@@ -323,7 +324,7 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
               ),
             ],
             if (_format == ExportFormat.xlsx || _format == ExportFormat.pdf)
-              SwitchListTile(
+              AdaptiveSwitchTile(
                 key: const ValueKey('export-colors'),
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Include colors'),
@@ -334,7 +335,7 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
                 onChanged: (v) => setState(() => _colors = v),
               ),
             if (_format == ExportFormat.xlsx || _format == ExportFormat.pdf)
-              SwitchListTile(
+              AdaptiveSwitchTile(
                 key: const ValueKey('export-text'),
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Use text settings'),
@@ -346,7 +347,7 @@ class _ExportSheetState extends ConsumerState<ExportSheet> {
                 onChanged: (v) => setState(() => _textSettings = v),
               ),
             if (_format == ExportFormat.pdf)
-              SwitchListTile(
+              AdaptiveSwitchTile(
                 key: const ValueKey('export-landscape'),
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Landscape'),

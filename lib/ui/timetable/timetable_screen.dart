@@ -409,7 +409,20 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Flexible(child: _DayLabel(day: day)),
+                Flexible(
+                  child: _FittingLabel(
+                    textKey: const ValueKey('day-label'),
+                    candidates: [
+                      for (final p in const [
+                        'EEE, d MMM',
+                        'd MMM',
+                        'EEE d',
+                        'd',
+                      ])
+                        dateFormat(context, p).format(day),
+                    ],
+                  ),
+                ),
                 const SizedBox(width: 4),
                 Icon(
                   Icons.unfold_less,
@@ -423,13 +436,14 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
       );
     } else {
       atToday = _page == kPagerOrigin;
-      title = Text(
-        formatWeekRange(
-          context,
-          addDays(ws, weekdays.first - 1),
-          addDays(ws, weekdays.last - 1),
-        ),
-        key: const ValueKey('week-label'),
+      final first = addDays(ws, weekdays.first - 1);
+      final last = addDays(ws, weekdays.last - 1);
+      title = _FittingLabel(
+        textKey: const ValueKey('week-label'),
+        candidates: [
+          formatWeekRange(context, first, last),
+          '${first.day}–${last.day}',
+        ],
       );
     }
 
@@ -744,13 +758,14 @@ class _SpeakButton extends ConsumerWidget {
   }
 }
 
-/// The day mode's app bar date: the longest of "Tue, 17 Nov", "17 Nov",
-/// "Tue 17" and "17" that fits (the burger and the action buttons leave
-/// little room on phones; the full date is in the day header below).
-class _DayLabel extends StatelessWidget {
-  const _DayLabel({required this.day});
+/// The first of [candidates] (longest first) that fits on one line; app bar
+/// titles on phones with large text (the burger and the action buttons leave
+/// little room; the full date is in the day header below).
+class _FittingLabel extends StatelessWidget {
+  const _FittingLabel({required this.textKey, required this.candidates});
 
-  final DateTime day;
+  final Key textKey;
+  final List<String> candidates;
 
   @override
   Widget build(BuildContext context) {
@@ -759,23 +774,24 @@ class _DayLabel extends StatelessWidget {
     final direction = Directionality.of(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        const patterns = ['EEE, d MMM', 'd MMM', 'EEE d', 'd'];
-        var text = '';
-        for (final p in patterns) {
-          text = dateFormat(context, p).format(day);
+        var text = candidates.last;
+        for (final c in candidates) {
           final painter = TextPainter(
-            text: TextSpan(text: text, style: style),
+            text: TextSpan(text: c, style: style),
             textDirection: direction,
             textScaler: scaler,
             maxLines: 1,
           )..layout();
           final fits = painter.width <= constraints.maxWidth;
           painter.dispose();
-          if (fits) break;
+          if (fits) {
+            text = c;
+            break;
+          }
         }
         return Text(
           text,
-          key: const ValueKey('day-label'),
+          key: textKey,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         );

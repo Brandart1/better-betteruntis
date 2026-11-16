@@ -53,26 +53,45 @@ class LessonCard extends ConsumerWidget {
     final fg = style.foreground;
     final centered = settings.centerText;
 
+    final padding = EdgeInsets.symmetric(
+      horizontal: detailed ? 10 : 3,
+      vertical: detailed ? 6 : 2,
+    );
+    final text = TextSpan(
+      children: _spans(fg, style, settings, ViewingTarget.of(context)),
+    );
+    final textStyle = TextStyle(
+      color: fg,
+      fontSize: settings.detailFontSize,
+      height: 1.2,
+    );
+    final align = centered ? TextAlign.center : TextAlign.start;
+    final scaler = MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.3);
     Widget content = Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: detailed ? 10 : 3,
-        vertical: detailed ? 6 : 2,
-      ),
+      padding: padding,
       child: Align(
         alignment: centered ? Alignment.center : AlignmentDirectional.topStart,
-        child: Text.rich(
-          TextSpan(
-            children: _spans(fg, style, settings, ViewingTarget.of(context)),
+        // Only whole lines: a line that doesn't fit is left out instead of
+        // being cut in half (short lessons, large text).
+        child: LayoutBuilder(
+          builder: (context, constraints) => Text.rich(
+            text,
+            style: textStyle,
+            textAlign: align,
+            overflow: TextOverflow.clip,
+            textScaler: scaler,
+            maxLines: _fittingLines(
+              TextSpan(
+                style: DefaultTextStyle.of(context).style.merge(textStyle),
+                children: [text],
+              ),
+              align,
+              scaler,
+              Directionality.of(context),
+              constraints,
+              settings.subjectFontSize,
+            ),
           ),
-          style: TextStyle(
-            color: fg,
-            fontSize: settings.detailFontSize,
-            height: 1.2,
-          ),
-          textAlign: centered ? TextAlign.center : TextAlign.start,
-          overflow: TextOverflow.clip,
-          textScaler: MediaQuery.textScalerOf(context)
-              .clamp(maxScaleFactor: 1.3),
         ),
       ),
     );
@@ -97,6 +116,57 @@ class LessonCard extends ConsumerWidget {
         child: SizedBox.expand(child: content),
       ),
     );
+  }
+
+  /// How many lines of [text] fit completely into [constraints] (at least
+  /// one); null when all of them do.
+  static int? _fittingLines(
+    InlineSpan text,
+    TextAlign align,
+    TextScaler scaler,
+    TextDirection direction,
+    BoxConstraints constraints,
+    double iconSize,
+  ) {
+    if (!constraints.hasBoundedHeight || !constraints.hasBoundedWidth) {
+      return null;
+    }
+    final painter = TextPainter(
+      text: text,
+      textAlign: align,
+      textDirection: direction,
+      textScaler: scaler,
+    );
+    // The exam icon (a WidgetSpan) needs a size to measure the text.
+    var placeholders = 0;
+    text.visitChildren((span) {
+      if (span is PlaceholderSpan) placeholders++;
+      return true;
+    });
+    if (placeholders > 0) {
+      painter.setPlaceholderDimensions([
+        for (var i = 0; i < placeholders; i++)
+          PlaceholderDimensions(
+            size: Size(iconSize + 2, iconSize),
+            alignment: PlaceholderAlignment.middle,
+          ),
+      ]);
+    }
+    painter.layout(maxWidth: constraints.maxWidth);
+    try {
+      if (painter.height <= constraints.maxHeight + 0.5) return null;
+      final lines = painter.computeLineMetrics();
+      var fit = 0;
+      var bottom = 0.0;
+      for (final l in lines) {
+        bottom += l.height;
+        if (bottom > constraints.maxHeight + 0.5) break;
+        fit++;
+      }
+      return fit < 1 ? 1 : fit;
+    } finally {
+      painter.dispose();
+    }
   }
 
   List<InlineSpan> _spans(
