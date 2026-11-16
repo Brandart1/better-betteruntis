@@ -155,7 +155,7 @@ final _de = _Words(
   cancelled: 'entfällt',
   substitution: 'Vertretung',
   exam: 'Prüfung',
-  homework: 'Hausaufgabe',
+  homework: 'Hausübung',
   noLessons: 'Keine Stunden.',
   holiday: 'Frei',
   date: (w, d, m) => '$w, $d. $m.',

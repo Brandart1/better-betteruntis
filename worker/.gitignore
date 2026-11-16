@@ -4,3 +4,4 @@ node_modules/
 /public/*
 !/public/index.html
 !/public/_headers
+/public-teacher-alpha/
