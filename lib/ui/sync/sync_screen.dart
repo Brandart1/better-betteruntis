@@ -31,8 +31,9 @@ class SyncScreen extends ConsumerWidget {
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
               child: Text(
-                'Keep your custom exams and lesson details the same on all '
-                'your devices (also the web version).',
+                'Keep your custom exams, lesson details and settings '
+                '(colours, text, accessibility) the same on all your devices '
+                '(also the web version).',
               ),
             ),
             for (final a in list)
@@ -375,9 +376,9 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
     _status(Icons.cloud_outlined, 'Sync is off'),
     const SizedBox(height: 8),
     const Text(
-      'Your notes are only stored on this device. With sync, they are also '
-      'stored on the BetterBetterUntis server, optionally end-to-end '
-      'encrypted.',
+      'Your notes are only stored on this device. With sync, they and your '
+      'settings (colours, text, accessibility) are also stored on the '
+      'BetterBetterUntis server, optionally end-to-end encrypted.',
     ),
     _buttons([
       FilledButton.icon(

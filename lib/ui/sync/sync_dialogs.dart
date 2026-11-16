@@ -282,10 +282,12 @@ class SyncDisclaimerDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Your custom exams and lesson details are then stored on the '
-              'BetterBetterUntis server (hosted by Cloudflare), under your '
-              'WebUntis school and user id. That is how your other devices '
-              'find them.',
+              'Your custom exams and lesson details, and your settings '
+              '(lesson and subject colours, text, accessibility), are then '
+              'stored on the BetterBetterUntis server (hosted by Cloudflare), '
+              'under your WebUntis school and user id. That is how your other '
+              'devices find them. Accounts, passwords and calendar sync are '
+              'not synced.',
             ),
             const SizedBox(height: 12),
             const Text(

@@ -1,3 +1,4 @@
+import 'package:better_betteruntis/core/accessibility.dart';
 import 'package:better_betteruntis/core/interfaces.dart';
 import 'package:better_betteruntis/core/lesson_notes.dart';
 import 'package:better_betteruntis/core/models.dart';
@@ -9,6 +10,7 @@ import 'package:better_betteruntis/dev/fake_accounts.dart';
 import 'package:better_betteruntis/sync/sync_client.dart';
 import 'package:better_betteruntis/sync/sync_controller.dart';
 import 'package:better_betteruntis/sync/sync_engine.dart';
+import 'package:better_betteruntis/sync/synced_settings.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1677,6 +1679,263 @@ void main() {
     expect((await client.getE2eState(token)).epoch, epoch);
     expect((await client.getE2eState(token)).header, isNull);
     expect(a.state.identity!.epoch, epoch);
+  });
+
+  group('synced settings', () {
+    TimetableSettings tt(Device d) => d.c.read(timetableSettingsProvider);
+    AccessibilitySettings a11y(Device d) => d.c.read(accessibilityProvider);
+    void setTt(Device d, TimetableSettings Function(TimetableSettings) f) =>
+        d.c.read(timetableSettingsProvider.notifier).update(f);
+    void setA11y(
+      Device d,
+      AccessibilitySettings Function(AccessibilitySettings) f,
+    ) => d.c.read(accessibilityProvider.notifier).update(f);
+    Map<String, Map<String, Object?>> records() => _ident(server)!.notes;
+
+    test('two devices converge on colours and text (plaintext)', () async {
+      final a = Device(server);
+      final b = Device(server);
+      addTearDown(a.dispose);
+      addTearDown(b.dispose);
+      await a.enable();
+      tick();
+      setTt(
+        a,
+        (s) => s
+            .copyWith(
+              examColor: 0xFFFF0000,
+              subjectFontSize: 18,
+              boldSubject: false,
+            )
+            .withSubjectColor('ma', 0xFF00FF00),
+      );
+      await a.sync();
+      final r = records();
+      expect(r.keys.toSet(), {
+        'settings|timetable.examColor',
+        'settings|timetable.subjectFontSize',
+        'settings|timetable.boldSubject',
+        'settings|timetable.subjectColor.MA',
+      });
+      expect(r['settings|timetable.examColor']!['exam'], false);
+      expect(r['settings|timetable.examColor']!['text'], '${0xFFFF0000}');
+      expect(r['settings|timetable.subjectFontSize']!['text'], '18');
+
+      await b.enable();
+      expect(tt(b), tt(a));
+      expect(tt(b).subjectColorFor('Ma'), 0xFF00FF00);
+      // Never lesson notes.
+      expect(b.all, isEmpty);
+      expect(b.state.error, isNull);
+      // Nothing sent back (b only adopted).
+      final writes = server.noteWrites;
+      await b.sync();
+      await a.sync();
+      expect(server.noteWrites, writes);
+    });
+
+    test('E2E: settings are encrypted like notes and converge', () async {
+      final a = Device(server);
+      final b = Device(server);
+      addTearDown(a.dispose);
+      addTearDown(b.dispose);
+      a.write('1', 'note');
+      await a.enable('a passphrase');
+      tick();
+      setTt(a, (s) => s.withSubjectColor('D', 0xFF123456));
+      setA11y(a, (s) => s.copyWith(textScale: 1.3));
+      await a.sync();
+      expect(records().length, 3);
+      for (final k in records().keys) {
+        expect(k, isNot(contains('|')));
+        expect(records()[k]!['text'], isNull);
+      }
+      await b.enable('a passphrase');
+      expect(tt(b).subjectColorFor('D'), 0xFF123456);
+      expect(a11y(b).textScale, 1.3);
+      expect(b.live, {'1': 'note'});
+      expect(b.all.keys.single, b.key('1'));
+      expect(b.state.error, isNull);
+    });
+
+    test('accessibility changed on A shows up on B', () async {
+      final a = Device(server);
+      final b = Device(server);
+      addTearDown(a.dispose);
+      addTearDown(b.dispose);
+      await a.enable();
+      await b.enable();
+      tick();
+      setA11y(
+        a,
+        (s) => s.copyWith(
+          contrast: ContrastMode.dark,
+          dayViewByDefault: true,
+          speechLanguage: SpeechLanguage.de,
+          speechRate: 1.5,
+        ),
+      );
+      await a.sync();
+      await b.sync();
+      expect(a11y(b), a11y(a));
+      expect(a11y(b).contrast, ContrastMode.dark);
+    });
+
+    test('last write wins per setting; different subjects merge', () async {
+      final a = Device(server);
+      final b = Device(server);
+      addTearDown(a.dispose);
+      addTearDown(b.dispose);
+      await a.enable();
+      await b.enable();
+      tick();
+      setTt(
+        a,
+        (s) => s.copyWith(examColor: 0xFF111111).withSubjectColor('MA', 1),
+      );
+      tick();
+      setTt(
+        b,
+        (s) => s.copyWith(examColor: 0xFF222222).withSubjectColor('DE', 2),
+      );
+      // The older change syncs last: still loses.
+      await b.sync();
+      await a.sync();
+      await b.sync();
+      expect(tt(a).examColor, 0xFF222222);
+      expect(tt(b).examColor, 0xFF222222);
+      expect(tt(a).subjectColors, {'MA': 1, 'DE': 2});
+      expect(tt(b), tt(a));
+    });
+
+    test('reset to default propagates as a tombstone', () async {
+      final a = Device(server);
+      final b = Device(server);
+      addTearDown(a.dispose);
+      addTearDown(b.dispose);
+      setTt(
+        a,
+        (s) => s.copyWith(regularColor: 0xFF00AA00).withSubjectColor('MA', 5),
+      );
+      await a.enable();
+      await b.enable();
+      expect(tt(b).regularColor, 0xFF00AA00);
+      tick();
+      a.c.read(timetableSettingsProvider.notifier).reset();
+      await a.sync();
+      expect(records()['settings|timetable.regularColor']!['deleted'], true);
+      expect(records()['settings|timetable.subjectColor.MA']!['deleted'], true);
+      await b.sync();
+      expect(tt(b), const TimetableSettings());
+      // A device that joins later doesn't get the reset values either.
+      final c = Device(server);
+      addTearDown(c.dispose);
+      await c.enable();
+      expect(tt(c), const TimetableSettings());
+    });
+
+    test('settings from before sync: the synced version wins, the rest is '
+        'uploaded', () async {
+      final a = Device(
+        server,
+        store: MemorySettingsStore({
+          'timetable': const TimetableSettings(examColor: 0xFF0000AA).toJson(),
+        }),
+      );
+      addTearDown(a.dispose);
+      await a.enable();
+      expect(
+        records()['settings|timetable.examColor']!['text'],
+        '${0xFF0000AA}',
+      );
+      tick();
+      final b = Device(
+        server,
+        store: MemorySettingsStore({
+          'timetable': const TimetableSettings(
+            examColor: 0xFFBBBBBB,
+            centerText: false,
+          ).toJson(),
+        }),
+      );
+      addTearDown(b.dispose);
+      await b.enable();
+      expect(tt(b).examColor, 0xFF0000AA);
+      expect(tt(b).centerText, isFalse);
+      await a.sync();
+      expect(tt(a).centerText, isFalse);
+    });
+
+    test('invalid and unknown remote settings are skipped, oversized ones '
+        'counted', () async {
+      final a = Device(server);
+      addTearDown(a.dispose);
+      await a.enable();
+      void put(String key, String text) => records()[key] = {
+        'key': key,
+        'exam': false,
+        'text': text,
+        'updatedAt': clock.millisecondsSinceEpoch,
+        'deleted': false,
+        'seq': ++_ident(server)!.lastSeq,
+      };
+      put('settings|timetable.examColor', '"red"'); // wrong type
+      put('settings|timetable.subjectFontSize', '99'); // out of range
+      put('settings|timetable.subjectColor.ma', '1'); // not normalised
+      put('settings|from.a.newer.version', '1'); // unknown: ignored
+      await a.sync();
+      expect(tt(a), const TimetableSettings());
+      expect(a.all, isEmpty);
+      expect(
+        a.state.error,
+        contains('3 notes or settings could not be synced'),
+      );
+
+      tick();
+      setTt(a, (s) => s.withSubjectColor('X' * 300, 7));
+      await a.sync();
+      expect(records().keys.where((k) => k.contains('XXX')), isEmpty);
+      expect(a.state.error, contains('could not be synced'));
+    });
+
+    test('device-specific data is never uploaded', () async {
+      final a = Device(server);
+      addTearDown(a.dispose);
+      await a.store.write('calendarSync', [
+        {'id': 'x', 'secret': 'calendar'},
+      ]);
+      await a.store.write('lastVersionOpened', '0.5.0');
+      await a.store.write('activeAccountId', 'acc1');
+      setTt(a, (s) => s.copyWith(showCancelled: false));
+      await a.enable();
+      expect(records().keys.toSet(), {'settings|timetable.showCancelled'});
+      for (final n in records().values) {
+        expect('${n['text']}', isNot(contains('calendar')));
+      }
+    });
+
+    test('namespaces: notes stay notes, settings records stored as notes by '
+        'older versions are dropped and not re-sent as notes', () async {
+      final a = Device(
+        server,
+        store: MemorySettingsStore({
+          LessonNotesNotifier.storeKey: {
+            'acc1|settings|timetable.examColor': {
+              'text': '123',
+              'updatedAt': 5,
+            },
+          },
+        }),
+      );
+      addTearDown(a.dispose);
+      a.write('1', 'a lesson note');
+      await a.enable();
+      expect(records().keys.toSet(), {'2026-11-16|0800|1|3'});
+      expect(a.all.keys, [a.key('1')]);
+      expect(tt(a), const TimetableSettings());
+      expect(isSettingsKey('2026-11-16|0800|1|3'), isFalse);
+      expect(isSettingsKey(settingsRemoteKey('timetable.examColor')), isTrue);
+    });
   });
 }
 

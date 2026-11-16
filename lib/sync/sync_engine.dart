@@ -18,6 +18,9 @@
 /// batches of at most 500 notes / ~900 KB. Note keys on the server are the
 /// local keys without the leading account id; with E2E the server only
 /// sees `serverKey(keys, key)` and the real key travels inside the blob.
+/// The user's customisation settings travel the same way as records under
+/// the reserved key `settings|<name>` (lib/sync/synced_settings.dart):
+/// last-write-wins per setting, app-wide, carried by every syncing account.
 ///
 /// Safety rules:
 /// * While E2E is being set up (`e2ePending`, persisted before the session
@@ -48,6 +51,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/accessibility.dart';
 import '../core/interfaces.dart' show UntisException;
 import '../core/lesson_notes.dart';
 import '../core/models.dart';
@@ -59,6 +63,7 @@ import 'e2e_crypto.dart' as e2e;
 import 'e2e_crypto.dart' show E2eHeader, E2eKeys;
 import 'sync_client.dart';
 import 'sync_controller.dart';
+import 'synced_settings.dart';
 
 /// The HTTP client of the sync API (tests override it with a fake server).
 final syncClientProvider = Provider<SyncClient>((ref) => SyncClient());
@@ -96,7 +101,9 @@ class _Meta {
     this.pendingHeader,
     this.recoveryUnseen = false,
     Map<String, int>? unsendable,
-  }) : unsendable = unsendable ?? {};
+    Map<String, int>? settingsAcked,
+  }) : unsendable = unsendable ?? {},
+       settingsAcked = settingsAcked ?? {};
 
   /// Highest server seq applied (and persisted) locally.
   int lastSeq;
@@ -121,6 +128,11 @@ class _Meta {
   /// version of that this device can't read: not sent again until they
   /// change.
   final Map<String, int> unsendable;
+
+  /// Synced setting name → updatedAt of the version the server has (from
+  /// pulls and acknowledged pushes; refilled by every pull from 0). A
+  /// setting is pushed when its local stamp is newer.
+  final Map<String, int> settingsAcked;
 }
 
 const Object _keep = Object();
@@ -184,10 +196,22 @@ class SyncEngine extends SyncController {
   bool _pruned = false;
   Timer? _debounceTimer;
 
+  /// Accounts to sync when [_debounceTimer] fires.
+  final Set<String> _due = {};
+
+  /// Stamps of the synced settings (app-wide, [SyncedSettingStamps]).
+  SyncedSettingStamps _stamps = SyncedSettingStamps();
+
+  /// Set once the settings and their stamps are loaded; changes before
+  /// that are found by the first [SyncedSettingStamps.reconcile].
+  bool _settingsReady = false;
+  Future<void> _settingsLoading = Future.value();
+
   SyncClient get _client => ref.read(syncClientProvider);
   SettingsStore get _store => ref.read(settingsStoreProvider);
   SecretStore get _secrets => ref.read(secretStoreProvider);
   LessonNotesNotifier get _notes => ref.read(lessonNotesProvider.notifier);
+  int _nowMs() => _now().millisecondsSinceEpoch;
   DateTime _now() => ref.read(syncClockProvider)();
 
   static String _tokenId(String accountId) => 'sync-token|$accountId';
@@ -205,7 +229,10 @@ class SyncEngine extends SyncController {
   @override
   Map<String, SyncAccountState> build() {
     ref.listen(lessonNotesProvider, (_, _) => _onNotesChanged());
+    ref.listen(timetableSettingsProvider, (_, _) => _onSettingsChanged());
+    ref.listen(accessibilityProvider, (_, _) => _onSettingsChanged());
     ref.onDispose(() => _debounceTimer?.cancel());
+    _settingsLoading = _loadSettings();
     final store = ref.read(settingsStoreProvider);
     final cached = store.peek(storeKey);
     if (cached != null) return _decode(cached);
@@ -226,6 +253,7 @@ class SyncEngine extends SyncController {
     final header = v['pendingHeader'];
     final unsendable = v['unsendable'];
     final retention = v['webKeyRetention'];
+    final acked = v['settingsAcked'];
     final meta = _Meta(
       lastSeq: seq is num ? seq.toInt() : 0,
       fullPush: v['fullPush'] == true,
@@ -237,6 +265,11 @@ class SyncEngine extends SyncController {
       unsendable: {
         if (unsendable is Map)
           for (final u in unsendable.entries)
+            if (u.value is num) '${u.key}': (u.value as num).toInt(),
+      },
+      settingsAcked: {
+        if (acked is Map)
+          for (final u in acked.entries)
             if (u.value is num) '${u.key}': (u.value as num).toInt(),
       },
     );
@@ -307,6 +340,8 @@ class SyncEngine extends SyncController {
       'pendingHeader': ?m?.pendingHeader,
       if (m?.recoveryUnseen ?? false) 'recoveryUnseen': true,
       if (m != null && m.unsendable.isNotEmpty) 'unsendable': {...m.unsendable},
+      if (m != null && m.settingsAcked.isNotEmpty)
+        'settingsAcked': {...m.settingsAcked},
       if (s.webKeyRetention != WebKeyRetention.standard)
         'webKeyRetention': s.webKeyRetention.name,
     };
@@ -553,6 +588,7 @@ class SyncEngine extends SyncController {
   Future<void> _ready() async {
     await _loading;
     await _notes.ready;
+    await _settingsLoading;
   }
 
   /// Runs [fn] after every earlier operation of [accountId] finished.
@@ -643,20 +679,144 @@ class SyncEngine extends SyncController {
 
   // --------------------------------------------------------------- triggers
 
-  void _onNotesChanged() {
-    final due = [
-      for (final s in state.values)
-        if (s.phase == SyncPhase.on && _notes.hasDirty(s.accountId))
-          s.accountId,
-    ];
-    if (due.isEmpty) return;
+  void _onNotesChanged() => _schedule([
+    for (final s in state.values)
+      if (s.phase == SyncPhase.on && _notes.hasDirty(s.accountId)) s.accountId,
+  ]);
+
+  /// Debounced sync of [ids] (added to the accounts already due).
+  void _schedule(Iterable<String> ids) {
+    _due.addAll(ids);
+    if (_due.isEmpty) return;
     _debounceTimer?.cancel();
     _debounceTimer = Timer(debounce, () {
       if (!ref.mounted) return;
+      final due = [..._due];
+      _due.clear();
       for (final id in due) {
         unawaited(syncNow(id).then((_) {}, onError: (_) {}));
       }
     });
+  }
+
+  // ------------------------------------------------------- synced settings
+
+  Map<String, Object> _currentSettings() => syncedSettingsOf(
+    ref.read(timetableSettingsProvider),
+    ref.read(accessibilityProvider),
+  );
+
+  Future<void> _loadSettings() async {
+    try {
+      await ref.read(timetableSettingsProvider.notifier).ready;
+      await ref.read(accessibilityProvider.notifier).ready;
+      final raw = await ref
+          .read(settingsStoreProvider)
+          .read(SyncedSettingStamps.storeKey);
+      if (!ref.mounted) return;
+      _stamps = SyncedSettingStamps.decode(raw);
+    } catch (_) {
+      if (!ref.mounted) return;
+    }
+    _settingsReady = true;
+    if (_stamps.reconcile(_currentSettings(), _nowMs(), initial: true)) {
+      unawaited(_saveStamps());
+    }
+  }
+
+  Future<void> _saveStamps() async {
+    if (!ref.mounted) return;
+    try {
+      await _store.write(SyncedSettingStamps.storeKey, _stamps.toJson());
+    } catch (_) {}
+  }
+
+  /// A synced setting changed (by the user, or by [_applyRemoteSettings],
+  /// which updates the stamps first so nothing differs here).
+  void _onSettingsChanged() {
+    if (!_settingsReady || !ref.mounted) return;
+    if (!_stamps.reconcile(_currentSettings(), _nowMs(), initial: false)) {
+      return;
+    }
+    unawaited(_saveStamps());
+    _schedule([
+      for (final s in state.values)
+        if (s.phase == SyncPhase.on) s.accountId,
+    ]);
+  }
+
+  /// Applies settings from the server of [accountId] with last-write-wins
+  /// per setting (equal stamps: the server's version wins, as for notes).
+  /// Server keys of records that can't be used are added to [problems].
+  Future<void> _applyRemoteSettings(
+    String accountId,
+    Map<String, _RemoteSetting> remote,
+    Set<String> problems,
+  ) async {
+    if (remote.isEmpty) return;
+    final acked = _metaOf(accountId).settingsAcked;
+    final changes = <String, Object?>{};
+    var stamped = false;
+    for (final e in remote.entries) {
+      final name = e.key;
+      final r = e.value;
+      acked[name] = r.updatedAt;
+      final read = readRemoteSetting(name, r.text, deleted: r.deleted);
+      final Object? value;
+      switch (read) {
+        case UnknownSetting():
+          continue; // from a newer app version
+        case InvalidSetting():
+          problems.add(r.serverKey);
+          continue;
+        case SettingValue(value: final v):
+          value = v;
+      }
+      final local = _stamps.stamps[name];
+      if (local != null) {
+        if (r.updatedAt < local.at) continue;
+        if (r.updatedAt == local.at && sameSettingValue(local.value, value)) {
+          continue;
+        }
+      }
+      _stamps.stamps[name] = SettingStamp(value, r.updatedAt);
+      stamped = true;
+      if (local == null && value == null) continue; // tombstone only
+      changes[name] = value;
+    }
+    if (changes.isNotEmpty) {
+      final tt = ref.read(timetableSettingsProvider);
+      final nextTt = applyTimetableChanges(tt, changes);
+      if (nextTt != tt) {
+        ref.read(timetableSettingsProvider.notifier).set(nextTt);
+      }
+      final a11y = ref.read(accessibilityProvider);
+      final nextA11y = applyAccessibilityChanges(a11y, changes);
+      if (nextA11y != a11y) {
+        ref.read(accessibilityProvider.notifier).update((_) => nextA11y);
+      }
+    }
+    // Settings first, stamps after: both land in the same store write.
+    if (stamped) await _saveStamps();
+  }
+
+  /// Lowers stamps of local setting changes ahead of [max] (clock skew),
+  /// never to or below a version a server has.
+  void _clampSettings(int max) {
+    var n = 0;
+    for (final e in _stamps.stamps.entries.toList()) {
+      if (e.value.at <= max) continue;
+      var floor = 0;
+      for (final m in _meta.values) {
+        final a = m.settingsAcked[e.key];
+        if (a != null && a + 1 > floor) floor = a + 1;
+      }
+      final at = floor > max ? floor : max;
+      if (at >= e.value.at) continue;
+      _stamps.stamps[e.key] = SettingStamp(e.value.value, at);
+      n++;
+    }
+    if (n > 0) unawaited(_saveStamps());
   }
 
   /// Syncs every account that syncs (app start / resume); locked accounts
@@ -764,7 +924,8 @@ class SyncEngine extends SyncController {
   /// Status text after a sync that worked.
   String? _notice(String accountId, int skipped) {
     if (skipped > 0) {
-      return '$skipped note${skipped == 1 ? '' : 's'} could not be synced '
+      return '$skipped note${skipped == 1 ? '' : 's'} or setting'
+          '${skipped == 1 ? '' : 's'} could not be synced '
           '(too long or not readable with this key).';
     }
     final s = stateOf(accountId);
@@ -1037,6 +1198,7 @@ class SyncEngine extends SyncController {
             accountId,
             e.serverTime! + _clampLead.inMilliseconds,
           );
+          _clampSettings(e.serverTime! + _clampLead.inMilliseconds);
         } else if (e.kind == SyncErrorKind.e2eRequired) {
           if (!await _adoptMode(accountId, true)) return 0;
         } else if (e.kind == SyncErrorKind.e2eNotEnabled) {
@@ -1149,6 +1311,8 @@ class SyncEngine extends SyncController {
     // Pull. A full push needs to know everything the server has: from 0.
     if (push && meta.fullPush) meta.lastSeq = 0;
     final fullPull = meta.lastSeq == 0;
+    // A pull from 0 tells everything the server has.
+    if (fullPull) meta.settingsAcked.clear();
     // Server key -> updatedAt of the versions the server has (complete
     // after a full pull, else the changed ones).
     final known = <String, int>{};
@@ -1163,6 +1327,7 @@ class SyncEngine extends SyncController {
       final pulled = await _toLocal(accountId, page.notes, keys);
       problems.addAll(pulled.unreadable);
       _notes.applyRemote(pulled.notes);
+      await _applyRemoteSettings(accountId, pulled.settings, problems);
       // Only remember the seq once the notes are stored.
       await _notesSaved();
       if (!page.more || page.notes.isEmpty) {
@@ -1182,6 +1347,10 @@ class SyncEngine extends SyncController {
     final full = meta.fullPush;
     if (full) _notes.stampLegacy(accountId, _now().millisecondsSinceEpoch);
     final prefix = '$accountId|';
+    // Settings records an older app version stored as notes.
+    _notes.removeWhere(
+      (k) => k.startsWith(prefix) && isSettingsKey(k.substring(prefix.length)),
+    );
     final local = _notes.notesOf(accountId);
     // Forget "unsendable" marks of notes that changed or synced since.
     meta.unsendable.removeWhere(
@@ -1191,6 +1360,57 @@ class SyncEngine extends SyncController {
     var marked = false;
     final out = <RemoteNote>[];
     final sent = <String, (String, LessonNote, RemoteNote)>{};
+    final sentSettings = <String, (String, RemoteNote)>{};
+    // Settings set before settings were synced: stamped now, after the
+    // pull (so a synced version won over them).
+    var legacy = false;
+    for (final e in _stamps.stamps.entries.toList()) {
+      if (e.value.at != 0) continue;
+      _stamps.stamps[e.key] = SettingStamp(e.value.value, _nowMs());
+      legacy = true;
+    }
+    if (legacy) unawaited(_saveStamps());
+    for (final e in _stamps.stamps.entries) {
+      final st = e.value;
+      final have = meta.settingsAcked[e.key];
+      if (have != null && have >= st.at) continue;
+      // Never on the server and at the default: nothing to tell.
+      if (have == null && st.deleted) continue;
+      final remoteKey = settingsRemoteKey(e.key);
+      final text = st.deleted ? '' : jsonEncode(st.value);
+      if (text.length > _maxTextLength ||
+          (keys == null && remoteKey.length > _maxKeyLength)) {
+        tooLong++;
+        continue;
+      }
+      final RemoteNote r;
+      if (keys != null) {
+        final sk = await e2e.serverKey(keys, remoteKey);
+        r = RemoteNote(
+          key: sk,
+          blob: await e2e.encryptNote(
+            keys,
+            noteKey: remoteKey,
+            exam: false,
+            text: text,
+            updatedAt: st.at,
+            deleted: st.deleted,
+          ),
+          updatedAt: st.at,
+          deleted: st.deleted,
+        );
+      } else {
+        r = RemoteNote(
+          key: remoteKey,
+          exam: false,
+          text: text,
+          updatedAt: st.at,
+          deleted: st.deleted,
+        );
+      }
+      out.add(r);
+      sentSettings[r.key] = (e.key, r);
+    }
     for (final e in local.entries) {
       final n = e.value;
       if (!full && !n.dirty) continue;
@@ -1296,6 +1516,13 @@ class SyncEngine extends SyncController {
       final ack = <String, LessonNote>{};
       final other = <RemoteNote>[];
       for (final stored in res.notes) {
+        final setting = sentSettings[stored.key];
+        if (setting != null) {
+          // What the server has now (ours, or a newer one adopted below).
+          meta.settingsAcked[setting.$1] = stored.updatedAt;
+          if (!_sameVersion(setting.$2, stored)) other.add(stored);
+          continue;
+        }
         final mine = sent[stored.key];
         if (mine != null && _sameVersion(mine.$3, stored)) {
           ack[mine.$1] = mine.$2;
@@ -1305,7 +1532,14 @@ class SyncEngine extends SyncController {
         }
       }
       final adopted = await _toLocal(accountId, other, keys);
+      await _applyRemoteSettings(accountId, adopted.settings, problems);
       for (final k in adopted.unreadable) {
+        if (sentSettings.containsKey(k)) {
+          // A setting the server has a version of we can't read: acked
+          // above, so not sent again until it changes here.
+          problems.add(k);
+          continue;
+        }
         // The server kept a version this device can't read: don't send
         // ours again until it changes.
         final mine = sent[k];
@@ -1332,9 +1566,17 @@ class SyncEngine extends SyncController {
 
   /// Server notes as local notes by full local key, the count of notes
   /// that couldn't be read and their server keys.
-  Future<({Map<String, LessonNote> notes, int bad, Set<String> unreadable})>
+  Future<
+    ({
+      Map<String, LessonNote> notes,
+      Map<String, _RemoteSetting> settings,
+      int bad,
+      Set<String> unreadable,
+    })
+  >
   _toLocal(String accountId, List<RemoteNote> notes, E2eKeys? keys) async {
     final out = <String, LessonNote>{};
+    final settings = <String, _RemoteSetting>{};
     final unreadable = <String>{};
     for (final r in notes) {
       String key;
@@ -1373,11 +1615,26 @@ class SyncEngine extends SyncController {
         unreadable.add(r.key);
         continue;
       }
+      if (isSettingsKey(key)) {
+        // A synced setting, never a lesson note.
+        settings[key.substring(settingsKeyPrefix.length)] = _RemoteSetting(
+          serverKey: r.key,
+          text: text,
+          updatedAt: r.updatedAt,
+          deleted: r.deleted,
+        );
+        continue;
+      }
       out['$accountId|$key'] = r.deleted
           ? LessonNote.tombstone(r.updatedAt)
           : LessonNote(exam: exam, text: text, updatedAt: r.updatedAt);
     }
-    return (notes: out, bad: unreadable.length, unreadable: unreadable);
+    return (
+      notes: out,
+      settings: settings,
+      bad: unreadable.length,
+      unreadable: unreadable,
+    );
   }
 
   // ------------------------------------------------------------------ login
@@ -2231,6 +2488,20 @@ class SyncEngine extends SyncController {
       }
     });
   }
+}
+
+/// One synced setting as read from the server.
+class _RemoteSetting {
+  const _RemoteSetting({
+    required this.serverKey,
+    required this.text,
+    required this.updatedAt,
+    required this.deleted,
+  });
+  final String serverKey;
+  final String text;
+  final int updatedAt;
+  final bool deleted;
 }
 
 /// The server reported another E2E mode than this device assumed.

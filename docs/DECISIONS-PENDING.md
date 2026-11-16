@@ -366,6 +366,30 @@ once confirmed.
   (options, default `standard`), `_expired` / `_cacheKeys` /
   `setWebKeyRetention` in lib/sync/sync_engine.dart.
 
+## R9. Synced settings: which, key scheme, app-wide scope
+- **Chosen:** sync all timetable appearance settings (lesson and subject
+  colours, fill/border, school colours, font sizes, bold, centre text,
+  show cancelled) and, by the maintainer's decision, all accessibility
+  settings (contrast, day view by default, large day headers, read-aloud
+  button / language / speed, text size). Not synced: accounts and
+  credentials, active account, sync state, calendar sync, "what's new"
+  version, debug options. Records of the notes API under
+  `settings|<name>` (JSON text, exam false; with E2E encrypted like notes),
+  one per setting and per coloured subject, LWW per setting, reset to
+  default = tombstone. The settings are app-wide, so every syncing account
+  carries them and changes from any of them apply app-wide. Details:
+  docs/SYNC-PLAN.md "Synced settings".
+- **Alternatives:** (a) don't sync accessibility (device- and
+  person-related, e.g. a tablet vs. a phone may want another text size);
+  (b) ride along only with the first / active syncing account; (c) one
+  record for the whole settings object (fewer records, but two devices
+  changing different settings would overwrite each other).
+- **Switch:** (a) drop `_accessibilityFields` (or single names) in
+  lib/sync/synced_settings.dart, then existing records are ignored as
+  unknown; (b) in lib/sync/sync_engine.dart push settings only for the
+  chosen account (settings loop in `_pullPushOnce`) and ignore
+  `pulled.settings` for others; (c) would need a new name and a migration.
+
 ## Confirmed by the maintainer (2026-11-15, evening)
 - **Free Cloudflare plan** is fine (R6 budget stays).
 - **Alphas:** instead of a separate alpha database, the repository

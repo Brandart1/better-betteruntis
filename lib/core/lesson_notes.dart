@@ -386,6 +386,15 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
       ? LessonNote.tombstone(n.updatedAt)
       : LessonNote(exam: n.exam, text: n.text, updatedAt: n.updatedAt);
 
+  /// Removes the entries whose full key matches [test] (no tombstones:
+  /// used for records that never were lesson notes). Returns how many.
+  int removeWhere(bool Function(String key) test) {
+    final next = {...state}..removeWhere((k, _) => test(k));
+    final n = state.length - next.length;
+    if (n > 0) _commit(next);
+    return n;
+  }
+
   /// Drops tombstones older than [maxAge] of accounts for which [keep] is
   /// false (accounts that don't sync).
   void pruneTombstones(

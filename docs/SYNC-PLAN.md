@@ -10,7 +10,9 @@ before the teacher release (now 0.6.0; numbers swapped 2026-11-15).
   maintainer to run, update or back up.
 - The same Worker is the **WebUntis relay** for the web version (WebUntis
   sends no CORS headers) and hosts the **optional sync** of the user's own
-  lesson notes (custom exams, lesson details) in Cloudflare D1 (SQLite).
+  lesson notes (custom exams, lesson details) and customisation settings
+  (colours, text, accessibility; see "Synced settings") in Cloudflare D1
+  (SQLite).
 - Sync is **opt-in** with a disclaimer that the data is stored on a server.
   Turning it off deletes everything stored about the user on the server; the
   local notes stay on the device.
@@ -265,6 +267,94 @@ different keys at the same time.
   push; tombstones; reset `since` to 0 after a new session; stop on 401
   without touching local data.
 - Web: relay origin = the Worker (same origin), cookie auth + `X-BBU-Sync`.
+
+## Synced settings
+
+Added 2026-11-16 (maintainer: "make sync also sync settings (text,
+colours)"; accessibility added the same day). No server change: settings
+are ordinary records of the notes API in a reserved key namespace.
+Code: `lib/sync/synced_settings.dart` (list, encoding, stamps) and the
+settings part of `lib/sync/sync_engine.dart`. Open choices:
+DECISIONS-PENDING R9.
+
+**Synced** (app-wide today, applied app-wide):
+
+| Setting (store key) | Record names |
+|---|---|
+| Lesson colours: regular / substitution / cancelled / exam colour, school colours on/off, fill vs. border per state (`timetable`) | `timetable.regularColor`, `.irregularColor`, `.cancelledColor`, `.examColor`, `.useSchoolColors`, `.examMode`, `.irregularMode`, `.cancelledMode` |
+| Subject colours (`timetable.subjectColors`) | `timetable.subjectColor.<SUBJECT>` (one record per subject, short name trimmed + upper case) |
+| Text: subject / detail font size, bold subject, centre text (`timetable`) | `timetable.subjectFontSize`, `.detailFontSize`, `.boldSubject`, `.centerText` |
+| Lessons: show cancelled lessons (`timetable`) | `timetable.showCancelled` |
+| Accessibility, everything on the screen (`accessibility`): contrast, day view by default, large day headers, read-aloud button, read-aloud language, text size, voice speed | `accessibility.contrast`, `.dayViewByDefault`, `.largeDayHeaders`, `.speakButton`, `.speechLanguage`, `.textScale`, `.speechRate` |
+
+Custom exams and lesson details ("own lesson titles/texts") were already
+synced as lesson notes. Accessibility values are the user's explicit
+choices: "contrast off" (theme follows the system) and "read-aloud
+language: system" are synced as those choices; what they resolve to on a
+device (system theme, device language, the system text size the factor
+applies to) is computed at runtime and never synced.
+
+**Not synced**, and why:
+
+| Data | Reason |
+|---|---|
+| Accounts, credentials, active account (`activeAccountId`), account names | device login data / secrets; account rows differ per device |
+| Sync state (`syncState`), session tokens, E2E keys | the sync machinery itself; secrets |
+| Calendar sync (`calendarSync`) | refers to calendars of this device's calendar app |
+| Notifications / background refresh (none in the app yet) | would be per device (permissions, OS scheduling) |
+| `lastVersionOpened` ("what's new"), debug / developer options | per installation |
+| Cached timetables and master data | not user content; re-loaded from WebUntis |
+
+**Key scheme.** Server key `settings|<name>` (plaintext), `text` =
+canonical JSON of the value (integral numbers as int, so web and native
+encode alike), `exam` = false. With E2E the record is encrypted exactly
+like a note: server key = HMAC of `settings|<name>`, the real key inside
+the blob. Lesson note keys always start with a date (`YYYY-MM-DD|HHMM|…`),
+so they can never collide. A setting at its default has no record;
+**reset to default = tombstone**. Values ≤ 4 000 chars (all current ones
+are a few chars); a longer value or a plaintext key > 256 chars (very long
+subject name) is not sent and counted in "… could not be synced". A
+remote value this app version can't use (wrong type, out of range, not
+normalised) is skipped and counted; an unknown name (from a newer app
+version) is ignored silently.
+
+**Last write wins per setting.** Each device keeps one stamp per setting
+name (`syncedSettings` in the settings store: value + updatedAt,
+tombstones too), set when the value changes (always above the version it
+replaces). A remote record replaces the local value if newer; with an
+equal stamp the server's version wins (as for notes). Values that existed
+before this device synced settings have stamp 0: a synced version wins
+over them, the rest is stamped and uploaded at the next sync. Remote
+changes are applied to the settings stores (`timetableSettingsProvider`,
+`accessibilityProvider`), so the UI updates at once; local changes
+trigger the same debounced sync as notes.
+
+**Scope: app-wide settings ride along with every syncing account.** The
+settings are app-wide (no per-account keys exist today), so every account
+that syncs carries the same records under its own identity, and changes
+pulled through any of them are applied app-wide. Per account the engine
+remembers which version the server has (`settingsAcked` in the sync
+state) and pushes a setting when the local stamp is newer, so a change
+pulled from account A's server is forwarded to account B's server; with
+LWW per setting two accounts can't fight (the newest stamp wins
+everywhere, nothing is re-sent at equal stamps). A future per-account
+setting would sync only with its account.
+
+**Budgets.** About 20 settings + one record per coloured subject: far
+below the 5 000 live notes and the 5 000 writes/day per identity (a
+change is one write per setting at the next debounced sync, not per
+slider step).
+
+**Older clients (v0.5.0-alpha).** Their engine has no namespace check:
+it stores a settings record as a local lesson note `<accountId>|settings|…`
+(plaintext text = JSON, or the decrypted key with E2E). That is harmless:
+notes are only looked up by `lessonNoteKey` (always with a date at the
+second position), so it never shows up in the timetable, exports or the
+calendar; the old client never edits or re-sends it (it has the server's
+version; after a server reset it would re-upload it unchanged, which is
+the same record). Its settings just don't sync. After an update the new
+engine drops such leftover entries from the notes and never sends them as
+notes.
 
 ## Order of work
 

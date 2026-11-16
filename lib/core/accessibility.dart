@@ -159,15 +159,22 @@ final accessibilityProvider =
 class AccessibilityNotifier extends Notifier<AccessibilitySettings> {
   static const storeKey = 'accessibility';
   bool _changed = false;
+  Future<void> _loading = Future.value();
 
   @override
   AccessibilitySettings build() {
     final store = ref.watch(settingsStoreProvider);
     final cached = store.peek(storeKey);
-    if (cached != null) return AccessibilitySettings.fromJson(cached);
-    unawaited(_load(store));
+    if (cached != null) {
+      _loading = Future.value();
+      return AccessibilitySettings.fromJson(cached);
+    }
+    _loading = _load(store);
     return const AccessibilitySettings();
   }
+
+  /// Completes once the stored settings are loaded (or found missing).
+  Future<void> get ready => _loading;
 
   Future<void> _load(SettingsStore store) async {
     try {
