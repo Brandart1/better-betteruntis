@@ -3,6 +3,7 @@
 Teacher test build (branch `teacher`). Absences, lesson topic, previous topics and class register entries are confirmed with real teacher accounts. Room booking, exams, absence summaries and pupil photos are new and their server calls are still guesses — if something fails, please send the entries from the Debug screen.
 
 ### New
+- Your own homework on a lesson, like your own exams; both also appear in the Info center marked “Custom”.
 - Pupils and parents: the first time they open **Teachers** in the timetables menu, a notice asks them not to use teacher timetables to contact teachers in free periods and points to the office hours (once per device). Teacher accounts don't see it.
 - Turning on sync checks for an existing sync first: you only confirm, or enter its passphrase.
 - The login screen now says that BetterBetterUntis is independent and not affiliated with Untis GmbH.

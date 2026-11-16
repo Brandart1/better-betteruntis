@@ -53,11 +53,12 @@ Any authenticated call whose identity row disappeared between the session
 lookup and the statement (concurrent account deletion) answers 401
 `unauthorized`, never 200 with empty data.
 
-Notes: plaintext `{key, exam, text, updatedAt, deleted}`, E2E
+Notes: plaintext `{key, exam, text, homework?, updatedAt, deleted}`
+(`homework` optional on writes, `""` when missing; always in answers), E2E
 `{key (43-char base64url HMAC), blob (base64url), updatedAt, deleted}`;
 answers add `seq`. Last write wins; an equal `updatedAt` keeps the stored
 version (the answer returns it). **Plaintext tombstones (`deleted: true`)
-are stored and returned blanked: `text: ""`, `exam: false`**, whatever the
+are stored and returned blanked: `text: ""`, `homework: ""`, `exam: false`**, whatever the
 client sent; E2E tombstones are opaque blobs and stored as sent. Seqs of
 one PUT are `last_seq + position in the request + 1`, so notes of the
 request that weren't written (older/tied) leave gaps. `clock_skew` (updatedAt > server time +
@@ -76,7 +77,7 @@ of the header returned by GET.
 
 Limits: 500 notes / 1 MiB per request; per identity **5 000 live
 (non-deleted) notes** (tombstones don't count here) and 5 MiB (UTF-8 bytes
-of key + text/blob, tombstones included); a write that doesn't grow the
+of key + text/homework/blob, tombstones included); a write that doesn't grow the
 live count / the byte total passes even when over the limit (deleting
 always works). **Daily write budget: 5 000 accepted note writes per
 identity and UTC day** (every insert or overwrite counts 1, tombstones
@@ -147,7 +148,8 @@ a stricter CSP is set) and HSTS; the app gets the same via `public/_headers`
 Modules: `router.ts` (routes), `auth.ts` (sessions, cookie, CSRF, rate limits),
 `identity.ts` (WebUntis check), `notes.ts` / `e2e.ts` (validation, handlers),
 `db.ts` (all SQL), `http.ts` (JSON helpers); `../ip.ts` (rate-limit IP keys).
-Schema: `migrations/0001_init.sql`.
+Schema: `migrations/0001_init.sql` (+ `0002_last_login.sql`,
+`0003_homework.sql`).
 
 
 **Retention (daily cron):** expired sessions, tombstones not written for 400
@@ -233,8 +235,7 @@ their notes and E2E header (privacy notice §2).
     D1 on the free plan: 100 000 rows written and 5 M rows read per day for
     the whole app; when used up, sync fails for everyone until 00:00 UTC.
     The per-identity daily write budget keeps one account from using it up;
-    watch D1 → Metrics and consider Workers Paid if the app grows
-    (`docs/DECISIONS-PENDING.md` R6).
+    watch D1 → Metrics and consider Workers Paid if the app grows.
 
 ### How releases deploy
 
@@ -310,7 +311,7 @@ Foreign keys cascade anyway; the explicit deletes match what
 that window has passed.
 
 For an access request, the same `SELECT` plus
-`SELECT key, exam, text, blob, updated_at, deleted FROM notes WHERE identity_id = 42`
+`SELECT key, exam, text, homework, blob, updated_at, deleted FROM notes WHERE identity_id = 42`
 shows everything stored (E2E notes are ciphertext).
 
 ## Teacher web alpha (no sync)

@@ -224,6 +224,7 @@ class LessonDetailsPage extends ConsumerWidget {
             noteKey: key,
             userExam: notes[key]?.exam ?? false,
             userNote: notes[key]?.text ?? '',
+            userHomework: notes[key]?.homework ?? '',
           )
         else
           q,
@@ -721,31 +722,51 @@ class ElementChip extends StatelessWidget {
   }
 }
 
-/// Asks for lesson details (e.g. "mündliche Wiederholung", exam topics).
-/// Returns the text, or null when cancelled/skipped.
+/// Asks for lesson details (e.g. "mündliche Wiederholung", exam topics)
+/// or, with another [hint], the user's homework. Returns the text, or null
+/// when cancelled/skipped.
 Future<String?> askLessonDetails(
   BuildContext context, {
   required String title,
   String initial = '',
   String dismissLabel = 'Cancel',
+  String hint = 'e.g. mündliche Wiederholung, topics, pages',
 }) => showDialog<String>(
   context: context,
   builder: (_) => _LessonDetailsDialog(
     title: title,
     initial: initial,
     dismissLabel: dismissLabel,
+    hint: hint,
   ),
 );
+
+/// Hint of the homework dialog.
+const homeworkHint = 'e.g. p. 12, exercises 3–5';
+
+/// Saves the user's [note] for [keys] (all periods of a lesson) and brings
+/// calendars synced from the app up to date.
+void saveLessonNote(WidgetRef ref, List<String> keys, LessonNote note) {
+  ref.read(lessonNotesProvider.notifier).set(keys, note);
+  unawaited(
+    ref
+        .read(calendarSyncsProvider.notifier)
+        .syncDue(force: true)
+        .catchError((_) {}),
+  );
+}
 
 class _LessonDetailsDialog extends StatefulWidget {
   const _LessonDetailsDialog({
     required this.title,
     required this.initial,
     required this.dismissLabel,
+    required this.hint,
   });
   final String title;
   final String initial;
   final String dismissLabel;
+  final String hint;
 
   @override
   State<_LessonDetailsDialog> createState() => _LessonDetailsDialogState();
@@ -773,10 +794,10 @@ class _LessonDetailsDialogState extends State<_LessonDetailsDialog> {
         // Sync limit (worker: 4 000 characters per note).
         maxLength: 4000,
         textCapitalization: TextCapitalization.sentences,
-        decoration: const InputDecoration(
-          hintText: 'e.g. mündliche Wiederholung, topics, pages',
-          helperText: 'Only saved on this device.',
-          border: OutlineInputBorder(),
+        decoration: InputDecoration(
+          hintText: widget.hint,
+          helperText: 'Only for you, not sent to the school.',
+          border: const OutlineInputBorder(),
         ),
       ),
       actions: [
@@ -795,7 +816,8 @@ class _LessonDetailsDialogState extends State<_LessonDetailsDialog> {
   }
 }
 
-/// The user's own additions: lesson details and the custom exam mark.
+/// The user's own additions: lesson details, homework and the custom exam
+/// mark.
 class _UserNoteSection extends ConsumerWidget {
   const _UserNoteSection({
     required this.block,
@@ -818,21 +840,15 @@ class _UserNoteSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final p = block.first;
-    final note = LessonNote(exam: p.userExam, text: p.userNote);
-    final notes = ref.read(lessonNotesProvider.notifier);
+    final note = LessonNote(
+      exam: p.userExam,
+      text: p.userNote,
+      homework: p.userHomework,
+    );
     final schoolExam = block.periods.any((q) => q.isSchoolExam);
     final serverInfo = block.first.infoText.trim();
 
-    // Saves and brings calendars synced from the app up to date.
-    void save(LessonNote n) {
-      notes.set(noteKeys, n);
-      unawaited(
-        ref
-            .read(calendarSyncsProvider.notifier)
-            .syncDue(force: true)
-            .catchError((_) {}),
-      );
-    }
+    void save(LessonNote n) => saveLessonNote(ref, noteKeys, n);
 
     Future<void> editDetails() async {
       final text = await askLessonDetails(
@@ -842,6 +858,17 @@ class _UserNoteSection extends ConsumerWidget {
       );
       if (text == null) return;
       save(note.copyWith(text: text));
+    }
+
+    Future<void> editHomework() async {
+      final text = await askLessonDetails(
+        context,
+        title: note.homework.isEmpty ? 'Add homework' : 'Edit homework',
+        initial: note.homework,
+        hint: homeworkHint,
+      );
+      if (text == null) return;
+      save(note.copyWith(homework: text));
     }
 
     Future<void> markExam() async {
@@ -882,6 +909,25 @@ class _UserNoteSection extends ConsumerWidget {
                 onTap: editDetails,
               ),
             ),
+          if (note.homework.isNotEmpty) ...[
+            if (note.text.isNotEmpty) const SizedBox(height: 8),
+            Card.outlined(
+              key: const ValueKey('lesson-user-homework'),
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.menu_book_outlined),
+                title: Text(note.homework),
+                subtitle: const Text('Your homework'),
+                trailing: IconButton(
+                  key: const ValueKey('lesson-homework-remove'),
+                  tooltip: 'Remove homework',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => save(note.copyWith(homework: '')),
+                ),
+                onTap: editHomework,
+              ),
+            ),
+          ],
           const SizedBox(height: 4),
           Wrap(
             spacing: 8,
@@ -909,6 +955,16 @@ class _UserNoteSection extends ConsumerWidget {
                     note.text.isEmpty ? 'Add details' : 'Edit details',
                   ),
                 ),
+              TextButton.icon(
+                key: const ValueKey('lesson-homework-edit'),
+                onPressed: editHomework,
+                icon: Icon(
+                  note.homework.isEmpty ? Icons.add : Icons.edit_outlined,
+                ),
+                label: Text(
+                  note.homework.isEmpty ? 'Add homework' : 'Edit homework',
+                ),
+              ),
               if (note.exam)
                 TextButton.icon(
                   key: const ValueKey('lesson-exam-remove'),

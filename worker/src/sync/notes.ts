@@ -11,16 +11,19 @@ export const LIMITS = {
   maxBodyBytes: 1024 * 1024,
   /** Live (non-deleted) notes per user; tombstones don't count here (they do in bytes). */
   maxNotesPerUser: 5_000,
-  /** Stored bytes per user: UTF-8 key + text/blob over all notes incl. tombstones. */
+  /** Stored bytes per user: UTF-8 key + text/homework/blob over all notes incl. tombstones. */
   maxBytesPerUser: 5 * 1024 * 1024,
   /**
    * Accepted note writes per user and UTC day (inserts and overwrites,
    * tombstones included; older/tied notes that aren't written don't count).
-   * Protects the app-wide D1 daily write allowance (docs/DECISIONS-PENDING.md R6).
+   * Protects the app-wide D1 daily write allowance (free plan: 100 000 rows
+   * written per day for the whole app; used up, sync stops for everyone).
    */
   maxWritesPerDay: 5_000,
   maxKeyLength: 256,
   maxTextLength: 4000,
+  /** The user's homework of a lesson (plaintext notes), like [maxTextLength]. */
+  maxHomeworkLength: 4000,
   /** E2E key: base64url HMAC-SHA256 (32 bytes, unpadded). */
   e2eKeyLength: 43,
   /** E2E blob: base64url of at most 16 KiB of ciphertext. */
@@ -38,6 +41,7 @@ export function noteToJson(r: db.NoteRow): Record<string, unknown> {
     key: r.key,
     exam: r.exam === 1,
     text: r.text ?? "",
+    homework: r.homework ?? "",
     updatedAt: r.updated_at,
     deleted: r.deleted === 1,
     seq: r.seq,
@@ -71,9 +75,9 @@ const bad = (msg: string) => new HttpError(400, "bad_request", msg);
 
 /** Parses one note of a PUT body; [i] is only used in messages (never user data). */
 function parseNote(v: unknown, i: number, now: number): db.NoteInput {
-  const shape = `notes[${i}] must be {key, exam, text, updatedAt, deleted} or {key, blob, updatedAt, deleted}.`;
+  const shape = `notes[${i}] must be {key, exam, text, homework?, updatedAt, deleted} or {key, blob, updatedAt, deleted}.`;
   if (!isPlainObject(v)) throw bad(shape);
-  const { key, exam, text, blob, updatedAt, deleted } = v;
+  const { key, exam, text, homework, blob, updatedAt, deleted } = v;
   if (typeof key !== "string" || typeof deleted !== "boolean" || typeof updatedAt !== "number") throw bad(shape);
   if (!Number.isSafeInteger(updatedAt) || updatedAt < 0) throw bad(`notes[${i}]: updatedAt must be an integer >= 0.`);
   if (updatedAt > now + LIMITS.maxClockSkewMs) {
@@ -83,7 +87,9 @@ function parseNote(v: unknown, i: number, now: number): db.NoteInput {
   }
   if (blob !== undefined) {
     // End-to-end encrypted note: key = base64url HMAC, blob = base64url ciphertext.
-    if (exam !== undefined || text !== undefined) throw bad(`notes[${i}]: an encrypted note has no exam/text.`);
+    if (exam !== undefined || text !== undefined || homework !== undefined) {
+      throw bad(`notes[${i}]: an encrypted note has no exam/text/homework.`);
+    }
     if (!isBase64Url(key, LIMITS.e2eKeyLength, LIMITS.e2eKeyLength)) {
       throw bad(`notes[${i}]: key of an encrypted note must be ${LIMITS.e2eKeyLength} base64url chars.`);
     }
@@ -92,14 +98,20 @@ function parseNote(v: unknown, i: number, now: number): db.NoteInput {
     }
     return { key, exam: null, text: null, blob, updatedAt, deleted };
   }
+  // homework is optional: app versions before it don't send it ('' then).
   if (typeof exam !== "boolean" || typeof text !== "string") throw bad(shape);
+  if (homework !== undefined && typeof homework !== "string") throw bad(shape);
+  const hw = homework ?? "";
   if (key.length === 0) throw bad(`notes[${i}]: key must not be empty.`);
   if (key.length > LIMITS.maxKeyLength) throw bad(`notes[${i}]: key longer than ${LIMITS.maxKeyLength} chars.`);
   if (text.length > LIMITS.maxTextLength) throw bad(`notes[${i}]: text longer than ${LIMITS.maxTextLength} chars.`);
-  if (hasBadChars(key) || hasBadChars(text)) throw bad(`notes[${i}]: NUL or unpaired surrogate.`);
+  if (hw.length > LIMITS.maxHomeworkLength) {
+    throw bad(`notes[${i}]: homework longer than ${LIMITS.maxHomeworkLength} chars.`);
+  }
+  if (hasBadChars(key) || hasBadChars(text) || hasBadChars(hw)) throw bad(`notes[${i}]: NUL or unpaired surrogate.`);
   // Plaintext tombstones are stored blanked (nothing of a deleted note stays).
-  if (deleted) return { key, exam: false, text: "", blob: null, updatedAt, deleted };
-  return { key, exam, text, blob: null, updatedAt, deleted };
+  if (deleted) return { key, exam: false, text: "", homework: "", blob: null, updatedAt, deleted };
+  return { key, exam, text, homework: hw, blob: null, updatedAt, deleted };
 }
 
 /**

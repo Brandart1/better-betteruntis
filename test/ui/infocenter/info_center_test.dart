@@ -1,5 +1,6 @@
 import 'package:better_betteruntis/core/info.dart';
 import 'package:better_betteruntis/core/interfaces.dart';
+import 'package:better_betteruntis/core/lesson_notes.dart';
 import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/core/providers.dart';
 import 'package:better_betteruntis/dev/fake_info.dart';
@@ -593,5 +594,179 @@ void main() {
     expect(find.text('Your inbox is empty'), findsOneWidget);
     await openTab(tester, 'Homework');
     expect(find.text('No homework 🎉'), findsOneWidget);
+  });
+
+  group('custom items (lesson notes)', () {
+    String two(int v) => v.toString().padLeft(2, '0');
+    String key(
+      DateTime d,
+      String hhmm,
+      int lesson,
+      String what, {
+      String? acc,
+    }) =>
+        '${acc ?? account().id}|${d.year}-${two(d.month)}-${two(d.day)}|'
+        '$hhmm|$lesson|$what';
+    ProviderContainer container(WidgetTester tester) =>
+        ProviderScope.containerOf(
+          tester.element(find.byType(InfoCenterScreen)),
+        );
+
+    testWidgets('homework tab: custom homework among the school\'s, with a '
+        '"Custom" chip; tapping edits it', (tester) async {
+      await pump(tester);
+      final notes = container(tester).read(lessonNotesProvider.notifier);
+      final ph = '${DemoIds.ph}';
+      // A double lesson: one item.
+      notes.set([
+        key(today, '0745', 501, ph),
+        key(today, '0835', 501, ph),
+      ], const LessonNote(homework: 'Arbeitsblatt 2'));
+      // A lesson without a subject: its title.
+      notes.set([
+        key(today, '0940', 502, 'Projekttag'),
+      ], const LessonNote(text: 'details only', homework: 'Plakat'));
+      // Not shown: details only, another account, a removed one.
+      notes.set([key(today, '1030', 503, ph)], const LessonNote(text: 'x'));
+      notes.set([
+        key(today, '1130', 504, ph, acc: 'other'),
+      ], const LessonNote(homework: 'Not mine'));
+      notes.set([key(today, '1220', 505, ph)], const LessonNote(homework: 'y'));
+      notes.set([key(today, '1220', 505, ph)], const LessonNote());
+      await openTab(tester, 'Homework');
+
+      final card = find.byKey(
+        ValueKey('homework-custom-${key(today, '0745', 501, ph)}'),
+      );
+      expect(card, findsOneWidget);
+      expect(
+        find.descendant(of: card, matching: find.text('Physik')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('Arbeitsblatt 2')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('Custom')),
+        findsOneWidget,
+      );
+      final other = find.byKey(
+        ValueKey('homework-custom-${key(today, '0940', 502, 'Projekttag')}'),
+      );
+      expect(
+        find.descendant(of: other, matching: find.text('Projekttag')),
+        findsOneWidget,
+      );
+      expect(find.text('Custom'), findsNWidgets(2));
+      expect(find.text('Not mine'), findsNothing);
+      expect(find.text('y'), findsNothing);
+      expect(find.text('details only'), findsNothing);
+      // The school's homework is still there.
+      expect(find.text('Buch S. 84, Nr. 3a–d und 5'), findsOneWidget);
+
+      await tester.tap(find.text('Arbeitsblatt 2'));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit homework'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('lesson-details-field')),
+        'Arbeitsblatt 3',
+      );
+      await tester.tap(find.byKey(const ValueKey('lesson-details-save')));
+      await tester.pumpAndSettle();
+      expect(find.text('Arbeitsblatt 3'), findsOneWidget);
+      final all = container(tester).read(lessonNotesProvider);
+      expect(all[key(today, '0745', 501, ph)]!.homework, 'Arbeitsblatt 3');
+      expect(all[key(today, '0835', 501, ph)]!.homework, 'Arbeitsblatt 3');
+    });
+
+    testWidgets('homework tab: custom homework alone is not "empty", and '
+        'past custom homework is never overdue', (tester) async {
+      repo = FakeInfoCenterRepository(homework: const []);
+      await pump(tester);
+      await openTab(tester, 'Homework');
+      expect(find.text('Nothing is due this week.'), findsOneWidget);
+      final notes = container(tester).read(lessonNotesProvider.notifier);
+      final ph = '${DemoIds.ph}';
+      notes.set([
+        key(today.subtract(const Duration(days: 7)), '0745', 501, ph),
+      ], const LessonNote(homework: 'Old one'));
+      notes.set([
+        key(today, '0745', 501, ph),
+      ], const LessonNote(homework: 'New'));
+      await tester.pumpAndSettle();
+      expect(find.text('Nothing is due this week.'), findsNothing);
+      expect(find.text('New'), findsOneWidget);
+      await tester.tap(find.text('Past 4 weeks'));
+      await tester.pumpAndSettle();
+      expect(find.text('Old one'), findsOneWidget);
+      expect(find.text('Overdue'), findsNothing);
+    });
+
+    testWidgets('exams tab: custom exams upcoming and past, with a "Custom" '
+        'chip, their details and the period\'s time', (tester) async {
+      await pump(tester);
+      final notes = container(tester).read(lessonNotesProvider.notifier);
+      final ph = '${DemoIds.ph}';
+      final tomorrow = today.add(const Duration(days: 1));
+      notes.set([
+        key(tomorrow, '0745', 601, ph),
+        key(tomorrow, '0835', 601, ph),
+      ], const LessonNote(exam: true, text: 'Kapitel 4'));
+      notes.set([
+        key(today.subtract(const Duration(days: 20)), '0940', 602, ph),
+      ], const LessonNote(exam: true));
+      // Homework only is no exam.
+      notes.set([
+        key(tomorrow, '1030', 603, ph),
+      ], const LessonNote(homework: 'Not an exam'));
+      await openTab(tester, 'Exams');
+
+      final card = find.byKey(
+        ValueKey('exam-custom-${key(tomorrow, '0745', 601, ph)}'),
+      );
+      expect(card, findsOneWidget);
+      for (final t in ['Physik', 'Custom', 'Kapitel 4', 'Tomorrow']) {
+        expect(
+          find.descendant(of: card, matching: find.text(t)),
+          findsOneWidget,
+        );
+      }
+      // Start of the first, end of the last period (time grid).
+      expect(
+        find.descendant(of: card, matching: find.textContaining('07:45–09:20')),
+        findsOneWidget,
+      );
+      expect(find.text('Not an exam'), findsNothing);
+      // School exams stay; the past one counts in the past section.
+      expect(find.text('Mathematik · Lineare Funktionen'), findsOneWidget);
+      expect(find.text('Past (3)'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('exams-past-toggle')));
+      await tester.pumpAndSettle();
+      final past = find.byKey(
+        ValueKey(
+          'exam-custom-'
+          '${key(today.subtract(const Duration(days: 20)), '0940', 602, ph)}',
+        ),
+      );
+      expect(
+        find.descendant(of: past, matching: find.text('Custom')),
+        findsOneWidget,
+      );
+
+      await tester.ensureVisible(find.text('Kapitel 4'));
+      await tester.tap(find.text('Kapitel 4'));
+      await tester.pumpAndSettle();
+      expect(find.text('Exam details'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('lesson-details-field')),
+        'Kapitel 4 und 5',
+      );
+      await tester.tap(find.byKey(const ValueKey('lesson-details-save')));
+      await tester.pumpAndSettle();
+      final n = container(tester)
+          .read(lessonNotesProvider)[key(tomorrow, '0835', 601, ph)]!;
+      expect((n.exam, n.text), (true, 'Kapitel 4 und 5'));
+    });
   });
 }

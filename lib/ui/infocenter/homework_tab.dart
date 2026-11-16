@@ -4,9 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/info.dart';
 import '../../core/interfaces.dart';
+import '../../core/lesson_notes.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../timetable/timetable_utils.dart';
+import 'custom_items.dart';
 import 'info_common.dart';
 import 'info_providers.dart';
 
@@ -47,6 +49,13 @@ class HomeworkTab extends ConsumerWidget {
     final p = homeworkProvider(q);
     final value = ref.watch(p);
     final names = ref.watch(nameResolverProvider).value;
+    // The user's own homework (lesson notes) joins the school's.
+    final custom = customHomework(
+      ref.watch(lessonNotesProvider),
+      account.id,
+      start,
+      end,
+    );
 
     return CachedListView<List<HomeworkItem>>(
       value: value,
@@ -56,7 +65,7 @@ class HomeworkTab extends ConsumerWidget {
         selected: range,
         onSelected: (r) => ref.read(homeworkRangeProvider.notifier).set(r),
       ),
-      isEmpty: (l) => l.isEmpty,
+      isEmpty: (l) => l.isEmpty && custom.isEmpty,
       empty: InfoEmptyState(
         icon: Icons.task_alt,
         title: range == HomeworkRange.past4Weeks ? 'No homework' : 'No homework 🎉',
@@ -66,7 +75,8 @@ class HomeworkTab extends ConsumerWidget {
           HomeworkRange.past4Weeks => 'No homework in the past four weeks.',
         },
       ),
-      builder: (context, items) {
+      builder: (context, school) {
+        final items = [...school, ...custom];
         final groups = groupBy(items, (HomeworkItem h) => dateOnly(h.dueOn));
         final days = groups.keys.toList()..sort();
         final ordered = range == HomeworkRange.past4Weeks ? days.reversed : days;
@@ -75,15 +85,22 @@ class HomeworkTab extends ConsumerWidget {
             SliverToBoxAdapter(
               child: InfoSectionHeader(
                 homeworkDueLabel(context, day, now),
-                color: day.isBefore(dateOnly(now)) &&
-                        groups[day]!.any((h) => !h.completed)
+                color: groups[day]!.any((h) => isOverdue(h, now))
                     ? Theme.of(context).colorScheme.error
                     : null,
               ),
             ),
             SliverList.list(
               children: [
-                for (final h in groups[day]!) HomeworkCard(item: h, names: names, now: now),
+                for (final h in groups[day]!)
+                  HomeworkCard(
+                    item: h,
+                    names: names,
+                    now: now,
+                    onTap: h.custom == null
+                        ? null
+                        : () => editCustomHomework(context, ref, h.custom!),
+                  ),
               ],
             ),
           ],
@@ -103,8 +120,11 @@ String homeworkDueLabel(BuildContext context, DateTime day, DateTime now) {
   return d < 0 ? 'Was due $label' : 'Due $label';
 }
 
+/// The user's own homework is never overdue: it has no completion state.
 bool isOverdue(HomeworkItem h, DateTime now) =>
-    !h.completed && dateOnly(h.dueOn).isBefore(dateOnly(now));
+    h.custom == null &&
+    !h.completed &&
+    dateOnly(h.dueOn).isBefore(dateOnly(now));
 
 class _RangeChips extends StatelessWidget {
   const _RangeChips({required this.selected, required this.onSelected});
@@ -143,11 +163,15 @@ class HomeworkCard extends StatelessWidget {
     required this.item,
     required this.names,
     required this.now,
+    this.onTap,
   });
 
   final HomeworkItem item;
   final NameResolver? names;
   final DateTime now;
+
+  /// Custom homework: edit it.
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -155,13 +179,21 @@ class HomeworkCard extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final overdue = isOverdue(h, now);
+    final custom = h.custom;
     final subject = h.subjectId == null
         ? null
         : resolveName(names, ElementType.subject, h.subjectId!);
+    final title = subject ??
+        (custom != null && custom.title.isNotEmpty ? custom.title : null);
     final teachers = resolveNames(names, ElementType.teacher, h.teacherIds);
     final fg = overdue ? cs.onErrorContainer : null;
     return Card.outlined(
-      key: ValueKey('homework-${h.id}'),
+      key: ValueKey(
+        custom == null
+            ? 'homework-${h.id}'
+            : 'homework-custom-${custom.noteKeys.first}',
+      ),
+      clipBehavior: Clip.antiAlias,
       margin: const EdgeInsets.symmetric(vertical: 4),
       color: overdue ? cs.errorContainer : null,
       shape: overdue
@@ -170,77 +202,90 @@ class HomeworkCard extends StatelessWidget {
               side: BorderSide(color: cs.error),
             )
           : null,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  h.completed ? Icons.check_circle : Icons.radio_button_unchecked,
-                  size: 20,
-                  color: h.completed ? cs.primary : (fg ?? cs.outline),
-                  semanticLabel: h.completed ? 'Completed' : 'Not completed',
-                ),
-                const SizedBox(width: 8),
-                Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  if (custom != null)
+                    Icon(
+                      Icons.menu_book_outlined,
+                      size: 20,
+                      color: cs.outline,
+                      semanticLabel: 'Your homework',
+                    )
+                  else
+                    Icon(
+                      h.completed ? Icons.check_circle : Icons.radio_button_unchecked,
+                      size: 20,
+                      color: h.completed ? cs.primary : (fg ?? cs.outline),
+                      semanticLabel: h.completed ? 'Completed' : 'Not completed',
+                    ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      title ?? 'Homework',
+                      style: theme.textTheme.titleSmall?.copyWith(color: fg),
+                    ),
+                  ),
+                  if (custom != null)
+                    const CustomChip()
+                  else if (overdue)
+                    InfoChip(
+                      'Overdue',
+                      icon: Icons.warning_amber_rounded,
+                      background: cs.error,
+                      foreground: cs.onError,
+                    )
+                  else if (h.completed)
+                    const InfoChip('Done'),
+                ],
+              ),
+              if (teachers.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 28, top: 2),
                   child: Text(
-                    subject ?? 'Homework',
-                    style: theme.textTheme.titleSmall?.copyWith(color: fg),
+                    teachers.join(', '),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: fg ?? cs.onSurfaceVariant,
+                    ),
                   ),
                 ),
-                if (overdue)
-                  InfoChip(
-                    'Overdue',
-                    icon: Icons.warning_amber_rounded,
-                    background: cs.error,
-                    foreground: cs.onError,
-                  )
-                else if (h.completed)
-                  const InfoChip('Done'),
-              ],
-            ),
-            if (teachers.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 28, top: 2),
-                child: Text(
-                  teachers.join(', '),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: fg ?? cs.onSurfaceVariant,
+              if (h.text.trim().isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 28, top: 6),
+                  child: Text(
+                    h.text.trim(),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: fg,
+                      decoration: h.completed ? TextDecoration.lineThrough : null,
+                      decorationColor: cs.outline,
+                    ),
                   ),
                 ),
-              ),
-            if (h.text.trim().isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 28, top: 6),
-                child: Text(
-                  h.text.trim(),
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: fg,
-                    decoration: h.completed ? TextDecoration.lineThrough : null,
-                    decorationColor: cs.outline,
+              if (h.remark.trim().isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 28, top: 4),
+                  child: Text(
+                    h.remark.trim(),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontStyle: FontStyle.italic,
+                      color: fg ?? cs.onSurfaceVariant,
+                    ),
                   ),
                 ),
-              ),
-            if (h.remark.trim().isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 28, top: 4),
-                child: Text(
-                  h.remark.trim(),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontStyle: FontStyle.italic,
-                    color: fg ?? cs.onSurfaceVariant,
-                  ),
+              if (h.attachments.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 20),
+                  child: AttachmentList(h.attachments),
                 ),
-              ),
-            if (h.attachments.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 20),
-                child: AttachmentList(h.attachments),
-              ),
-            const SizedBox(height: 4),
-          ],
+              const SizedBox(height: 4),
+            ],
+          ),
         ),
       ),
     );

@@ -75,7 +75,7 @@ class FakeSyncServer {
   /// without writing.
   int busyPuts = 0;
 
-  /// Stored bytes per identity (key + text/blob), like the Worker's 5 MiB.
+  /// Stored bytes per identity (key + text/homework/blob), like the Worker's 5 MiB.
   int maxBytes = 5 * 1024 * 1024;
 
   /// Live notes (tombstones don't count) per identity.
@@ -250,6 +250,8 @@ class FakeSyncServer {
                 // Plaintext tombstones are stored without content.
                 'exam': deleted ? false : n['exam'],
                 'text': deleted ? '' : n['text'],
+                // Optional (missing = ''), like the Worker.
+                'homework': deleted ? '' : (n['homework'] ?? ''),
               },
               'updatedAt': at,
               'deleted': deleted,
@@ -284,6 +286,7 @@ class FakeSyncServer {
         for (final n in next.values) {
           bytes += utf8.encode(n['key'] as String).length;
           bytes += utf8.encode('${n['blob'] ?? n['text'] ?? ''}').length;
+          bytes += utf8.encode('${n['homework'] ?? ''}').length;
         }
         if (bytes > maxBytes) return err(413, 'storage_quota');
         ident.writesToday += changedKeys.length;

@@ -196,7 +196,8 @@ class LessonCard extends ConsumerWidget {
       textDirection: direction,
       textScaler: scaler,
     );
-    // The exam icon (a WidgetSpan) needs a size to measure the text.
+    // The exam and homework icons (WidgetSpans) need a size to measure the
+    // text.
     var placeholders = 0;
     text.visitChildren((span) {
       if (span is PlaceholderSpan) placeholders++;
@@ -257,6 +258,22 @@ class LessonCard extends ConsumerWidget {
         TextSpan(text: p.customTitle.isNotEmpty ? p.customTitle : '—')
       else
         ...elementSpans(names, subjects, long: detailed, oldStyle: oldStyle),
+      // The user's own homework: a small mark after the subject (school
+      // homework is only listed in the lesson details).
+      if (block.periods.any((q) => q.userHomework.isNotEmpty))
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 2),
+            child: Icon(
+              Icons.menu_book_outlined,
+              key: const ValueKey('lesson-homework-icon'),
+              size: settings.subjectFontSize,
+              color: fg.withValues(alpha: 0.8),
+              semanticLabel: 'Homework',
+            ),
+          ),
+        ),
     ];
 
     final spans = <InlineSpan>[

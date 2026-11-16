@@ -174,6 +174,7 @@ describe("E2E notes", () => {
       { ...blobNote(1, 1), blob: "A".repeat(LIMITS.maxBlobChars + 1) },
       { ...blobNote(1, 1), exam: true },
       { ...blobNote(1, 1), text: "" },
+      { ...blobNote(1, 1), homework: "" },
     ];
     for (const c of cases) {
       const res = await put(s.token, [c]);

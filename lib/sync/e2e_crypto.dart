@@ -54,7 +54,7 @@
 /// ```
 ///
 /// Tombstones (deleted notes) are encrypted records too: `deleted = 1`,
-/// plaintext with `exam = false` and empty text.
+/// plaintext with `exam = false`, empty text and no homework.
 ///
 /// **Server key:** `base64url(HMAC-SHA256(note-key subkey, UTF-8 note key))`,
 /// 43 characters.
@@ -64,13 +64,22 @@
 /// ```text
 /// offset  size  field
 /// 0       1     layout version = 0x01
-/// 1       1     flags: bit 0 = exam, all other bits must be 0
+/// 1       1     flags: bit 0 = exam, bit 1 = homework follows,
+///               all other bits must be 0
 /// 2       2     n = UTF-8 length of the note key (u16)
 /// 4       n     note key (UTF-8)
 /// 4+n     4     m = UTF-8 length of the text (u32)
 /// 8+n     m     text (UTF-8)
-/// 8+n+m   ...   zero bytes up to the next multiple of 256 (min. 256 total)
+/// only with flag bit 1:
+/// 8+n+m   4     h = UTF-8 length of the homework (u32)
+/// 12+n+m  h     homework (UTF-8)
+/// ...     ...   zero bytes up to the next multiple of 256 (min. 256 total)
 /// ```
+///
+/// Notes without homework are encoded without the homework part and flag
+/// bit 1, exactly as before homework existed, so older app versions keep
+/// reading them; notes with homework are unreadable for them (refused as
+/// "bad flags", so they are never overwritten by such a device).
 ///
 /// Decryption checks the AEAD tag (with the AAD built from the server key and
 /// the server-reported `updatedAt` / `deleted`), the layout,
@@ -447,11 +456,15 @@ class E2eNote {
     required this.noteKey,
     required this.exam,
     required this.text,
+    this.homework = '',
   });
 
   final String noteKey;
   final bool exam;
   final String text;
+
+  /// Empty for notes without homework (and those from older app versions).
+  final String homework;
 }
 
 // ------------------------------------------------------------------- flows
@@ -604,12 +617,13 @@ Future<String> serverKey(E2eKeys keys, String noteKey) async =>
 /// library docs). Its AAD binds it to `serverKey(keys, noteKey)` and to
 /// [updatedAt] (ms since epoch, 0..2^53-1) and [deleted], which must be the
 /// values sent to the server with the blob. Tombstones: `deleted: true`,
-/// `exam: false`, `text: ''`.
+/// `exam: false`, `text: ''`, `homework: ''`.
 Future<String> encryptNote(
   E2eKeys keys, {
   required String noteKey,
   required bool exam,
   required String text,
+  String homework = '',
   required int updatedAt,
   required bool deleted,
   E2eRandomBytes? random,
@@ -618,7 +632,12 @@ Future<String> encryptNote(
     throw ArgumentError.value(updatedAt, 'updatedAt', 'out of range');
   }
   final sk = await serverKey(keys, noteKey);
-  final plain = encodeNotePlaintext(noteKey: noteKey, exam: exam, text: text);
+  final plain = encodeNotePlaintext(
+    noteKey: noteKey,
+    exam: exam,
+    text: text,
+    homework: homework,
+  );
   final nonce = _take(random ?? _secureRandomBytes, _nonceLength);
   final box = await _seal(
     keys._noteEnc,
@@ -686,27 +705,35 @@ Uint8List noteAad({
   return out;
 }
 
-/// Encodes the v1 note plaintext (padded). Exposed for tests.
+/// Encodes the v1 note plaintext (padded); the homework part only when
+/// [homework] isn't empty. Exposed for tests.
 Uint8List encodeNotePlaintext({
   required String noteKey,
   required bool exam,
   required String text,
+  String homework = '',
 }) {
   final k = utf8.encode(noteKey);
   final t = utf8.encode(text);
+  final h = utf8.encode(homework);
   if (k.length > 0xFFFF) {
     throw ArgumentError.value(noteKey, 'noteKey', 'too long');
   }
-  final used = 8 + k.length + t.length;
+  final textEnd = 8 + k.length + t.length;
+  final used = h.isEmpty ? textEnd : textEnd + 4 + h.length;
   final total = ((used + e2ePadBlock - 1) ~/ e2ePadBlock) * e2ePadBlock;
   final out = Uint8List(total);
   final bd = ByteData.sublistView(out);
   out[0] = e2eVersion;
-  out[1] = exam ? 1 : 0;
+  out[1] = (exam ? 1 : 0) | (h.isEmpty ? 0 : 2);
   bd.setUint16(2, k.length);
   out.setRange(4, 4 + k.length, k);
   bd.setUint32(4 + k.length, t.length);
-  out.setRange(8 + k.length, used, t);
+  out.setRange(8 + k.length, textEnd, t);
+  if (h.isNotEmpty) {
+    bd.setUint32(textEnd, h.length);
+    out.setRange(textEnd + 4, used, h);
+  }
   return out;
 }
 
@@ -716,14 +743,26 @@ E2eNote decodeNotePlaintext(Uint8List p) {
     throw const E2eCorrupt('plaintext: bad length');
   }
   if (p[0] != e2eVersion) throw const E2eCorrupt('plaintext: bad version');
-  if (p[1] & ~1 != 0) throw const E2eCorrupt('plaintext: bad flags');
+  if (p[1] & ~3 != 0) throw const E2eCorrupt('plaintext: bad flags');
+  final hasHomework = p[1] & 2 != 0;
   final bd = ByteData.sublistView(p);
   final kLen = bd.getUint16(2);
   if (8 + kLen > p.length) throw const E2eCorrupt('plaintext: bad key length');
   final tLen = bd.getUint32(4 + kLen);
-  final used = 8 + kLen + tLen;
+  final textEnd = 8 + kLen + tLen;
+  var used = textEnd;
+  if (hasHomework) {
+    if (textEnd + 4 > p.length) {
+      throw const E2eCorrupt('plaintext: bad text length');
+    }
+    used = textEnd + 4 + bd.getUint32(textEnd);
+  }
   if (used > p.length || p.length - used >= e2ePadBlock) {
-    throw const E2eCorrupt('plaintext: bad text length');
+    throw E2eCorrupt(
+      hasHomework
+          ? 'plaintext: bad homework length'
+          : 'plaintext: bad text length',
+    );
   }
   for (var i = used; i < p.length; i++) {
     if (p[i] != 0) throw const E2eCorrupt('plaintext: bad padding');
@@ -732,7 +771,10 @@ E2eNote decodeNotePlaintext(Uint8List p) {
     return E2eNote(
       noteKey: utf8.decode(Uint8List.sublistView(p, 4, 4 + kLen)),
       exam: p[1] & 1 == 1,
-      text: utf8.decode(Uint8List.sublistView(p, 8 + kLen, used)),
+      text: utf8.decode(Uint8List.sublistView(p, 8 + kLen, textEnd)),
+      homework: hasHomework
+          ? utf8.decode(Uint8List.sublistView(p, textEnd + 4, used))
+          : '',
     );
   } on FormatException {
     throw const E2eCorrupt('plaintext: bad UTF-8');

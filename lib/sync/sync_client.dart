@@ -107,7 +107,8 @@ class SyncApiException implements Exception {
   String toString() => 'SyncApiException($kind, $code, $status): $message';
 }
 
-/// A note as stored on the server. Plaintext notes have [exam]/[text];
+/// A note as stored on the server. Plaintext notes have [exam]/[text]/
+/// [homework];
 /// end-to-end encrypted notes have [blob] (and [key] is the hidden server
 /// key).
 class RemoteNote {
@@ -117,6 +118,7 @@ class RemoteNote {
     required this.deleted,
     this.exam = false,
     this.text = '',
+    this.homework = '',
     this.blob,
     this.seq = 0,
   });
@@ -124,6 +126,10 @@ class RemoteNote {
   final String key;
   final bool exam;
   final String text;
+
+  /// The user's homework (plaintext notes; servers before it don't send
+  /// it: '').
+  final String homework;
   final String? blob;
   final int updatedAt;
   final bool deleted;
@@ -137,6 +143,7 @@ class RemoteNote {
           'key': key,
           'exam': exam,
           'text': text,
+          'homework': homework,
           'updatedAt': updatedAt,
           'deleted': deleted,
         };
@@ -154,6 +161,7 @@ class RemoteNote {
       deleted: j['deleted'] == true,
       exam: j['exam'] == true,
       text: j['text'] is String ? j['text'] as String : '',
+      homework: j['homework'] is String ? j['homework'] as String : '',
       blob: blob is String ? blob : null,
       seq: seq is num ? seq.toInt() : 0,
     );
