@@ -9,7 +9,7 @@ import '../accessibility/accessibility_screen.dart';
 import '../accounts/manage_accounts_screen.dart';
 import '../calendar/calendar_sync_screen.dart';
 import '../calendar/calendar_syncs_screen.dart';
-import '../classreg/open_lessons_screen.dart';
+import '../classreg/class_register_overview_screen.dart';
 import '../infocenter/info_center_screen.dart';
 import '../infocenter/messages_tab.dart';
 import '../login/login_form_screen.dart';
@@ -83,9 +83,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(path: '/browse', builder: (_, _) => const ElementPickerScreen()),
       GoRoute(
-        path: '/classreg/open',
-        builder: (_, _) => const OpenLessonsScreen(),
+        path: '/classreg',
+        builder: (_, _) => const ClassRegisterOverviewScreen(),
       ),
+      // Old name of the class register overview ("Open lessons").
+      GoRoute(path: '/classreg/open', redirect: (_, _) => '/classreg'),
       GoRoute(
         path: '/info',
         builder: (_, _) => const InfoCenterScreen(),

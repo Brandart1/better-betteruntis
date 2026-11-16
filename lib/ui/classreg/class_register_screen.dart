@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/class_register.dart';
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
+import '../common/large_text.dart';
+import '../timetable/timetable_utils.dart';
 
 /// Opens the class register of one lesson block ([periods]: one lesson, or
 /// the periods of a double lesson). Resolves to true when something was saved.
@@ -30,6 +32,10 @@ Future<bool> openClassRegister(
 /// Attendance check and lesson topic ("Lehrstoff") of one lesson, for
 /// teacher accounts. Saving records the absences, confirms the attendance
 /// check and stores the topic for every period of the block.
+///
+/// Also shows the topics of the course's previous lessons and the class
+/// register entries ("Klassenbucheinträge") of this and recent lessons of
+/// the course; those load lazily after the screen is up.
 class ClassRegisterScreen extends ConsumerStatefulWidget {
   const ClassRegisterScreen({
     super.key,
@@ -62,10 +68,27 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
 
   List<ClassRegStudent> _students = const [];
 
+  /// Entries of this lesson block.
+  List<ClassRegEvent> _events = const [];
+
+  /// Earlier lessons of the course (null while loading).
+  CourseHistory? _history;
+  Object? _historyError;
+  Map<int, String> _reasons = const {};
+
+  /// Only the two newest previous topics are shown until expanded, so the
+  /// pupils stay near the top.
+  bool _showAllTopics = false;
+
+  ClassRegisterRepository get _repo =>
+      ref.read(classRegisterRepositoryProvider);
+
   @override
   void initState() {
     super.initState();
     _load();
+    _loadHistory();
+    _loadReasons();
   }
 
   @override
@@ -80,9 +103,7 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
       _loadError = null;
     });
     try {
-      final d = await ref
-          .read(classRegisterRepositoryProvider)
-          .load(widget.account, widget.periods);
+      final d = await _repo.load(widget.account, widget.periods);
       if (!mounted) return;
       final regs = [for (final p in widget.periods) ?d.periods[p.id]];
       final ids = <int>{
@@ -108,10 +129,42 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
         _absent = {...absent};
         _topicBefore = topic;
         _topic.text = topic;
+        _events = _blockEvents(d);
       });
     } catch (e) {
       if (mounted) setState(() => _loadError = e);
     }
+  }
+
+  /// Entries of every period of the block, each once, newest first.
+  List<ClassRegEvent> _blockEvents(PeriodRegisterData d) {
+    final seen = <int>{};
+    final out = <ClassRegEvent>[];
+    for (final p in widget.periods) {
+      for (final e in d.periods[p.id]?.events ?? const <ClassRegEvent>[]) {
+        if (e.id != null && !seen.add(e.id!)) continue;
+        out.add(e.inLesson(p.id, p.start));
+      }
+    }
+    return out..sort((a, b) => b.date!.compareTo(a.date!));
+  }
+
+  Future<void> _loadHistory() async {
+    setState(() {
+      _history = null;
+      _historyError = null;
+    });
+    try {
+      final h = await _repo.courseHistory(widget.account, widget.periods);
+      if (mounted) setState(() => _history = h);
+    } catch (e) {
+      if (mounted) setState(() => _historyError = e);
+    }
+  }
+
+  Future<void> _loadReasons() async {
+    final r = await _repo.eventReasons(widget.account);
+    if (mounted && r.isNotEmpty) setState(() => _reasons = r);
   }
 
   List<PeriodRegister> get _regs => [
@@ -134,18 +187,16 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
     setState(() => _saving = true);
     final topic = _topic.text.trim();
     try {
-      await ref
-          .read(classRegisterRepositoryProvider)
-          .save(
-            widget.account,
-            widget.periods,
-            data,
-            ClassRegChanges(
-              topic: topic != _topicBefore.trim() ? topic : null,
-              markAbsent: _absent.difference(_absentBefore),
-              markPresent: _absentBefore.difference(_absent),
-            ),
-          );
+      await _repo.save(
+        widget.account,
+        widget.periods,
+        data,
+        ClassRegChanges(
+          topic: topic != _topicBefore.trim() ? topic : null,
+          markAbsent: _absent.difference(_absentBefore),
+          markPresent: _absentBefore.difference(_absent),
+        ),
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Class register saved')));
@@ -181,6 +232,46 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
         ),
       ) ??
       false;
+
+  void _useTopic(String topic) {
+    setState(() {
+      _topic.text = topic;
+      _topic.selection = TextSelection.collapsed(offset: topic.length);
+    });
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('Topic copied into the field')),
+      );
+  }
+
+  /// All pupils known from this lesson and the course's earlier lessons.
+  Map<int, ClassRegStudent> get _knownStudents => {
+    ...?_history?.students,
+    ...?_data?.students,
+    for (final s in _students) s.id: s,
+  };
+
+  Future<void> _newEntry() async {
+    final created = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => NewClassRegEntryScreen(
+          students: _students,
+          reasons: _reasons,
+          onSubmit: (e) => _repo.createEvent(widget.account, widget.periods, e),
+        ),
+      ),
+    );
+    if (created != true || !mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Entry created')));
+    // Only the entries are reloaded, so unsaved absences / topic stay.
+    try {
+      final d = await _repo.load(widget.account, widget.periods);
+      if (mounted) setState(() => _events = _blockEvents(d));
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -251,6 +342,9 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
     }
     if (_data == null) return const Center(child: CircularProgressIndicator());
     final absentCount = _absent.length;
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
     return ListView(
       padding: const EdgeInsets.only(bottom: 16),
       children: [
@@ -270,18 +364,24 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
             ),
           ),
         ),
+        ..._previousTopics(theme, muted),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-          child: Row(
+          // Large text: the chip goes below the title instead of squeezing it.
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
             children: [
-              Expanded(
-                child: Text('Absences', style: theme.textTheme.titleMedium),
-              ),
+              Text('Absences', style: theme.textTheme.titleMedium),
               Chip(
-                avatar: Icon(
-                  _checked ? Icons.check_circle : Icons.pending_outlined,
-                  size: 18,
-                ),
+                avatar: isLargeText(context)
+                    ? null
+                    : Icon(
+                        _checked ? Icons.check_circle : Icons.pending_outlined,
+                        size: 18,
+                      ),
                 label: Text(_checked ? 'Checked' : 'Not checked yet'),
                 visualDensity: VisualDensity.compact,
               ),
@@ -295,13 +395,215 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
                 ? 'The server sent no pupils for this lesson.'
                 : '${_students.length - absentCount} present · '
                       '$absentCount absent — tap a pupil to switch',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            style: muted,
           ),
         ),
         for (final s in _students) _studentTile(theme, s),
+        ..._entries(theme, muted),
       ],
+    );
+  }
+
+  // ---- Previous topics -------------------------------------------------
+
+  List<Widget> _previousTopics(ThemeData theme, TextStyle? muted) {
+    final h = _history;
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: Text('Previous topics', style: theme.textTheme.titleSmall),
+      ),
+      if (_historyError != null)
+        _inlineError(
+          'Could not load earlier lessons: ${_message(_historyError!)}',
+          muted,
+        )
+      else if (h == null)
+        _inlineLoading('Loading earlier lessons…', muted)
+      else if (h.topics.isEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+          child: Text(
+            h.lessonsLoaded == 0
+                ? 'No earlier lessons of this course in the last weeks.'
+                : 'No topics entered in the earlier lessons of this course.',
+            style: muted,
+          ),
+        )
+      else ...[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 2, 16, 0),
+          child: Text('Tap one to copy it into the field', style: muted),
+        ),
+        for (final l in _showAllTopics ? h.topics : h.topics.take(2))
+          _topicTile(theme, l),
+        if (h.topics.length > 2)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton(
+                key: const ValueKey('classreg-prev-topics-more'),
+                onPressed: () =>
+                    setState(() => _showAllTopics = !_showAllTopics),
+                child: Text(
+                  _showAllTopics
+                      ? 'Show fewer'
+                      : 'Show ${h.topics.length - 2} more',
+                ),
+              ),
+            ),
+          ),
+      ],
+    ];
+  }
+
+  Widget _topicTile(ThemeData theme, ClassRegLesson l) {
+    final topic = l.register.topic.trim();
+    final large = isLargeText(context);
+    return ListTile(
+      key: ValueKey('classreg-prev-topic-${l.period.id}'),
+      dense: !large,
+      title: Text(topic),
+      subtitle: Text(_date(l.period.start)),
+      trailing: large ? null : const Icon(Icons.content_copy, size: 18),
+      onTap: _saving ? null : () => _useTopic(topic),
+    );
+  }
+
+  String _date(DateTime d) => dateFormat(context, 'EEE d MMM').format(d);
+
+  Widget _inlineLoading(String text, TextStyle? muted) => Padding(
+    key: const ValueKey('classreg-history-loading'),
+    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(text, style: muted),
+        const SizedBox(height: 6),
+        const LinearProgressIndicator(),
+      ],
+    ),
+  );
+
+  Widget _inlineError(String text, TextStyle? muted) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+    child: Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 8,
+      children: [
+        Text(
+          text,
+          style: muted?.copyWith(color: Theme.of(context).colorScheme.error),
+        ),
+        TextButton(
+          key: const ValueKey('classreg-history-retry'),
+          onPressed: _loadHistory,
+          child: const Text('Retry'),
+        ),
+      ],
+    ),
+  );
+
+  // ---- Class register entries ------------------------------------------
+
+  List<Widget> _entries(ThemeData theme, TextStyle? muted) {
+    final h = _history;
+    final title = Text(
+      'Class register entries',
+      style: theme.textTheme.titleMedium,
+    );
+    final button = FilledButton.tonalIcon(
+      key: const ValueKey('classreg-new-entry'),
+      onPressed: _saving ? null : _newEntry,
+      icon: const Icon(Icons.add),
+      label: const Text('New entry'),
+    );
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 4),
+        child: isLargeText(context)
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [title, const SizedBox(height: 8), button],
+              )
+            : Row(
+                children: [
+                  Expanded(child: title),
+                  button,
+                ],
+              ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        child: Text('This lesson', style: theme.textTheme.titleSmall),
+      ),
+      if (_events.isEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+          child: Text('No entries in this lesson.', style: muted),
+        )
+      else
+        for (final e in _events) _eventTile(theme, e),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        child: Text(
+          'Recent entries in this course',
+          style: theme.textTheme.titleSmall,
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 2, 16, 0),
+        child: Text(
+          'From the earlier lessons of this course in your timetable '
+          '(entries made by other teachers in other lessons are not shown).',
+          style: muted,
+        ),
+      ),
+      if (_historyError != null)
+        _inlineError(
+          'Could not load earlier lessons: ${_message(_historyError!)}',
+          muted,
+        )
+      else if (h == null)
+        _inlineLoading('Loading earlier lessons…', muted)
+      else if (h.events.isEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+          child: Text('No entries found.', style: muted),
+        )
+      else
+        for (final e in h.events) _eventTile(theme, e),
+    ];
+  }
+
+  Widget _eventTile(ThemeData theme, ClassRegEvent e) {
+    final students = _knownStudents;
+    final who = e.studentId != null
+        ? (students[e.studentId]?.displayName ??
+              (e.studentName.isNotEmpty
+                  ? e.studentName
+                  : 'Pupil #${e.studentId}'))
+        : (e.studentName.isNotEmpty ? e.studentName : 'Whole class');
+    final reason =
+        _reasons[e.reasonId] ??
+        (e.reasonName.isNotEmpty
+            ? e.reasonName
+            : (e.reasonId != null ? 'Reason #${e.reasonId}' : null));
+    final lines = [
+      if (e.text.isNotEmpty) e.text,
+      [
+        if (e.date != null) _date(e.date!),
+        if (e.author.isNotEmpty) e.author,
+      ].join(' · '),
+    ].where((s) => s.isNotEmpty).join('\n');
+    return ListTile(
+      key: ValueKey('classreg-entry-${e.ttId}-${e.id}'),
+      leading: isLargeText(context)
+          ? null
+          : Icon(e.isClassWide ? Icons.groups_outlined : Icons.person_outline),
+      title: Text(reason == null ? who : '$who · $reason'),
+      subtitle: lines.isEmpty ? null : Text(lines),
     );
   }
 
@@ -322,6 +624,215 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
           : () => setState(() {
               absent ? _absent.remove(s.id) : _absent.add(s.id);
             }),
+    );
+  }
+}
+
+/// Form for a new class register entry: pupil (or the whole class), reason
+/// (optional) and text. [onSubmit] sends it; its error stays visible here.
+/// Pops with true once it was sent.
+class NewClassRegEntryScreen extends StatefulWidget {
+  const NewClassRegEntryScreen({
+    super.key,
+    required this.students,
+    required this.reasons,
+    required this.onSubmit,
+  });
+
+  final List<ClassRegStudent> students;
+  final Map<int, String> reasons;
+  final Future<void> Function(NewClassRegEvent event) onSubmit;
+
+  @override
+  State<NewClassRegEntryScreen> createState() => _NewClassRegEntryScreenState();
+}
+
+class _NewClassRegEntryScreenState extends State<NewClassRegEntryScreen> {
+  final _text = TextEditingController();
+  int? _studentId;
+  int? _reasonId;
+  bool _sending = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  bool get _canSend =>
+      !_sending && (_text.text.trim().isNotEmpty || _reasonId != null);
+
+  String get _studentLabel {
+    final id = _studentId;
+    if (id == null) return 'Whole class';
+    return widget.students
+            .where((s) => s.id == id)
+            .map((s) => s.displayName)
+            .firstOrNull ??
+        '#$id';
+  }
+
+  Future<void> _pickStudent() async {
+    // 0 = whole class (pupil ids are positive).
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: const Text('Pupil'),
+        children: [
+          SimpleDialogOption(
+            key: const ValueKey('classreg-entry-pupil-0'),
+            onPressed: () => Navigator.of(c).pop(0),
+            child: const Text('Whole class'),
+          ),
+          for (final s in widget.students)
+            SimpleDialogOption(
+              key: ValueKey('classreg-entry-pupil-${s.id}'),
+              onPressed: () => Navigator.of(c).pop(s.id),
+              child: Text(s.displayName),
+            ),
+        ],
+      ),
+    );
+    if (picked != null) {
+      setState(() => _studentId = picked == 0 ? null : picked);
+    }
+  }
+
+  Future<void> _pickReason() async {
+    final sorted = widget.reasons.entries.toList()
+      ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+    // -1 = no reason.
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: const Text('Reason'),
+        children: [
+          SimpleDialogOption(
+            key: const ValueKey('classreg-entry-reason--1'),
+            onPressed: () => Navigator.of(c).pop(-1),
+            child: const Text('No reason'),
+          ),
+          for (final r in sorted)
+            SimpleDialogOption(
+              key: ValueKey('classreg-entry-reason-${r.key}'),
+              onPressed: () => Navigator.of(c).pop(r.key),
+              child: Text(r.value),
+            ),
+        ],
+      ),
+    );
+    if (picked != null) {
+      setState(() => _reasonId = picked == -1 ? null : picked);
+    }
+  }
+
+  Future<void> _send() async {
+    if (!_canSend) return;
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
+    try {
+      await widget.onSubmit(
+        NewClassRegEvent(
+          studentId: _studentId,
+          reasonId: _reasonId,
+          text: _text.text.trim(),
+        ),
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _sending = false;
+        _error = e is UntisException
+            ? (e.code == 0 || e.code == -1
+                  ? e.message
+                  : '${e.message} (error ${e.code})')
+            : e.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final large = isLargeText(context);
+    return Scaffold(
+      appBar: AppBar(title: const Text('New entry')),
+      body: ListView(
+        padding: const EdgeInsets.only(bottom: 16),
+        children: [
+          ListTile(
+            key: const ValueKey('classreg-entry-pupil'),
+            leading: large ? null : const Icon(Icons.person_outline),
+            title: const Text('Pupil'),
+            subtitle: Text(_studentLabel),
+            onTap: _sending ? null : _pickStudent,
+          ),
+          ListTile(
+            key: const ValueKey('classreg-entry-reason'),
+            leading: large ? null : const Icon(Icons.label_outline),
+            title: const Text('Reason'),
+            subtitle: Text(
+              widget.reasons.isEmpty
+                  ? 'No reasons known for this school'
+                  : (_reasonId == null
+                        ? 'No reason'
+                        : widget.reasons[_reasonId] ?? '#$_reasonId'),
+            ),
+            onTap: _sending || widget.reasons.isEmpty ? null : _pickReason,
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: TextField(
+              key: const ValueKey('classreg-entry-text'),
+              controller: _text,
+              minLines: 3,
+              maxLines: 8,
+              enabled: !_sending,
+              textCapitalization: TextCapitalization.sentences,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Text',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Container(
+                key: const ValueKey('classreg-entry-error'),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cs.errorContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Could not create the entry: $_error',
+                  style: TextStyle(color: cs.onErrorContainer),
+                ),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: FilledButton.icon(
+              key: const ValueKey('classreg-entry-send'),
+              onPressed: _canSend ? _send : null,
+              icon: _sending
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.send),
+              label: const Text('Create entry'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

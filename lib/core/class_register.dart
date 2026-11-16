@@ -62,9 +62,13 @@ class PeriodRegister {
     this.studentIds = const [],
     this.absences = const [],
     this.topic = '',
+    this.events = const [],
   });
 
   final int ttId;
+
+  /// Class register entries ("Klassenbucheinträge") recorded in this lesson.
+  final List<ClassRegEvent> events;
 
   /// Whether the teacher already confirmed the attendance check.
   final bool absenceChecked;
@@ -132,6 +136,114 @@ abstract interface class ClassRegisterApi {
     required UntisCredentials auth,
     required List<int> ttIds,
   });
+
+  /// Names of the class register entry reasons (master data `eventReasons`)
+  /// by id; empty when the server has none.
+  Future<Map<int, String>> eventReasons({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  });
+
+  /// Creates a class register entry in lesson [ttId], for [studentId] or
+  /// (null) the whole class. **Assumed** call, see docs/API.md.
+  Future<void> createClassRegEvent({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    int? studentId,
+    int? eventReasonId,
+    required String text,
+  });
+}
+
+/// A class register entry ("Klassenbucheintrag"): a remark about one pupil
+/// or the whole class, optionally with a reason (master data
+/// `eventReasons`).
+class ClassRegEvent {
+  const ClassRegEvent({
+    this.id,
+    this.ttId,
+    this.studentId,
+    this.studentName = '',
+    this.reasonId,
+    this.reasonName = '',
+    this.text = '',
+    this.date,
+    this.author = '',
+  });
+
+  final int? id;
+
+  /// The lesson it was found in (null when the server did not say).
+  final int? ttId;
+
+  /// Null for an entry about the whole class.
+  final int? studentId;
+
+  /// Name as sent inline by the server ('' when not).
+  final String studentName;
+  final int? reasonId;
+
+  /// Reason name as sent inline by the server ('' when not).
+  final String reasonName;
+  final String text;
+  final DateTime? date;
+
+  /// Who wrote it, as sent inline ('' when not).
+  final String author;
+
+  bool get isClassWide => studentId == null && studentName.isEmpty;
+
+  /// Copy that belongs to lesson [lessonTtId]; [fallbackDate] is used when
+  /// the entry has no date of its own.
+  ClassRegEvent inLesson(int lessonTtId, DateTime fallbackDate) =>
+      ClassRegEvent(
+        id: id,
+        ttId: ttId ?? lessonTtId,
+        studentId: studentId,
+        studentName: studentName,
+        reasonId: reasonId,
+        reasonName: reasonName,
+        text: text,
+        date: date ?? fallbackDate,
+        author: author,
+      );
+}
+
+/// A new class register entry, as entered in the app.
+class NewClassRegEvent {
+  const NewClassRegEvent({this.studentId, this.reasonId, required this.text});
+
+  /// Null: the whole class.
+  final int? studentId;
+  final int? reasonId;
+  final String text;
+}
+
+/// Earlier lessons of the same course as a lesson block (see
+/// [ClassRegisterRepository.courseHistory]).
+class CourseHistory {
+  const CourseHistory({
+    this.topics = const [],
+    this.events = const [],
+    this.students = const {},
+    this.lessonsLoaded = 0,
+  });
+
+  /// The latest earlier lessons that have a topic, newest first.
+  final List<ClassRegLesson> topics;
+
+  /// Entries found in the loaded earlier lessons, newest first (each with
+  /// its `ttId` and a date).
+  final List<ClassRegEvent> events;
+
+  /// Pupils the server referenced in those lessons.
+  final Map<int, ClassRegStudent> students;
+
+  /// How many earlier lessons were looked at.
+  final int lessonsLoaded;
 }
 
 /// What the class register screen saves for one lesson block.
@@ -150,9 +262,9 @@ class ClassRegChanges {
   final Set<int> markPresent;
 }
 
-/// A past lesson of the teacher with what is still missing.
-class OpenLesson {
-  const OpenLesson(this.period, this.register);
+/// One of the teacher's own lessons with its class register state.
+class ClassRegLesson {
+  const ClassRegLesson(this.period, this.register);
   final Period period;
   final PeriodRegister register;
 }
@@ -170,9 +282,32 @@ abstract interface class ClassRegisterRepository {
     ClassRegChanges changes,
   );
 
-  /// The teacher's own past lessons of the last [days] days (not cancelled)
-  /// whose attendance check or topic is missing, newest first.
-  Future<List<OpenLesson>> openLessons(Account account, {int days = 14});
+  /// Earlier lessons of the same course as [periods] (same lesson id, else
+  /// same subject and classes) from the teacher's own timetable, going back
+  /// at most [weeks] weeks: the latest [topics] lessons with a topic and the
+  /// entries found in the loaded lessons.
+  Future<CourseHistory> courseHistory(
+    Account account,
+    List<Period> periods, {
+    int topics = 5,
+    int weeks = 6,
+  });
+
+  /// Entry reasons by id (empty when unknown or not loadable; never throws).
+  Future<Map<int, String>> eventReasons(Account account);
+
+  /// Creates [event] in the first period of the block [periods].
+  Future<void> createEvent(
+    Account account,
+    List<Period> periods,
+    NewClassRegEvent event,
+  );
+
+  /// The teacher's own lessons (not cancelled) from [days] days ago up to
+  /// the end of today, upcoming ones of today included, each with its
+  /// register, oldest first. Lessons the server has no register for are
+  /// left out. Filtering (missing attendance / topic) is up to the caller.
+  Future<List<ClassRegLesson>> lessons(Account account, {int days = 14});
 }
 
 final classRegisterRepositoryProvider = Provider<ClassRegisterRepository>(

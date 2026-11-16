@@ -431,10 +431,8 @@ class FakeUntisApi implements FullUntisApi {
     required String host,
     required String school,
     required UntisCredentials auth,
-  }) async => throw const UntisException(
-    0,
-    'Demo accounts have no WebUntis token.',
-  );
+  }) async =>
+      throw const UntisException(0, 'Demo accounts have no WebUntis token.');
 
   @override
   Future<void> probeTeacherSources({
@@ -715,14 +713,25 @@ class FakeUntisApi implements FullUntisApi {
   ];
 
   /// Demo register state by timetable id. Lessons not in [registerTopics] /
-  /// [registerChecked] are open, except every other one, which starts filled
-  /// in so the "open lessons" list is not all of them.
+  /// [registerChecked] are open, except that lessons before today start
+  /// with a mix (see [_seededChecked] / [_seededTopic]) so the class
+  /// register overview shows done, half-done and open lessons.
   final registerTopics = <int, String>{};
   final registerChecked = <int>{};
   final registerAbsences = <int, List<ClassRegAbsence>>{};
   var _nextAbsenceId = 9000;
 
-  bool _seededDone(int ttId) => ttId % 3 == 0;
+  /// Lessons before today (ids are yyyymmddN, see [demoPeriodId]):
+  /// ttId % 4 == 0 is done, 1 has only the attendance check, 2 only the
+  /// topic, 3 nothing.
+  bool _seededPast(int ttId) {
+    final now = DateTime.now();
+    return ttId ~/ 10 < now.year * 10000 + now.month * 100 + now.day;
+  }
+
+  bool _seededChecked(int ttId) => _seededPast(ttId) && ttId % 4 <= 1;
+  bool _seededTopic(int ttId) =>
+      _seededPast(ttId) && (ttId % 4 == 0 || ttId % 4 == 2);
 
   @override
   Future<PeriodRegisterData> periodData({
@@ -737,10 +746,12 @@ class FakeUntisApi implements FullUntisApi {
         for (final id in ttIds)
           id: PeriodRegister(
             ttId: id,
-            absenceChecked: registerChecked.contains(id) || _seededDone(id),
+            absenceChecked: registerChecked.contains(id) || _seededChecked(id),
             studentIds: [for (final s in demoStudents) s.id],
             absences: [...?registerAbsences[id]],
-            topic: registerTopics[id] ?? (_seededDone(id) ? 'Revision' : ''),
+            topic:
+                registerTopics[id] ?? (_seededTopic(id) ? _demoTopic(id) : ''),
+            events: _demoEvents(id),
           ),
       },
       students: {for (final s in demoStudents) s.id: s},
@@ -802,6 +813,78 @@ class FakeUntisApi implements FullUntisApi {
   }) async {
     await _delay();
     registerChecked.addAll(ttIds);
+  }
+
+  /// Class register entries created in the demo, by timetable id.
+  final registerEvents = <int, List<ClassRegEvent>>{};
+  var _nextEventId = 7000;
+
+  static const demoEventReasons = {
+    1: 'Hausübung fehlt',
+    2: 'Material vergessen',
+    3: 'Störung des Unterrichts',
+    4: 'Lob',
+  };
+
+  static const _demoTopics = [
+    'Revision',
+    'Fractions: adding and subtracting',
+    'Exercises p. 42, no. 3–7',
+    'Linear equations',
+    'Test preparation',
+    'Word problems',
+    'Percentages',
+  ];
+
+  /// Seeded topics vary by date so "Previous topics" is worth a look.
+  static String _demoTopic(int ttId) =>
+      _demoTopics[(ttId ~/ 10) % _demoTopics.length];
+
+  /// Created entries plus a seeded one in about every fifth past lesson
+  /// (no date of its own, like the parser may see on a real server).
+  List<ClassRegEvent> _demoEvents(int ttId) => [
+    if (_seededPast(ttId) && (ttId ~/ 10) % 5 == ttId % 10)
+      ClassRegEvent(
+        id: ttId,
+        ttId: ttId,
+        studentId: demoStudents[ttId % demoStudents.length].id,
+        reasonId: 1 + ttId % 4,
+        text: ttId % 2 == 0 ? 'Second time this month' : '',
+      ),
+    ...?registerEvents[ttId],
+  ];
+
+  @override
+  Future<Map<int, String>> eventReasons({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    await _delay();
+    return demoEventReasons;
+  }
+
+  @override
+  Future<void> createClassRegEvent({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    int? studentId,
+    int? eventReasonId,
+    required String text,
+  }) async {
+    await _delay();
+    (registerEvents[ttId] ??= []).add(
+      ClassRegEvent(
+        id: _nextEventId++,
+        ttId: ttId,
+        studentId: studentId,
+        reasonId: eventReasonId,
+        text: text,
+        date: DateTime.now(),
+      ),
+    );
   }
 
   @override

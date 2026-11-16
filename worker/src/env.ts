@@ -2,7 +2,7 @@
 export interface Env {
   /** Static assets: the Flutter web build. */
   ASSETS: Fetcher;
-  /** Sync database. */
+  /** Sync database (missing in web-only deployments, see index.ts). */
   DB: D1Database;
   /** Comma-separated WebUntis hosts the relay and the sync login may contact. */
   ALLOWED_HOSTS: string;

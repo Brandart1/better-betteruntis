@@ -9,6 +9,7 @@ import '../../core/class_register.dart';
 import '../../core/providers.dart';
 import '../accounts/account_switcher.dart';
 import '../accounts/child_switcher.dart';
+import '../../sync/sync_client.dart' show kSyncDisabled;
 import '../../sync/sync_controller.dart' show kLatestReleaseUrl;
 import '../infocenter/info_providers.dart' show urlOpenerProvider;
 
@@ -61,10 +62,10 @@ class AppDrawer extends StatelessWidget {
             );
             if (!teacher) return const SizedBox.shrink();
             return ListTile(
-              leading: const Icon(Icons.pending_actions_outlined),
-              title: const Text('Open lessons'),
-              subtitle: const Text('Missing absences or topic'),
-              onTap: () => go('/classreg/open'),
+              leading: const Icon(Icons.menu_book_outlined),
+              title: const Text('Class register'),
+              subtitle: const Text("Today's and past lessons"),
+              onTap: () => go('/classreg'),
             );
           },
         ),
@@ -86,14 +87,16 @@ class AppDrawer extends StatelessWidget {
             title: const Text('Calendar sync'),
             onTap: () => go('/calendar'),
           ),
-        // Also on the web: the web version syncs too.
-        ListTile(
-          key: const ValueKey('drawer-sync'),
-          leading: const Icon(Icons.cloud_sync_outlined),
-          title: const Text('Sync'),
-          subtitle: const Text('Notes on all your devices'),
-          onTap: () => go('/sync'),
-        ),
+        // Also on the web: the web version syncs too (not in builds
+        // without sync, e.g. the teacher web alpha).
+        if (!kSyncDisabled)
+          ListTile(
+            key: const ValueKey('drawer-sync'),
+            leading: const Icon(Icons.cloud_sync_outlined),
+            title: const Text('Sync'),
+            subtitle: const Text('Notes on all your devices'),
+            onTap: () => go('/sync'),
+          ),
         ListTile(
           leading: const Icon(Icons.manage_accounts_outlined),
           title: const Text('Manage accounts'),

@@ -11,7 +11,7 @@ import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/settings.dart';
 import '../classreg/class_register_screen.dart';
-import '../classreg/open_lessons_screen.dart';
+import '../classreg/class_register_overview_screen.dart';
 import '../export/export_sheet.dart';
 import '../shell/app_drawer.dart' show isWebProvider;
 import 'day_speech.dart';

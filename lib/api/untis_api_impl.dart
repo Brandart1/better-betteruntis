@@ -804,6 +804,46 @@ class UntisApiImpl implements FullUntisApi {
     });
   }
 
+  /// From the master data seen this session (login), else one
+  /// getUserData2017 call via [absenceLookups].
+  @override
+  Future<Map<int, String>> eventReasons({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    final known = _lookups['$host|$school']?.eventReasons;
+    if (known != null && known.isNotEmpty) return known;
+    return (await absenceLookups(
+      host: host,
+      school: school,
+      auth: auth,
+    )).eventReasons;
+  }
+
+  @override
+  Future<void> createClassRegEvent({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    int? studentId,
+    int? eventReasonId,
+    required String text,
+  }) async {
+    final params = {
+      'periodId': ttId,
+      'studentId': ?studentId,
+      'eventReasonId': ?eventReasonId,
+      'text': text,
+    };
+    _recordRequest('createClassRegEvent2017', params);
+    await _rpc.call(rpcUrl(host, school), 'createClassRegEvent2017', {
+      ...params,
+      'auth': _rpc.auth(auth),
+    });
+  }
+
   /// Client-side checks before anything is sent.
   static void checkAbsenceReport(AbsenceReport r) {
     if (r.studentId <= 0) {

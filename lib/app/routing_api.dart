@@ -310,4 +310,30 @@ class RoutingUntisApi implements FullUntisApi {
   }) => _for(
     host,
   ).submitAbsencesChecked(host: host, school: school, auth: auth, ttIds: ttIds);
+
+  @override
+  Future<Map<int, String>> eventReasons({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) => _for(host).eventReasons(host: host, school: school, auth: auth);
+
+  @override
+  Future<void> createClassRegEvent({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    int? studentId,
+    int? eventReasonId,
+    required String text,
+  }) => _for(host).createClassRegEvent(
+    host: host,
+    school: school,
+    auth: auth,
+    ttId: ttId,
+    studentId: studentId,
+    eventReasonId: eventReasonId,
+    text: text,
+  );
 }

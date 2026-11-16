@@ -10,6 +10,7 @@ import 'core/settings.dart';
 import 'data/data_providers.dart';
 import 'dev/fake_accounts.dart';
 import 'sync/sync_auto_trigger.dart';
+import 'sync/sync_client.dart' show kSyncDisabled;
 import 'sync/sync_controller.dart';
 import 'sync/sync_engine.dart';
 import 'ui/export/export_service.dart';
@@ -32,7 +33,9 @@ Future<void> main() async {
         untisApiProvider.overrideWithValue(api),
         settingsStoreProvider.overrideWithValue(settings),
         ...dataOverrides(secrets: createSecretStore()),
-        syncControllerProvider.overrideWith(SyncEngine.new),
+        // `--dart-define=BBU_NO_SYNC=true` (teacher web alpha): no sync at
+        // all, the Sync screen says it isn't available in this build.
+        if (!kSyncDisabled) syncControllerProvider.overrideWith(SyncEngine.new),
         if (supportsDirectDownload) ...[
           exportDirectoryProvider.overrideWithValue(() async => null),
           exportShareProvider.overrideWithValue(

@@ -312,3 +312,16 @@ that window has passed.
 For an access request, the same `SELECT` plus
 `SELECT key, exam, text, blob, updated_at, deleted FROM notes WHERE identity_id = 42`
 shows everything stored (E2E notes are ciphertext).
+
+## Teacher web alpha (no sync)
+`wrangler.teacher-alpha.jsonc` is a second, web-only Worker for testing the
+teacher branch in the browser: same code, but no D1 binding, no cron and only
+the relay's rate limit. Without `DB`, `/api/sync/*` answers `404
+{"error":"sync_disabled"}`, and the web build is made with
+`--dart-define=BBU_NO_SYNC=true` (no Sync menu entry). Deploy by hand from
+branch `teacher`:
+
+    set -a; . /root/better-betteruntis-keys/cloudflare.env; set +a
+    tool/deploy_teacher_alpha.sh
+
+→ https://bbu-teacher-alpha.brandart1.workers.dev

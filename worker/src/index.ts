@@ -26,6 +26,14 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     return handleProxy(request, env, ctx);
   }
   if (path === "/api/sync" || path.startsWith("/api/sync/")) {
+    // Deployments without a database (wrangler.teacher-alpha.jsonc: web
+    // hosting + relay only) have no sync.
+    if (!(env as { DB?: unknown }).DB) {
+      return new Response(JSON.stringify({ error: "sync_disabled" }), {
+        status: 404,
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      });
+    }
     return handleSync(request, env, ctx);
   }
   // Asset responses get their headers from public/_headers.
@@ -60,6 +68,7 @@ export default {
    * sync accounts without a login for 12 months (at most 5 000).
    */
   async scheduled(controller, env, _ctx): Promise<void> {
+    if (!(env as { DB?: unknown }).DB) return;
     await dailyCleanup(env.DB, controller.scheduledTime || Date.now());
   },
 } satisfies ExportedHandler<Env>;

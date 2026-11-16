@@ -15,17 +15,27 @@ import 'models.dart';
 
 /// Absence reason / excuse status names by id (long name, else short name).
 class AbsenceLookups {
-  const AbsenceLookups({this.reasons = const {}, this.statuses = const {}});
+  const AbsenceLookups({
+    this.reasons = const {},
+    this.statuses = const {},
+    this.eventReasons = const {},
+  });
 
   final Map<int, String> reasons;
   final Map<int, String> statuses;
 
-  bool get isEmpty => reasons.isEmpty && statuses.isEmpty;
+  /// Class register entry reasons (master data `eventReasons`). Kept only
+  /// for the session (not persisted), used by the teacher class register.
+  final Map<int, String> eventReasons;
+
+  bool get isEmpty =>
+      reasons.isEmpty && statuses.isEmpty && eventReasons.isEmpty;
 
   /// [other] wins on conflicting ids.
   AbsenceLookups merge(AbsenceLookups other) => AbsenceLookups(
     reasons: {...reasons, ...other.reasons},
     statuses: {...statuses, ...other.statuses},
+    eventReasons: {...eventReasons, ...other.eventReasons},
   );
 }
 

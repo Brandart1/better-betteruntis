@@ -18,3 +18,15 @@ it("has the rate limit bindings", async () => {
     expect((await rl.limit({ key: "smoke" })).success).toBe(true);
   }
 });
+
+it("answers sync_disabled without a database (web-only deployment)", async () => {
+  const worker = (await import("../src/index")).default;
+  const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
+  const res = await worker.fetch(
+    new Request("https://bbu.test/api/sync/session", { method: "POST" }),
+    { ...env, DB: undefined } as unknown as typeof env,
+    ctx,
+  );
+  expect(res.status).toBe(404);
+  expect(await res.json()).toEqual({ error: "sync_disabled" });
+});

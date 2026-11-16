@@ -78,6 +78,86 @@ ClassRegAbsence? parseClassRegAbsence(Map<String, Object?> j) {
   );
 }
 
+/// A class register entry ("Klassenbucheintrag"). No real response seen:
+/// every key is a guess (`id`/`eventId`, `studentId`/`student{id,…}`,
+/// `eventReasonId`/`reasonId`/`eventReason{id,name}`, `text`/`remark`, a
+/// date in `dateTime`/`startDateTime`/`date`/…). Null when it carries
+/// nothing to show.
+ClassRegEvent? parseClassRegEvent(Map<String, Object?> j, {int? ttId}) {
+  final student = j['student'];
+  final studentMap = _map(student);
+  final reason = j['eventReason'] ?? j['reason'];
+  final reasonMap = _map(reason);
+  var studentName = student is String
+      ? student.trim()
+      : _firstStr(j, ['studentName', 'displayNameStudent']);
+  if (studentName.isEmpty && studentMap.isNotEmpty) {
+    studentName = parseClassRegStudent(studentMap)?.displayName ?? '';
+    if (studentName.startsWith('#')) studentName = '';
+  }
+  final studentIds = j['studentIds'];
+  final studentId =
+      _int(j['studentId'] ?? studentMap['id']) ??
+      (studentIds is List && studentIds.length == 1
+          ? _int(studentIds.first)
+          : null);
+  final reasonId = _int(
+    j['eventReasonId'] ??
+        j['reasonId'] ??
+        j['classRegEventReasonId'] ??
+        reasonMap['id'],
+  );
+  final reasonName = reason is String
+      ? reason.trim()
+      : _firstStr(
+          {...reasonMap, ...j},
+          ['eventReasonName', 'reasonName', 'longName', 'name'],
+        );
+  final text = _firstStr(j, ['text', 'remark', 'description', 'comment']);
+  if (text.isEmpty && reasonId == null && reasonName.isEmpty) return null;
+  DateTime? date;
+  for (final k in const [
+    'dateTime',
+    'startDateTime',
+    'date',
+    'eventDate',
+    'createDate',
+    'createdAt',
+  ]) {
+    date = _date(j[k]);
+    if (date != null) break;
+  }
+  return ClassRegEvent(
+    id: _int(j['id'] ?? j['eventId']),
+    ttId: _int(j['ttId'] ?? j['periodId']) ?? ttId,
+    studentId: studentId != null && studentId > 0 ? studentId : null,
+    studentName: studentName,
+    reasonId: reasonId,
+    reasonName: reasonName,
+    text: text,
+    date: date,
+    author: _firstStr(j, ['teacherName', 'createdBy', 'creator', 'author']),
+  );
+}
+
+/// ISO date(-time), yyyyMMdd, or epoch milliseconds.
+DateTime? _date(Object? v) => switch (v) {
+  int n when n > 99991231 => DateTime.fromMillisecondsSinceEpoch(n),
+  _ => parseDateTime(v) ?? parseDate(v),
+};
+
+List<ClassRegEvent> _events(Object? raw, {int? ttId}) =>
+    _maps(raw)
+        .map((e) => parseClassRegEvent(e, ttId: ttId))
+        .whereType<ClassRegEvent>()
+        .toList();
+
+Object? _eventList(Map<String, Object?> j) =>
+    j['classRegEvents'] ??
+    j['classregEvents'] ??
+    j['classRegEntries'] ??
+    j['events'];
+
 /// `topic` is a string, or an object with `text`/`lessonTopic`.
 String _topic(Object? raw) => switch (raw) {
   String s => s,
@@ -98,10 +178,11 @@ PeriodRegister parsePeriodRegister(int ttId, Map<String, Object?> j) =>
           .whereType<ClassRegAbsence>()
           .toList(),
       topic: _topic(j['topic'] ?? j['lessonTopic']),
+      events: _events(_eventList(j), ttId: _int(j['ttId']) ?? ttId),
     );
 
 /// getPeriodData2017 result:
-/// `{dataByTTId:{"<id>":{…}}, referencedStudents:[…]}`.
+/// `{dataByTTId:{"<id>":{…, classRegEvents?:[…]}}, referencedStudents:[…]}`.
 PeriodRegisterData parsePeriodData(Object? raw) {
   final j = _map(raw);
   final byId = _map(j['dataByTTId']);
@@ -110,6 +191,20 @@ PeriodRegisterData parsePeriodData(Object? raw) {
     final id = int.tryParse(e.key);
     if (id == null || e.value is! Map) continue;
     periods[id] = parsePeriodRegister(id, _map(e.value));
+  }
+  // Entries may also come as one top-level list with a ttId per item.
+  final loose = _events(_eventList(j));
+  for (final ev in loose) {
+    final r = periods[ev.ttId];
+    if (r == null) continue;
+    periods[r.ttId] = PeriodRegister(
+      ttId: r.ttId,
+      absenceChecked: r.absenceChecked,
+      studentIds: r.studentIds,
+      absences: r.absences,
+      topic: r.topic,
+      events: [...r.events, ev],
+    );
   }
   return PeriodRegisterData(
     periods: periods,

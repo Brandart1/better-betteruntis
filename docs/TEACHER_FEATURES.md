@@ -5,6 +5,11 @@
      Nothing here is planned until it is moved to "Planned" further down. -->
 
 - **Homework** (Hausaufgaben) — requested 2026-11-12. See "Homework: what we know" below; the teacher's own details still to come.
+- **Previous lesson topics** — told 2026-11-16: when entering the lesson topic, the topics of the last few lessons (of that course) are shown too. → Built (see "Built").
+- **Class register entries** (Klassenbucheinträge) — told 2026-11-16: the screen where absences are entered (the class's pupils, with names and photos) also has a section "Klassenbucheinträge": see every entry of that class and create new ones. → Built, but only entries of your own recent lessons of the course (see "Built").
+- **Class register in the menu** (Klassenbuch) — told 2026-11-16: besides tapping a lesson in "My timetable", the burger menu has "Klassenbuch": today's upcoming lessons and past lessons, filterable by whether absences and lesson topic are done. → Built as "Class register" in the drawer (see "Built").
+- **Pupil photos** — told 2026-11-16: the pupil list shows photos next to the names (we only show names so far; how the server delivers photos is unknown).
+- **Parent-teacher day** (Elternsprechtag) — told 2026-11-16, **later**: teachers offer time slots for the upcoming Elternsprechtag; rather complicated, details after the next talk with the teacher (Wednesday 2026-11-18). Parents then book slots in their WebUntis — also a task for later (parent side, branch `main`).
 
 ## Homework: what we know (2026-11-12)
 Sources: a school's teacher guide (EPF Luxembourg, "Hausaufgabe 2023 Lehrer", with screenshots of WebUntis and the Untis Mobile iOS app) and the Untis help center ("Untis Mobile – Funktionen für Lehrkräfte", "Rechte im Modul Klassenbuch → Hausaufgabe"). Not yet confirmed by our teacher.
@@ -48,7 +53,9 @@ Basic package (no class register needed): enter notes for pupils ("Info zur Stun
 
 ## Built (0.6.0 alphas)
 - [x] **Absences & lesson topic per lesson** ("Abwesenheiten" + "Lehrstoff"): tap a lesson in your own timetable → "Absences & lesson topic". Tap pupils to mark them absent, type the topic, save. Saving also confirms the attendance check. Double lessons are saved for both periods.
-- [x] **Open lessons** (drawer): past lessons of the last 7 / 14 / 30 days that still miss the attendance check or the topic; tap one to fill it in.
+- [x] **Class register** (drawer, "Klassenbuch"; was "Open lessons"): **Today** — all of today's own lessons in time order, upcoming ones included (open them to prepare the topic) — and **Last 7 / 14 / 30 days**, newest first. Each lesson shows whether the attendance check and the topic are done. Filter chips: All · Attendance missing · Topic missing · Done. Tap a lesson to fill it in; the list reloads afterwards.
+- [x] **Previous topics**: below the topic field, the topics of the latest 5 earlier lessons of the same course (same lesson id, else same subject + class; from your own timetable, up to 6 weeks back), newest first with the date; the newest two show, "Show N more" for the rest. Tap one to copy it into the field. Loads after the screen is up (inline loading / error with Retry).
+- [x] **Class register entries** (Klassenbucheinträge): a section under the pupils: "This lesson" and "Recent entries in this course" (from the earlier lessons loaded for the previous topics — there is no known call for all entries of a class, so entries other teachers made in their lessons are missing). "New entry": pupil or whole class, reason (master data `eventReasons`, optional), text. The server's error stays visible in the form.
 - [x] Demo: log in with user `teacher` at the demo school to try it without a real account.
 
 ## To confirm with a real teacher account
@@ -56,14 +63,17 @@ Basic package (no class register needed): enter notes for pupils ("Info zur Stun
 - [ ] Marking absent / present again works
 - [ ] Lesson topic is saved and shows up in WebUntis
 - [ ] Attendance check counts as done in WebUntis
-- [ ] Open lessons matches WebUntis' list of open class register entries
+- [ ] Previous topics: same course is found (does `lessonId` stay the same across weeks?) and the topics match WebUntis
+- [ ] getPeriodData2017 contains class register entries — under which key and with which fields (Debug log)
+- [ ] `eventReasons` in the master data (names shown in "New entry")
+- [ ] Creating an entry: does `createClassRegEvent2017` exist, and with which params? (send the Debug log with `createClassRegEvent2017 request body` and the answer)
+- [ ] Is there a call for all entries of a class (to show entries of other teachers' lessons)?
+- [ ] Class register overview (missing attendance / topic) matches WebUntis' list of open class register entries
 
 ## Ideas (not planned yet)
 - Late arrival / leaving early (partial absence with times)
 - Absence reason and note per pupil
-- List of the course's previous lesson topics
 - Notes for pupils / notes for teachers per lesson
-- Class register events (Klassenbucheinträge / remarks)
 - Seating plan / photos
 - Excuse management for class teachers
 

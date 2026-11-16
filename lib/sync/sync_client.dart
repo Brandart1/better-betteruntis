@@ -21,6 +21,11 @@ import 'sync_controller.dart';
 /// apps of this build. The web app always uses its own origin.
 const String kSyncServerUrl = String.fromEnvironment('BBU_SYNC_URL');
 
+/// Builds with `--dart-define=BBU_NO_SYNC=true` have no sync at all (also
+/// on the web, which otherwise syncs with its own origin): e.g. the teacher
+/// web alpha, hosted by a Worker without a database.
+const bool kSyncDisabled = bool.fromEnvironment('BBU_NO_SYNC');
+
 /// The sync server's base URL for this platform (empty if unavailable).
 Uri defaultSyncBaseUrl() =>
     kIsWeb ? Uri.parse(Uri.base.origin) : Uri.parse(kSyncServerUrl.trim());

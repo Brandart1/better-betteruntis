@@ -6,7 +6,7 @@ import 'package:better_betteruntis/data/class_register_repository_impl.dart';
 import 'package:better_betteruntis/dev/fake_accounts.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
 import 'package:better_betteruntis/ui/classreg/class_register_screen.dart';
-import 'package:better_betteruntis/ui/classreg/open_lessons_screen.dart';
+import 'package:better_betteruntis/ui/classreg/class_register_overview_screen.dart';
 import 'package:better_betteruntis/ui/timetable/lesson_details_sheet.dart';
 import 'package:better_betteruntis/ui/timetable/lesson_layout.dart';
 import 'package:flutter/material.dart';
@@ -72,10 +72,7 @@ void main() {
   test('only teachers', () {
     expect(hasClassRegister(teacherAccount()), isTrue);
     expect(hasClassRegister(demoAccount()), isFalse);
-    expect(
-      () => repo.openLessons(demoAccount()),
-      throwsA(isA<UntisException>()),
-    );
+    expect(() => repo.lessons(demoAccount()), throwsA(isA<UntisException>()));
   });
 
   test('save: absences, attendance check and topic for every period', () async {
@@ -109,35 +106,42 @@ void main() {
     expect(api.registerTopics, isEmpty);
   });
 
-  test('open lessons: past, not cancelled, incomplete, newest first', () async {
-    final open = await repo.openLessons(teacherAccount(), days: 7);
-    final ids = open.map((l) => l.period.id).toList();
-    // From Wed 4 Nov to now (Wed 11 Nov 12:00): today's 13:00 is in the
-    // future, Monday's 13:00 lessons are cancelled.
-    expect(ids, isNot(contains(202611112)));
+  test('lessons: today (upcoming too) and past, not cancelled', () async {
+    final all = await repo.lessons(teacherAccount(), days: 7);
+    final ids = all.map((l) => l.period.id).toList();
+    // From Wed 4 Nov to the end of today (Wed 11 Nov): today's 13:00 lesson
+    // is upcoming but included, Monday's 13:00 lessons are cancelled.
+    expect(ids, contains(202611112));
+    expect(ids, contains(202611111));
     expect(ids, isNot(contains(202611092)));
-    // Today's 08:00 lesson (202611111) starts complete in the demo (id
-    // divisible by 3), so yesterday's is the newest open one.
-    expect(ids, isNot(contains(202611111)));
-    expect(ids.first, 202611101);
-    expect(open.every((l) => l.register.isIncomplete), isTrue);
-    expect(
-      open.every((l) => !l.period.start.isBefore(DateTime(2026, 11, 4))),
-      isTrue,
-    );
-    // Ids divisible by 3 start complete in the demo.
-    expect(ids.where((i) => i % 3 == 0), isEmpty);
-    // Completing one removes it.
-    final first = open.first;
-    final data = await repo.load(teacherAccount(), [first.period]);
+    expect(ids, isNot(contains(202611121)));
+    expect(ids.first, 202611041);
+    expect(ids.last, 202611112);
+    // Oldest first.
+    final starts = all.map((l) => l.period.start).toList();
+    expect(starts, orderedEquals([...starts]..sort()));
+    // The demo seeds a mix: done, attendance only, topic only, nothing.
+    PeriodRegister reg(int id) =>
+        all.firstWhere((l) => l.period.id == id).register;
+    expect(reg(202611112).isIncomplete, isFalse); // % 4 == 0
+    expect(reg(202611101).absenceChecked, isTrue); // % 4 == 1
+    expect(reg(202611101).hasTopic, isFalse);
+    expect(reg(202611102).absenceChecked, isFalse); // % 4 == 2
+    expect(reg(202611102).hasTopic, isTrue);
+    expect(reg(202611111).absenceChecked, isFalse); // % 4 == 3
+    expect(reg(202611111).hasTopic, isFalse);
+    // Saving shows up in the next load.
+    final p = all.firstWhere((l) => l.period.id == 202611111).period;
+    final data = await repo.load(teacherAccount(), [p]);
     await repo.save(
       teacherAccount(),
-      [first.period],
+      [p],
       data,
       const ClassRegChanges(topic: 'Done'),
     );
-    final again = await repo.openLessons(teacherAccount(), days: 7);
-    expect(again.map((l) => l.period.id), isNot(contains(first.period.id)));
+    final again = await repo.lessons(teacherAccount(), days: 7);
+    final r = again.firstWhere((l) => l.period.id == 202611111).register;
+    expect(r.isIncomplete, isFalse);
   });
 
   group('screens', () {
@@ -179,44 +183,93 @@ void main() {
       expect(api.registerAbsences[11]!.single.studentId, 501);
     });
 
-    testWidgets('open lessons list', (t) async {
-      final account = teacherAccount();
-      await t.pumpWidget(
-        ProviderScope(
-          overrides: [
-            accountRepositoryProvider.overrideWithValue(accounts),
-            activeAccountProvider.overrideWith((ref) => Stream.value(account)),
-            classRegisterRepositoryProvider.overrideWithValue(repo),
-            nameResolverProvider.overrideWith(
-              (ref) => Stream.value(demoNames()),
-            ),
-          ],
-          child: const MaterialApp(home: OpenLessonsScreen()),
-        ),
+    Widget overview(Account account) => ProviderScope(
+      overrides: [
+        accountRepositoryProvider.overrideWithValue(accounts),
+        activeAccountProvider.overrideWith((ref) => Stream.value(account)),
+        classRegisterRepositoryProvider.overrideWithValue(repo),
+        classRegisterClockProvider.overrideWithValue(() => now),
+        nameResolverProvider.overrideWith((ref) => Stream.value(demoNames())),
+      ],
+      child: const MaterialApp(home: ClassRegisterOverviewScreen()),
+    );
+    Finder tile(int id) => find.byKey(ValueKey('classreg-lesson-$id'));
+
+    testWidgets('class register overview: today, past, filters', (t) async {
+      await t.pumpWidget(overview(teacherAccount()));
+      await t.pumpAndSettle();
+      expect(find.text('Class register'), findsOneWidget);
+      // Today: in time order, the upcoming one included.
+      expect(tile(202611111), findsOneWidget);
+      expect(tile(202611112), findsOneWidget);
+      expect(
+        t.getTopLeft(tile(202611111)).dy,
+        lessThan(t.getTopLeft(tile(202611112)).dy),
+      );
+      expect(find.textContaining('upcoming'), findsOneWidget);
+      // Past: newest first, below today.
+      expect(
+        t.getTopLeft(find.byKey(const ValueKey('classreg-past'))).dy,
+        greaterThan(t.getTopLeft(tile(202611112)).dy),
+      );
+      expect(
+        t.getTopLeft(tile(202611102)).dy,
+        lessThan(t.getTopLeft(tile(202611101)).dy),
+      );
+      // Filters.
+      await t.tap(find.byKey(const ValueKey('classreg-filter-topicMissing')));
+      await t.pumpAndSettle();
+      expect(tile(202611101), findsOneWidget);
+      expect(tile(202611102), findsNothing);
+      expect(tile(202611112), findsNothing);
+      await t.tap(
+        find.byKey(const ValueKey('classreg-filter-attendanceMissing')),
       );
       await t.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('open-lesson-202611101')),
-        findsOneWidget,
-      );
-      expect(find.textContaining('Missing: attendance, topic'), findsWidgets);
+      expect(tile(202611102), findsOneWidget);
+      expect(tile(202611101), findsNothing);
+      await t.tap(find.byKey(const ValueKey('classreg-filter-done')));
+      await t.pumpAndSettle();
+      expect(tile(202611112), findsOneWidget);
+      expect(tile(202611111), findsNothing);
+      expect(find.text('No lessons today match "Done".'), findsNothing);
     });
 
-    testWidgets('open lessons: students get a hint, not a list', (t) async {
-      await t.pumpWidget(
-        ProviderScope(
-          overrides: [
-            activeAccountProvider.overrideWith(
-              (ref) => Stream.value(demoAccount()),
-            ),
-            classRegisterRepositoryProvider.overrideWithValue(repo),
-            nameResolverProvider.overrideWith(
-              (ref) => Stream.value(demoNames()),
-            ),
-          ],
-          child: const MaterialApp(home: OpenLessonsScreen()),
-        ),
-      );
+    testWidgets('class register overview: refreshes after a lesson', (t) async {
+      await t.pumpWidget(overview(teacherAccount()));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const ValueKey('classreg-filter-topicMissing')));
+      await t.pumpAndSettle();
+      expect(tile(202611111), findsOneWidget);
+      await t.tap(tile(202611111));
+      await t.pumpAndSettle();
+      expect(find.byType(ClassRegisterScreen), findsOneWidget);
+      // Entered elsewhere (or by the screen) while it was open.
+      api.registerTopics[202611111] = 'Fractions';
+      await t.pageBack();
+      await t.pumpAndSettle();
+      expect(find.byType(ClassRegisterOverviewScreen), findsOneWidget);
+      expect(tile(202611111), findsNothing);
+    });
+
+    testWidgets('class register overview: very large text', (t) async {
+      t.view.physicalSize = const Size(360, 740) * 3;
+      t.view.devicePixelRatio = 3;
+      t.platformDispatcher.textScaleFactorTestValue = 2.5;
+      addTearDown(t.view.reset);
+      addTearDown(t.platformDispatcher.clearTextScaleFactorTestValue);
+      await t.pumpWidget(overview(teacherAccount()));
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull);
+      // Decorative icons are dropped so the texts get the width.
+      expect(find.byIcon(Icons.chevron_right), findsNothing);
+      await t.drag(find.byType(ListView), const Offset(0, -2000));
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull);
+    });
+
+    testWidgets('class register overview: students get a hint', (t) async {
+      await t.pumpWidget(overview(demoAccount()));
       await t.pumpAndSettle();
       expect(
         find.text('Only teacher accounts have a class register.'),

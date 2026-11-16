@@ -126,7 +126,7 @@ List<ExamItem> parseExamItems(Object? raw) {
 // Absences (getStudentAbsences2017) + master-data lookups
 // ---------------------------------------------------------------------------
 
-/// `absenceReasons` / `excuseStatuses` of a master-data object. All entries
+/// `absenceReasons` / `excuseStatuses` / `eventReasons` of a master-data object. All entries
 /// are kept, active or not.
 AbsenceLookups parseAbsenceLookups(Object? masterData) {
   final j = _map(masterData);
@@ -143,6 +143,7 @@ AbsenceLookups parseAbsenceLookups(Object? masterData) {
   return AbsenceLookups(
     reasons: names(j['absenceReasons']),
     statuses: names(j['excuseStatuses']),
+    eventReasons: names(j['eventReasons']),
   );
 }
 
@@ -209,16 +210,19 @@ List<OfficeHourItem> parseOfficeHourItems(Object? raw) {
   for (final o in _maps(list)) {
     final day =
         _ohDate(o['date']) ?? _ohDate(o['startDate']) ?? _ohDate(o['day']);
-    final start = _ohDateTime(o['startDateTime']) ??
+    final start =
+        _ohDateTime(o['startDateTime']) ??
         _ohDateTime(o['start']) ??
         _ohDateTime(o['startDate']) ??
         _ohAt(day, o['startTime']) ??
         day;
     if (start == null) continue;
-    final endDay = _ohDate(o['endDate']) ??
+    final endDay =
+        _ohDate(o['endDate']) ??
         day ??
         DateTime(start.year, start.month, start.day);
-    final end = _ohDateTime(o['endDateTime']) ??
+    final end =
+        _ohDateTime(o['endDateTime']) ??
         _ohDateTime(o['end']) ??
         _ohDateTime(o['endDate']) ??
         _ohAt(endDay, o['endTime']) ??
@@ -228,7 +232,8 @@ List<OfficeHourItem> parseOfficeHourItems(Object? raw) {
         id: _int(o['id']),
         start: start,
         end: end.isBefore(start) ? start : end,
-        teacherName: _ohName(o, const [
+        teacherName:
+            _ohName(o, const [
               'displayNameTeacher',
               'teacherName',
               'teacher',
@@ -237,7 +242,8 @@ List<OfficeHourItem> parseOfficeHourItems(Object? raw) {
             ]) ??
             '',
         teacherId: _ohTeacherId(o),
-        rooms: _ohName(o, const [
+        rooms:
+            _ohName(o, const [
               'displayNameRooms',
               'rooms',
               'roomName',
@@ -276,7 +282,9 @@ DateTime? _ohDateTime(Object? v) {
 /// [day] at a time given as hhmm int, "1345", "13:45" or "T13:45".
 DateTime? _ohAt(DateTime? day, Object? time) {
   if (day == null || time == null) return null;
-  final digits = time is String ? RegExp(r'^\d{3,4}$').firstMatch(time.trim()) : null;
+  final digits = time is String
+      ? RegExp(r'^\d{3,4}$').firstMatch(time.trim())
+      : null;
   final t = digits != null ? parseTime(int.parse(digits[0]!)) : parseTime(time);
   if (t == null || t < 0 || t >= 24 * 60) return null;
   return DateTime(day.year, day.month, day.day, t ~/ 60, t % 60);
@@ -305,8 +313,8 @@ String? _ohName(Map<String, Object?> o, List<String> keys) {
   String? one(Object? v) {
     if (v is Map) {
       final m = _map(v);
-      final full = '${_str(m['firstName']).trim()} ${_str(m['lastName']).trim()}'
-          .trim();
+      final full =
+          '${_str(m['firstName']).trim()} ${_str(m['lastName']).trim()}'.trim();
       return _firstStr(m, const ['displayName', 'longName', 'name']) ??
           (full.isEmpty ? null : full);
     }
@@ -315,9 +323,7 @@ String? _ohName(Map<String, Object?> o, List<String> keys) {
 
   for (final k in keys) {
     final v = o[k];
-    final s = v is List
-        ? v.map(one).whereType<String>().join(', ')
-        : one(v);
+    final s = v is List ? v.map(one).whereType<String>().join(', ') : one(v);
     if (s != null && s.isNotEmpty) return s;
   }
   return null;
@@ -457,7 +463,12 @@ List<AbsenceReason> parseAbsenceReasons(Object? raw) {
   final seen = <int>{};
   for (final e in _maps(raw)) {
     final id = _intOrNull(e['id'] ?? e['reasonId'] ?? e['absenceReasonId']);
-    final name = _firstStr(e, const ['longName', 'name', 'displayName', 'label']);
+    final name = _firstStr(e, const [
+      'longName',
+      'name',
+      'displayName',
+      'label',
+    ]);
     if (id == null || name == null || name.trim() == '---') continue;
     if (e['active'] == false) continue;
     if (seen.add(id)) out.add(AbsenceReason(id: id, name: name.trim()));
@@ -495,7 +506,10 @@ AbsenceReportOptions parseAbsenceMeta(Object? raw) {
   Object? raw,
 ) {
   final d = _classicData(raw);
-  return (allowed: _createFlag(d), reasons: parseAbsenceReasons(d['absenceReasons']));
+  return (
+    allowed: _createFlag(d),
+    reasons: parseAbsenceReasons(d['absenceReasons']),
+  );
 }
 
 /// yyyyMMdd as a number, as the classic endpoints expect.
@@ -522,7 +536,13 @@ List<String> _conflictTexts(List<Object?> conflicts) => [
     if (c is String && c.trim().isNotEmpty)
       c.trim()
     else if (c is Map)
-      _firstStr(_map(c), const ['text', 'message', 'title', 'description', 'name']) ??
+      _firstStr(_map(c), const [
+            'text',
+            'message',
+            'title',
+            'description',
+            'name',
+          ]) ??
           'overlaps an existing entry',
 ];
 
@@ -593,7 +613,8 @@ void checkAbsenceWriteResult(Object? raw) {
   final errors = _list(j['errors']);
   if (errors.isNotEmpty) {
     final first = _map(errors.first);
-    final msg = _firstStr(first, const ['title', 'message', 'detail', 'code']) ??
+    final msg =
+        _firstStr(first, const ['title', 'message', 'detail', 'code']) ??
         'The server rejected the absence.';
     throw UntisException(-1, msg);
   }
