@@ -135,6 +135,21 @@ class SyncEnableOptions {
   final WebKeyRetention webKeyRetention;
 }
 
+/// What the sync server already has for an account, found by
+/// [SyncController.checkServer] before the user picks how to turn sync on.
+class SyncServerCheck {
+  const SyncServerCheck({required this.existing, required this.e2e});
+
+  /// Nothing known (e.g. a test fake): the normal opt-in.
+  static const unknown = SyncServerCheck(existing: false, e2e: false);
+
+  /// This account already syncs (on another device, or did before).
+  final bool existing;
+
+  /// That sync uses end-to-end encryption (a passphrase).
+  final bool e2e;
+}
+
 /// Result of turning sync or E2E on.
 class SyncEnableResult {
   const SyncEnableResult({required this.state, this.recoveryCode});
@@ -198,6 +213,17 @@ abstract class SyncController extends Notifier<Map<String, SyncAccountState>> {
   /// If the server already has E2E for this identity, the result's phase is
   /// [SyncPhase.locked].
   Future<SyncEnableResult> enable(String accountId, SyncEnableOptions options);
+
+  /// Before [enable]: logs in to the sync server and tells whether this
+  /// account already syncs and whether with a passphrase. The session is
+  /// kept for the following [enable]; call [discardCheck] if the user
+  /// cancels instead. The default (fakes) knows nothing.
+  Future<SyncServerCheck> checkServer(String accountId) async =>
+      SyncServerCheck.unknown;
+
+  /// The user cancelled after [checkServer]: drops its session and, if the
+  /// check itself created this account on the server, that empty entry.
+  Future<void> discardCheck(String accountId) async {}
 
   /// Unlocks E2E on this device with the passphrase or the recovery code.
   /// [webKeyRetention] (web): also sets how long the key is remembered.

@@ -182,6 +182,7 @@ class SyncSession {
     required this.expiresAt,
     required this.identity,
     required this.e2e,
+    this.existing,
   });
 
   /// Bearer token; null for browsers (the server only sets the cookie).
@@ -189,6 +190,10 @@ class SyncSession {
   final DateTime? expiresAt;
   final SyncIdentity identity;
   final bool e2e;
+
+  /// The identity existed before this login (the account already syncs on
+  /// another device or did before). Null from servers that don't say.
+  final bool? existing;
 }
 
 /// A page of `GET /api/sync/notes` or the answer of `PUT /api/sync/notes`.
@@ -449,6 +454,7 @@ class SyncClient {
           : null,
       identity: parseSyncIdentity(id, host: host, school: school)!,
       e2e: j['e2e'] == true,
+      existing: j['existing'] is bool ? j['existing'] as bool : null,
     );
   }
 

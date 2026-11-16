@@ -21,7 +21,7 @@ describe("POST /api/sync/session", () => {
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    const body = (await res.json()) as { token: string; expiresAt: string; identity: { epoch: string }; e2e: boolean };
+    const body = (await res.json()) as { token: string; expiresAt: string; identity: { epoch: string }; e2e: boolean; existing: boolean };
     expect(body.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(body.expiresAt).toBe(new Date(t0 + SESSION_TTL_MS).toISOString());
     expect(body.identity).toEqual({ host: HOST, school: "demo-school", userId: user, epoch: body.identity.epoch });
@@ -29,6 +29,7 @@ describe("POST /api/sync/session", () => {
     const stored = await env.DB.prepare("SELECT epoch FROM identities WHERE user_id = ?").bind(user).first();
     expect(stored).toEqual({ epoch: body.identity.epoch });
     expect(body.e2e).toBe(false);
+    expect(body.existing).toBe(false);
     const cookie = res.headers.get("set-cookie")!;
     expect(cookie).toBe(`__Host-bbu_sync=${body.token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=7776000`);
     // __Host- rules: Secure, Path=/, no Domain.
@@ -51,6 +52,8 @@ describe("POST /api/sync/session", () => {
     const b = await login(user);
     expect(a.token).not.toBe(b.token);
     expect(a.body.identity).toEqual(b.body.identity);
+    // The first login created the identity, the second found it.
+    expect([a.body.existing, b.body.existing]).toEqual([false, true]);
     const n = await env.DB.prepare("SELECT count(*) AS c FROM identities WHERE user_id = ?").bind(user).first<{ c: number }>();
     expect(n!.c).toBe(1);
   });

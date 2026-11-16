@@ -145,6 +145,7 @@ class FakeSyncServer {
       final school = '${b['school']}'.toLowerCase();
       final user = t.substring('untis:'.length);
       final key = '$host|$school|$user';
+      final existing = identities.containsKey(key);
       final ident = identities.putIfAbsent(
         key,
         () => FakeIdentity(host, school, user),
@@ -158,6 +159,7 @@ class FakeSyncServer {
           'expiresAt': now().add(const Duration(days: 90)).toIso8601String(),
           'identity': ident.json,
           'e2e': ident.header != null,
+          'existing': existing,
         },
         token,
       );

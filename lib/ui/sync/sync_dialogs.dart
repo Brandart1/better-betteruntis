@@ -25,9 +25,10 @@ typedef SyncDone<T> = ({T value});
 String syncErrorText(Object e) =>
     e is SyncException ? e.message : 'Something went wrong: $e';
 
-/// The whole opt-in flow for [accountId]: disclaimer, encryption choice,
-/// passphrase, then the recovery code (once) and, if the server already has
-/// encryption for this account, the unlock dialog.
+/// The whole opt-in flow for [accountId]: disclaimer, then a check whether
+/// the account already syncs. If it does, the user only confirms (no
+/// passphrase) or enters the existing passphrase / recovery code; otherwise
+/// the encryption choice, passphrase and the recovery code (once).
 Future<void> turnOnSync(
   BuildContext context,
   SyncController sync,
@@ -41,11 +42,28 @@ Future<void> turnOnSync(
     builder: (_) => const SyncDisclaimerDialog(),
   );
   if (agreed != true || !context.mounted) return;
+  final check = (await runSyncAction(
+    context,
+    title: 'Checking for an existing sync',
+    action: () => sync.checkServer(accountId),
+  ))?.value;
+  if (check == null) return;
+  if (!context.mounted) {
+    await sync.discardCheck(accountId);
+    return;
+  }
+  if (check.existing) {
+    await _joinExistingSync(context, sync, accountId, encrypted: check.e2e);
+    return;
+  }
   final encrypt = await showDialog<bool>(
     context: context,
     builder: (_) => const SyncEncryptionChoiceDialog(),
   );
-  if (encrypt == null || !context.mounted) return;
+  if (encrypt == null || !context.mounted) {
+    await sync.discardCheck(accountId);
+    return;
+  }
   final SyncDone<SyncEnableResult>? done;
   if (encrypt) {
     done = await showDialog<SyncDone<SyncEnableResult>>(
@@ -77,7 +95,10 @@ Future<void> turnOnSync(
     );
   }
   final result = done?.value;
-  if (result == null) return;
+  if (result == null) {
+    await sync.discardCheck(accountId);
+    return;
+  }
   if (result.recoveryCode case final code?) {
     if (root.mounted) {
       await showRecoveryCode(
@@ -90,6 +111,53 @@ Future<void> turnOnSync(
   if (!context.mounted) return;
   if (result.state.phase == SyncPhase.locked) {
     await unlockSync(context, sync, accountId, alreadyEncrypted: true);
+  }
+}
+
+/// The account already syncs: without a passphrase the user only confirms;
+/// with one, sync is turned on and must be unlocked right away (cancelling
+/// the unlock turns sync off on this device again, the server keeps
+/// everything).
+Future<void> _joinExistingSync(
+  BuildContext context,
+  SyncController sync,
+  String accountId, {
+  required bool encrypted,
+}) async {
+  if (!encrypted) {
+    final ok = await confirmSync(
+      context,
+      title: 'This account already syncs',
+      body:
+          'Sync is already set up for this account (without a passphrase), '
+          'e.g. on another device. Turn it on here too? Your notes on this '
+          'device and the synced ones are merged.',
+      confirmLabel: 'Turn on sync',
+    );
+    if (!ok || !context.mounted) {
+      await sync.discardCheck(accountId);
+      return;
+    }
+  }
+  final done = await runSyncAction(
+    context,
+    title: 'Turning on sync',
+    action: () => sync.enable(accountId, const SyncEnableOptions()),
+  );
+  final result = done?.value;
+  if (result == null) {
+    await sync.discardCheck(accountId);
+    return;
+  }
+  if (result.state.phase != SyncPhase.locked || !context.mounted) return;
+  final unlocked = await unlockSync(
+    context,
+    sync,
+    accountId,
+    alreadyEncrypted: true,
+  );
+  if (!unlocked && sync.stateOf(accountId).phase == SyncPhase.locked) {
+    await sync.signOutDevice(accountId);
   }
 }
 

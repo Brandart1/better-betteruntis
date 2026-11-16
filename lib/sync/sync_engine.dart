@@ -1974,7 +1974,12 @@ class SyncEngine extends SyncController {
       if (web) await _webGuard(accountId);
       final passphrase = options.passphrase;
       try {
-        final session = await _login(accountId);
+        final checked = _checked.remove(accountId);
+        final session =
+            checked != null &&
+                DateTime.now().difference(checked.at) < _checkMaxAge
+            ? checked.session
+            : await _login(accountId);
         // Persist the intent (E2E or not) before the session is used.
         _meta[accountId] = _Meta(
           fullPush: true,
@@ -2060,6 +2065,52 @@ class SyncEngine extends SyncController {
         throw _fail(accountId, e);
       }
     });
+  }
+
+  /// Sessions from [checkServer] waiting for [enable] (memory only).
+  final Map<String, ({SyncSession session, DateTime at})> _checked = {};
+
+  /// How long [enable] reuses the session of a [checkServer].
+  static const _checkMaxAge = Duration(minutes: 30);
+
+  @override
+  Future<SyncServerCheck> checkServer(String accountId) async {
+    if (!_client.available) throw const SyncException(_unavailableMessage);
+    return _userOp(accountId, () async {
+      if (await _isAnonymous(accountId)) {
+        throw const SyncException(kAnonymousSyncMessage);
+      }
+      if (web) await _webGuard(accountId);
+      try {
+        final session = await _login(accountId);
+        _checked[accountId] = (session: session, at: DateTime.now());
+        return SyncServerCheck(
+          // Older servers don't say; an E2E header means it exists.
+          existing: session.existing ?? session.e2e,
+          e2e: session.e2e,
+        );
+      } catch (e) {
+        throw _fail(accountId, e);
+      }
+    });
+  }
+
+  @override
+  Future<void> discardCheck(String accountId) async {
+    final checked = _checked.remove(accountId);
+    if (checked == null) return;
+    final session = checked.session;
+    try {
+      if (session.existing == false) {
+        // The check's login created the account on the server: remove the
+        // empty entry, so the next check doesn't find a "sync".
+        await _client.deleteAccount(session.token);
+      } else {
+        await _client.deleteSession(session.token);
+      }
+    } catch (_) {
+      // Offline: the session expires on its own.
+    }
   }
 
   /// Whether a failed E2E setup stays pending (the header upload may have
