@@ -230,7 +230,7 @@ void main() {
           names: names,
           language: SpeechLanguage.de,
         ),
-        contains('in Raum R101, Hausaufgabe.'),
+        contains('in Raum R101, Hausübung.'),
       );
     });
   });
