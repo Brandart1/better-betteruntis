@@ -6,6 +6,7 @@ import 'package:better_betteruntis/ui/timetable/lesson_card.dart';
 import 'package:better_betteruntis/ui/timetable/timetable_screen.dart';
 import 'package:better_betteruntis/ui/timetable/timetable_utils.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -213,7 +214,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(label(addDays(weekStart, 7))), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Today'));
+    await tester.tap(find.byTooltip('Today (T)'));
     await tester.pumpAndSettle();
     expect(find.text(label(weekStart)), findsOneWidget);
   });
@@ -260,7 +261,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(label(addDays(weekStart, 7))), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Today'));
+    await tester.tap(find.byTooltip('Today (T)'));
     await tester.pumpAndSettle();
     expect(find.text(label(weekStart)), findsOneWidget);
   });
@@ -317,5 +318,181 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('day-title')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+  });
+
+  group('keyboard', () {
+    String weekText(WidgetTester tester, DateTime ws) => formatWeekRange(
+      tester.element(find.byType(TimetableScreen)),
+      ws,
+      addDays(ws, 4),
+    );
+    String dayText(WidgetTester tester, DateTime d) => dateFormat(
+      tester.element(find.byType(TimetableScreen)),
+      'EEE, d MMM',
+    ).format(d);
+
+    Future<void> press(WidgetTester tester, LogicalKeyboardKey key) async {
+      await tester.sendKeyEvent(key);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('left / right switch weeks right after load, T jumps back', (
+      tester,
+    ) async {
+      await pumpScreen(tester);
+      expect(find.text(weekText(tester, weekStart)), findsOneWidget);
+
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      expect(
+        find.text(weekText(tester, addDays(weekStart, 7))),
+        findsOneWidget,
+      );
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      expect(
+        find.text(weekText(tester, addDays(weekStart, 14))),
+        findsOneWidget,
+      );
+      await press(tester, LogicalKeyboardKey.arrowLeft);
+      expect(
+        find.text(weekText(tester, addDays(weekStart, 7))),
+        findsOneWidget,
+      );
+
+      await press(tester, LogicalKeyboardKey.keyT);
+      expect(find.text(weekText(tester, weekStart)), findsOneWidget);
+
+      await press(tester, LogicalKeyboardKey.arrowLeft);
+      expect(
+        find.text(weekText(tester, addDays(weekStart, -7))),
+        findsOneWidget,
+      );
+      await press(tester, LogicalKeyboardKey.home);
+      expect(find.text(weekText(tester, weekStart)), findsOneWidget);
+    });
+
+    testWidgets('quick repeated presses step twice', (tester) async {
+      await pumpScreen(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(
+        find.text(weekText(tester, addDays(weekStart, 14))),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('left / right switch days in day mode, Escape zooms out', (
+      tester,
+    ) async {
+      await pumpScreen(tester);
+      await tester.tap(find.byKey(const ValueKey('day-header-2')));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<Text>(dayLabel()).data,
+        dayText(tester, addDays(weekStart, 1)),
+      );
+
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      expect(
+        tester.widget<Text>(dayLabel()).data,
+        dayText(tester, addDays(weekStart, 2)),
+      );
+      await press(tester, LogicalKeyboardKey.arrowLeft);
+      await press(tester, LogicalKeyboardKey.arrowLeft);
+      expect(tester.widget<Text>(dayLabel()).data, dayText(tester, weekStart));
+
+      await press(tester, LogicalKeyboardKey.escape);
+      expect(dayLabel(), findsNothing);
+      expect(find.text(weekText(tester, weekStart)), findsOneWidget);
+    });
+
+    testWidgets('ignored while a text field has focus', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            timetableRepositoryProvider.overrideWithValue(repo),
+            activeAccountProvider.overrideWith(
+              (ref) => Stream.value(demoAccount()),
+            ),
+          ],
+          child: MaterialApp(
+            home: TimetableScreen(
+              onOpenElement: (_, t) => opened.add(t),
+              drawer: const Drawer(child: TextField(key: ValueKey('field'))),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final scaffold = tester.state<ScaffoldState>(find.byType(Scaffold));
+      scaffold.openDrawer();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('field')));
+      await tester.enterText(find.byKey(const ValueKey('field')), 'abc');
+      await tester.pumpAndSettle();
+
+      await press(tester, LogicalKeyboardKey.arrowLeft);
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      await press(tester, LogicalKeyboardKey.keyT);
+      scaffold.closeDrawer();
+      await tester.pumpAndSettle();
+      expect(find.text(weekText(tester, weekStart)), findsOneWidget);
+
+      // Closing the drawer gives the keys back to the timetable.
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      expect(
+        find.text(weekText(tester, addDays(weekStart, 7))),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('ignored while a dialog is open', (tester) async {
+      await pumpScreen(tester);
+      await tester.tap(find.byTooltip('Jump to date'));
+      await tester.pumpAndSettle();
+      expect(find.byType(DatePickerDialog), findsOneWidget);
+
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      expect(find.byType(DatePickerDialog), findsOneWidget);
+
+      await press(tester, LogicalKeyboardKey.escape);
+      expect(find.byType(DatePickerDialog), findsNothing);
+      expect(find.text(weekText(tester, weekStart)), findsOneWidget);
+
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      expect(
+        find.text(weekText(tester, addDays(weekStart, 7))),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('Escape closes the lesson sheet, then keys work again', (
+      tester,
+    ) async {
+      await pumpScreen(tester);
+      final maths = week.firstWhere(
+        (p) => p.lessonId == DemoIds.doubleMathsLesson,
+      );
+      await tester.tap(find.byKey(ValueKey('lesson-${maths.id}')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Lesson 1–2'), findsOneWidget);
+
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      expect(find.text(weekText(tester, weekStart)), findsOneWidget);
+
+      await press(tester, LogicalKeyboardKey.escape);
+      expect(find.textContaining('Lesson 1–2'), findsNothing);
+
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      expect(
+        find.text(weekText(tester, addDays(weekStart, 7))),
+        findsOneWidget,
+      );
+    });
   });
 }
