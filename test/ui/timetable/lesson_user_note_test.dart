@@ -128,6 +128,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('lesson-details-remove')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('lesson-user-note')), findsNothing);
-    expect(c.read(lessonNotesProvider), isEmpty);
+    // Only a tombstone (for sync) is left.
+    expect(c.read(lessonNotesProvider).values.every((n) => n.isEmpty), isTrue);
+    expect(c.read(lessonNotesProvider)[period.noteKey]!.deleted, isTrue);
   });
 }

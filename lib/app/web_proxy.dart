@@ -1,5 +1,6 @@
 /// Browser builds can't call WebUntis directly (CORS), so every request goes
-/// through the self-hosted server (`server/`), which forwards
+/// through the relay of the Cloudflare Worker that also serves the web app
+/// (`worker/src/proxy.ts`, same origin), which forwards
 /// `<origin>/proxy/<host>/<path>?<query>` to `https://<host>/<path>?<query>`.
 library;
 

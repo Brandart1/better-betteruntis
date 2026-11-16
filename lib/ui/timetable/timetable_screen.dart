@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -12,6 +13,7 @@ import '../../core/settings.dart';
 import '../classreg/class_register_screen.dart';
 import '../classreg/open_lessons_screen.dart';
 import '../export/export_sheet.dart';
+import '../shell/app_drawer.dart' show isWebProvider;
 import 'day_speech.dart';
 import 'day_timeline.dart';
 import 'lesson_details_sheet.dart';
@@ -30,6 +32,10 @@ import 'week_grid.dart';
 /// width); in day mode the app bar shows the date, swiping moves between
 /// days, and tapping the date (app bar or day header) or pressing back zooms
 /// out to the week containing the current day.
+///
+/// Hardware keyboard (any platform): ← / → previous / next week (or day in
+/// day mode), Home or T jumps to today, Escape leaves day mode. Ignored while
+/// a text field has focus or a dialog/sheet is open; ↑ / ↓ keep scrolling.
 class TimetableScreen extends ConsumerStatefulWidget {
   const TimetableScreen({
     super.key,
@@ -94,8 +100,17 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     return kPagerOrigin + weeks * _days.length + pos;
   }
 
+  /// Receives the keyboard shortcuts; autofocused so keys work right after
+  /// the page loads (web) and re-focused after sheets, dialogs and the drawer.
+  final _keyFocus = FocusNode(debugLabel: 'timetable-keys');
+
+  /// Page a keyboard step is heading to while its animation runs, so quick
+  /// repeated presses keep stepping instead of retargeting the same page.
+  int? _keyTarget;
+
   @override
   void dispose() {
+    _keyFocus.dispose();
     _weekController.dispose();
     _dayController?.dispose();
     _zoom.dispose();
@@ -116,6 +131,64 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
   }
 
   void _goToWeek(int page) => _animate(_weekController, _page, page);
+
+  /// Previous (-1) / next (+1) week, or day in day mode: the same pager
+  /// animation as a swipe.
+  void _step(int delta) {
+    if (_zoom.isAnimating) return;
+    final c = _day != null ? _dayController : _weekController;
+    if (c == null || !c.hasClients) return;
+    final pos = c.position;
+    final current = pos.isScrollingNotifier.value && _keyTarget != null
+        ? _keyTarget!
+        : (c.page ?? c.initialPage.toDouble()).round();
+    final to = current + delta;
+    _keyTarget = to;
+    _animate(c, current, to);
+  }
+
+  void _refocus() {
+    if (mounted) _keyFocus.requestFocus();
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    // A dialog, sheet or menu on top: leave keys to it.
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      return KeyEventResult.ignored;
+    }
+    // Text fields need the arrow keys (and T) themselves.
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused != null &&
+        (focused.widget is EditableText ||
+            focused.findAncestorWidgetOfExactType<EditableText>() != null)) {
+      return KeyEventResult.ignored;
+    }
+    final kb = HardwareKeyboard.instance;
+    if (kb.isControlPressed || kb.isMetaPressed || kb.isAltPressed) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      _step(-1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowRight) {
+      _step(1);
+      return KeyEventResult.handled;
+    }
+    if (event is KeyRepeatEvent) return KeyEventResult.ignored;
+    if (key == LogicalKeyboardKey.home || key == LogicalKeyboardKey.keyT) {
+      if (kb.isShiftPressed) return KeyEventResult.ignored;
+      _goToDate(DateTime.now());
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.escape && _day != null) {
+      _exitDay();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
   void _goToDate(DateTime date) {
     if (_day != null) {
@@ -173,6 +246,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
       firstDate: DateTime(now.year - 5),
       lastDate: DateTime(now.year + 5, 12, 31),
     );
+    _refocus();
     if (picked != null && mounted) _goToDate(picked);
   }
 
@@ -250,7 +324,11 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
   void _openElement(TimetableTarget t) =>
       (widget.onOpenElement ?? defaultOpenElement)(context, t);
 
-  void _showDetails(List<LessonBlock> blocks, int index, NameResolver names) {
+  Future<void> _showDetails(
+    List<LessonBlock> blocks,
+    int index,
+    NameResolver names,
+  ) async {
     final account = ref.read(activeAccountProvider).value;
     final target = widget.target ?? account?.personalTarget;
     // Teachers: class register of lessons in their own timetable.
@@ -258,7 +336,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
         account != null &&
         hasClassRegister(account) &&
         target == TimetableTarget(ElementType.teacher, account.elementId);
-    showLessonDetails(
+    await showLessonDetails(
       context,
       blocks: blocks,
       index: index,
@@ -287,6 +365,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
               );
             },
     );
+    _refocus();
   }
 
   @override
@@ -505,51 +584,88 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
         onPopInvokedWithResult: (didPop, _) {
           if (!didPop) _exitDay();
         },
-        child: Scaffold(
-          drawer: widget.drawer,
-          appBar: AppBar(
-            title: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                title,
-                if (element != null)
-                  Text(element.longName, style: theme.textTheme.labelMedium)
-                else if (child != null)
-                  Text(
-                    child.displayName,
-                    key: const ValueKey('child-label'),
-                    style: theme.textTheme.labelMedium,
+        child: Focus(
+          focusNode: _keyFocus,
+          autofocus: true,
+          onKeyEvent: _onKey,
+          child: Scaffold(
+            drawer: widget.drawer,
+            onDrawerChanged: (open) {
+              if (!open) _refocus();
+            },
+            appBar: AppBar(
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  title,
+                  if (element != null)
+                    Text(element.longName, style: theme.textTheme.labelMedium)
+                  else if (child != null)
+                    Text(
+                      child.displayName,
+                      key: const ValueKey('child-label'),
+                      style: theme.textTheme.labelMedium,
+                    ),
+                ],
+              ),
+              actions: [
+                if (ref.watch(
+                  accessibilityProvider.select((a) => a.speakButton),
+                ))
+                  _SpeakButton(onSpeak: () => _speakDay(account, target, ws)),
+                // Web version: visible previous/next buttons (the apps
+                // swipe; arrow keys work everywhere).
+                if (ref.watch(isWebProvider))
+                  IconButton(
+                    key: const ValueKey('timetable-prev'),
+                    tooltip: day != null
+                        ? 'Previous day (←)'
+                        : 'Previous week (←)',
+                    onPressed: () {
+                      _step(-1);
+                      _refocus();
+                    },
+                    icon: const Icon(Icons.chevron_left),
                   ),
+                IconButton(
+                  tooltip: 'Today (T)',
+                  onPressed: atToday ? null : () => _goToDate(DateTime.now()),
+                  icon: const Icon(Icons.today),
+                ),
+                if (ref.watch(isWebProvider))
+                  IconButton(
+                    key: const ValueKey('timetable-next'),
+                    tooltip: day != null ? 'Next day (→)' : 'Next week (→)',
+                    onPressed: () {
+                      _step(1);
+                      _refocus();
+                    },
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                IconButton(
+                  tooltip: 'Jump to date',
+                  onPressed: _pickDate,
+                  icon: const Icon(Icons.calendar_month),
+                ),
+                IconButton(
+                  key: const ValueKey('export-action'),
+                  tooltip: 'Export',
+                  onPressed: () async {
+                    await showExportSheet(
+                      context,
+                      account: account,
+                      target: target,
+                      initialWeek: day ?? ws,
+                      elementName: child?.displayName,
+                    );
+                    _refocus();
+                  },
+                  icon: const Icon(Icons.ios_share),
+                ),
               ],
             ),
-            actions: [
-              if (ref.watch(accessibilityProvider.select((a) => a.speakButton)))
-                _SpeakButton(onSpeak: () => _speakDay(account, target, ws)),
-              IconButton(
-                tooltip: 'Today',
-                onPressed: atToday ? null : () => _goToDate(DateTime.now()),
-                icon: const Icon(Icons.today),
-              ),
-              IconButton(
-                tooltip: 'Jump to date',
-                onPressed: _pickDate,
-                icon: const Icon(Icons.calendar_month),
-              ),
-              IconButton(
-                key: const ValueKey('export-action'),
-                tooltip: 'Export',
-                onPressed: () => showExportSheet(
-                  context,
-                  account: account,
-                  target: target,
-                  initialWeek: day ?? ws,
-                  elementName: child?.displayName,
-                ),
-                icon: const Icon(Icons.ios_share),
-              ),
-            ],
+            body: body,
           ),
-          body: body,
         ),
       ),
     );

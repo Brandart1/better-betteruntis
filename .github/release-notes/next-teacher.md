@@ -6,3 +6,6 @@ Teacher test build (branch `teacher`). The class register calls haven't been con
 - Teachers: tap a lesson in your own timetable → **Absences & lesson topic**. Tap pupils to mark them absent, enter the lesson topic ("Lehrstoff") and save; this also confirms the attendance check. Double lessons are saved for both periods.
 - Teachers: **Open lessons** in the menu lists your past lessons of the last 7, 14 or 30 days that still miss the attendance check or the topic.
 - Demo school: log in as `teacher` to try the teacher features.
+
+### Changed
+- Includes everything from v0.5.0-beta (web version, optional encrypted sync, "What's new", keyboard navigation).

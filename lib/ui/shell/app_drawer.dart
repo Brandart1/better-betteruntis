@@ -9,6 +9,8 @@ import '../../core/class_register.dart';
 import '../../core/providers.dart';
 import '../accounts/account_switcher.dart';
 import '../accounts/child_switcher.dart';
+import '../../sync/sync_controller.dart' show kLatestReleaseUrl;
+import '../infocenter/info_providers.dart' show urlOpenerProvider;
 
 class AppDrawer extends StatelessWidget {
   const AppDrawer({super.key});
@@ -77,6 +79,14 @@ class AppDrawer extends StatelessWidget {
             title: const Text('Calendar sync'),
             onTap: () => go('/calendar'),
           ),
+        // Also on the web: the web version syncs too.
+        ListTile(
+          key: const ValueKey('drawer-sync'),
+          leading: const Icon(Icons.cloud_sync_outlined),
+          title: const Text('Sync'),
+          subtitle: const Text('Notes on all your devices'),
+          onTap: () => go('/sync'),
+        ),
         ListTile(
           leading: const Icon(Icons.manage_accounts_outlined),
           title: const Text('Manage accounts'),
@@ -92,6 +102,29 @@ class AppDrawer extends StatelessWidget {
           title: const Text('Accessibility'),
           onTap: () => go('/accessibility'),
         ),
+        ListTile(
+          key: const ValueKey('drawer-whats-new'),
+          leading: const Icon(Icons.new_releases_outlined),
+          title: const Text("What's new"),
+          subtitle: const Text('Release notes'),
+          onTap: () => go('/whats-new'),
+        ),
+        // Web version only: point to the Android/iOS apps.
+        Consumer(
+          builder: (context, ref, _) => !ref.watch(isWebProvider)
+              ? const SizedBox.shrink()
+              : ListTile(
+                  key: const ValueKey('drawer-get-app'),
+                  leading: const Icon(Icons.install_mobile_outlined),
+                  title: const Text('Get the app'),
+                  subtitle: const Text('Android and iOS'),
+                  trailing: const Icon(Icons.open_in_new, size: 18),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    ref.read(urlOpenerProvider)(Uri.parse(kLatestReleaseUrl));
+                  },
+                ),
+        ),
         if (debugToolsEnabled) ...[
           const Divider(indent: 28, endIndent: 28),
           ListTile(
@@ -105,6 +138,9 @@ class AppDrawer extends StatelessWidget {
     );
   }
 }
+
+/// Whether this is the web version (overridable in tests).
+final isWebProvider = Provider<bool>((ref) => kIsWeb);
 
 /// "Version 0.4.4 (19) · beta" at the bottom of the drawer.
 class _VersionFooter extends ConsumerWidget {

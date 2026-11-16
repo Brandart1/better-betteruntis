@@ -138,6 +138,15 @@ abstract interface class UntisApi {
     required DateTime weekStart,
   });
 
+  /// A WebUntis REST bearer token (JWT from JSON-RPC `getAuthToken`, cached
+  /// for a few minutes). Used to prove the account's identity to the sync
+  /// server, which checks it with WebUntis.
+  Future<String> restAuthToken({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  });
+
   /// Raw JSON of the last N responses, for the debug screen.
   List<({String method, DateTime at, String json})> get debugLog;
 }

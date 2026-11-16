@@ -126,7 +126,9 @@ final _random = Random();
 /// Unique, time-ordered local account id.
 String newAccountId() =>
     '${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}-'
-    '${_random.nextInt(1 << 32).toRadixString(36)}';
+    // Two 16-bit halves: on the web `1 << 32` is 0 (32-bit shifts), and
+    // nextInt(0) threw, so adding an account failed in the browser.
+    '${(_random.nextInt(1 << 16) * 0x10000 + _random.nextInt(1 << 16)).toRadixString(36)}';
 
 bool _sameSchool(School a, School b) =>
     a.loginName.toLowerCase() == b.loginName.toLowerCase() ||

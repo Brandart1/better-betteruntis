@@ -9,23 +9,38 @@ on:
         description: "Existing tag to (re)build and release, e.g. v0.2.0-alpha"
         required: true
 
+# Read-only by default; only the job that creates the GitHub release can
+# write (security review L5).
 permissions:
-  contents: write
+  contents: read
 
 env:
   FLUTTER_VERSION: "3.47.9"
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
   # alpha builds keep the Debug screen; beta/stable hide it (lib/core/build_channel.dart).
   BBU_CHANNEL: ${{ contains(github.event.inputs.tag || github.ref_name, '-alpha') && 'alpha' || (contains(github.event.inputs.tag || github.ref_name, '-beta') && 'beta' || 'stable') }}
+  # Sync in alpha builds only while the repository variable ALPHA_SYNC is
+  # "on" (while sync itself is being developed). Otherwise alpha apps are
+  # built without a sync server ("Sync isn't available in this build") and
+  # alphas don't deploy the web preview, so alpha bugs can't touch the
+  # production sync database.
+  BBU_SYNC_URL: ${{ (!contains(github.event.inputs.tag || github.ref_name, '-alpha') || vars.ALPHA_SYNC == 'on') && vars.BBU_SYNC_URL || '' }}
 
 jobs:
   version:
     name: Tag matches pubspec version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
+      - name: Tag format
+        # TAG ends up in shell commands (e.g. the wrangler deploy command), so
+        # only plain release tags are accepted.
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta)(\.[0-9]+)?)?$'; then
+            echo "::error::Unexpected tag format: $TAG"; exit 1
+          fi
       - name: Compare
         run: |
           V=$(sed -n 's/^version: *\([^+]*\)+.*/\1/p' pubspec.yaml)
@@ -50,14 +65,14 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: "21"
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
@@ -74,19 +89,23 @@ jobs:
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
+      # "What's new" bundles the release notes (assets/release_notes). The
+      # tests keep the committed copy in sync; regenerating here also covers
+      # a tag whose notes were committed without running the tool.
+      - run: dart run tool/sync_release_notes.dart
       - name: Build APK
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: flutter build apk --release --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }}
+        run: flutter build apk --release --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }} --dart-define=BBU_TAG=${{ env.TAG }} --dart-define=BBU_SYNC_URL=${{ env.BBU_SYNC_URL }}
       - name: Verify release signature
         run: |
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk | tee signer.txt
           if grep -q "CN=Android Debug" signer.txt; then echo "::error::APK is debug-signed"; exit 1; fi
           mv build/app/outputs/flutter-apk/app-release.apk "better-betteruntis-${TAG}.apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: apk
           path: better-betteruntis-*.apk
@@ -96,86 +115,173 @@ jobs:
     needs: version
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
-      - run: flutter build ios --release --no-codesign --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }}
+      # "What's new" bundles the release notes (assets/release_notes). The
+      # tests keep the committed copy in sync; regenerating here also covers
+      # a tag whose notes were committed without running the tool.
+      - run: dart run tool/sync_release_notes.dart
+      - run: flutter build ios --release --no-codesign --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }} --dart-define=BBU_TAG=${{ env.TAG }} --dart-define=BBU_SYNC_URL=${{ env.BBU_SYNC_URL }}
       - name: Package IPA
         run: |
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
           zip -qr "better-betteruntis-${TAG}-unsigned.ipa" Payload
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ipa
           path: better-betteruntis-*-unsigned.ipa
 
   web:
-    name: Web build + server binary
+    name: Web build
     needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
-      - run: flutter build web --release --no-web-resources-cdn --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }}
-      - name: Server binary (linux x64)
-        working-directory: server
-        run: |
-          dart pub get
-          dart test
-          dart compile exe bin/server.dart -o bbu_server
-      - name: Package
-        run: |
-          mkdir -p pkg/better-betteruntis-web
-          cp -R build/web pkg/better-betteruntis-web/web
-          cp server/bbu_server pkg/better-betteruntis-web/
-          cp docs/WEB.md LICENSE pkg/better-betteruntis-web/
-          tar -C pkg -czf "better-betteruntis-${TAG}-web-linux-x64.tar.gz" better-betteruntis-web
-      - uses: actions/upload-artifact@v4
+      # "What's new" bundles the release notes (assets/release_notes). The
+      # tests keep the committed copy in sync; regenerating here also covers
+      # a tag whose notes were committed without running the tool.
+      - run: dart run tool/sync_release_notes.dart
+      - run: flutter build web --release --no-web-resources-cdn --dart-define=BBU_CHANNEL=${{ env.BBU_CHANNEL }} --dart-define=BBU_TAG=${{ env.TAG }} --dart-define=BBU_SYNC_URL=${{ env.BBU_SYNC_URL }}
+      # Not a release asset (the web version is hosted on Cloudflare, see
+      # deploy-worker); only handed to the deploy job.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: web
-          path: better-betteruntis-*-web-linux-x64.tar.gz
+          name: web-build
+          path: build/web
+          retention-days: 7
 
-  # Checks that the self-hosting image still builds (not published). Not a
-  # dependency of the release, so a Docker problem doesn't hold back the
-  # app; it still turns the run red.
-  docker:
-    name: Docker image builds
+  # Decides whether the Cloudflare deploy runs. Secrets can't be used in a
+  # job's `if:`, so this job checks them and deploy-worker is skipped (shown
+  # as skipped, not failed) when they are missing, e.g. on forks or before
+  # the maintainer has set up Cloudflare. Manual rebuilds of old tags
+  # (workflow_dispatch) never deploy, so they can't roll production back.
+  cloudflare:
+    name: Cloudflare deploy enabled?
     needs: version
     runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
     steps:
-      - uses: actions/checkout@v4
+      - id: check
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ALPHA_SYNC: ${{ vars.ALPHA_SYNC }}
+        run: |
+          if [ "${{ github.event_name }}" != push ]; then
+            echo "Manual rebuild: not deploying to Cloudflare."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ]; then
+            echo "::notice::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set: skipping the Worker deploy."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [ "$BBU_CHANNEL" = alpha ] && [ "$ALPHA_SYNC" != on ]; then
+            echo "::notice::Alpha release and ALPHA_SYNC is not 'on': no web preview deploy."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Web app + WebUntis relay + sync API on Cloudflare (worker/README.md).
+  # Alphas upload a new Worker version under the preview alias "alpha"
+  # (https://alpha-<worker>.<subdomain>.workers.dev) without production
+  # traffic; betas and stable releases deploy to production. Both share the
+  # production D1 database, so migrations must stay backwards compatible
+  # (additive) with the version that is live.
+  deploy-worker:
+    name: Deploy Cloudflare Worker
+    needs: [web, cloudflare]
+    if: needs.cloudflare.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-worker
+      cancel-in-progress: false
+    env:
+      D1_ID: ${{ vars.CLOUDFLARE_D1_ID }}
+      WRANGLER_SEND_METRICS: "false"
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - run: docker build --build-arg BBU_CHANNEL=${{ env.BBU_CHANNEL }} -t better-betteruntis-web .
+      - name: Use the real D1 database id
+        # wrangler.jsonc keeps a placeholder (local dev and tests don't need
+        # a real database); the id lives in the repository variable
+        # CLOUDFLARE_D1_ID (Settings > Secrets and variables > Actions > Variables).
+        run: |
+          if ! printf '%s' "$D1_ID" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+            echo "::error::Repository variable CLOUDFLARE_D1_ID is missing or not a UUID (see worker/README.md)."; exit 1
+          fi
+          sed -i "s/00000000-0000-0000-0000-000000000000/$D1_ID/" wrangler.jsonc
+          grep -q "\"database_id\": \"$D1_ID\"" wrangler.jsonc
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-build
+          path: worker/public
+      - name: Check the web build and _headers
+        run: |
+          test -f public/index.html
+          test -f public/main.dart.js
+          test -f public/_headers || { echo "::error::worker/public/_headers missing"; exit 1; }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: npm 11 (install-script allowlist in package.json "allowScripts")
+        run: npm install -g npm@11.19.1
+      # --strict-allow-scripts: a new dependency with install scripts that
+      # isn't reviewed in "allowScripts" fails the install.
+      - run: npm ci --strict-allow-scripts
+      - run: npx tsc --noEmit
+      - run: npx vitest run
+      - name: Migrate D1 and deploy
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          packageManager: npm
+          # wrangler comes from worker/package-lock.json (installed above).
+          command: |
+            d1 migrations apply bbu-sync --remote
+            ${{ env.BBU_CHANNEL == 'alpha' && format('versions upload --preview-alias alpha --tag {0} --message "{0}"', env.TAG) || format('deploy --tag {0} --message "{0}"', env.TAG) }}
 
   release:
     name: GitHub release
     needs: [android, ios, web]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          name: apk
           path: dist
-          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ipa
+          path: dist
       - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}

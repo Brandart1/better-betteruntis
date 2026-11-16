@@ -1,0 +1,172 @@
+{
+  "releases": [
+    {
+      "version": "0.5.0-beta",
+      "tag": "v0.5.0-beta",
+      "channel": "beta",
+      "file": "v0.5.0-beta.md"
+    },
+    {
+      "version": "0.5.0-alpha.1",
+      "tag": "v0.5.0-alpha",
+      "channel": "alpha",
+      "file": "v0.5.0-alpha.md"
+    },
+    {
+      "version": "0.4.8-alpha.7",
+      "tag": "v0.4.8-alpha.7",
+      "channel": "alpha",
+      "file": "v0.4.8-alpha.7.md"
+    },
+    {
+      "version": "0.4.8-alpha.6",
+      "tag": "v0.4.8-alpha.6",
+      "channel": "alpha",
+      "file": "v0.4.8-alpha.6.md"
+    },
+    {
+      "version": "0.4.8-alpha.5",
+      "tag": "v0.4.8-alpha.5",
+      "channel": "alpha",
+      "file": "v0.4.8-alpha.5.md"
+    },
+    {
+      "version": "0.4.8-alpha.4",
+      "tag": "v0.4.8-alpha.4",
+      "channel": "alpha",
+      "file": "v0.4.8-alpha.4.md"
+    },
+    {
+      "version": "0.4.8-alpha.3",
+      "tag": "v0.4.8-alpha.3",
+      "channel": "alpha",
+      "file": "v0.4.8-alpha.3.md"
+    },
+    {
+      "version": "0.4.8-alpha.2",
+      "tag": "v0.4.8-alpha.2",
+      "channel": "alpha",
+      "file": "v0.4.8-alpha.2.md"
+    },
+    {
+      "version": "0.4.8-alpha.1",
+      "tag": "v0.4.8-alpha",
+      "channel": "alpha",
+      "file": "v0.4.8-alpha.md"
+    },
+    {
+      "version": "0.4.7-beta",
+      "tag": "v0.4.7-beta",
+      "channel": "beta",
+      "file": "v0.4.7-beta.md"
+    },
+    {
+      "version": "0.4.7-alpha.3",
+      "tag": "v0.4.7-alpha.3",
+      "channel": "alpha",
+      "file": "v0.4.7-alpha.3.md"
+    },
+    {
+      "version": "0.4.7-alpha.2",
+      "tag": "v0.4.7-alpha.2",
+      "channel": "alpha",
+      "file": "v0.4.7-alpha.2.md"
+    },
+    {
+      "version": "0.4.7-alpha.1",
+      "tag": "v0.4.7-alpha",
+      "channel": "alpha",
+      "file": "v0.4.7-alpha.md"
+    },
+    {
+      "version": "0.4.6-beta",
+      "tag": "v0.4.6-beta",
+      "channel": "beta",
+      "file": "v0.4.6-beta.md"
+    },
+    {
+      "version": "0.4.6-alpha.4",
+      "tag": "v0.4.6-alpha.4",
+      "channel": "alpha",
+      "file": "v0.4.6-alpha.4.md"
+    },
+    {
+      "version": "0.4.6-alpha.3",
+      "tag": "v0.4.6-alpha.3",
+      "channel": "alpha",
+      "file": "v0.4.6-alpha.3.md"
+    },
+    {
+      "version": "0.4.6-alpha.2",
+      "tag": "v0.4.6-alpha.2",
+      "channel": "alpha",
+      "file": "v0.4.6-alpha.2.md"
+    },
+    {
+      "version": "0.4.6-alpha.1",
+      "tag": "v0.4.6-alpha",
+      "channel": "alpha",
+      "file": "v0.4.6-alpha.md"
+    },
+    {
+      "version": "0.4.5-beta",
+      "tag": "v0.4.5-beta",
+      "channel": "beta",
+      "file": "v0.4.5-beta.md"
+    },
+    {
+      "version": "0.4.4-beta",
+      "tag": "v0.4.4-beta",
+      "channel": "beta",
+      "file": "v0.4.4-beta.md"
+    },
+    {
+      "version": "0.4.3-beta",
+      "tag": "v0.4.3-beta",
+      "channel": "beta",
+      "file": "v0.4.3-beta.md"
+    },
+    {
+      "version": "0.4.2-beta",
+      "tag": "v0.4.2-beta",
+      "channel": "beta",
+      "file": "v0.4.2-beta.md"
+    },
+    {
+      "version": "0.4.0-beta",
+      "tag": "v0.4.0-beta",
+      "channel": "beta",
+      "file": "v0.4.0-beta.md"
+    },
+    {
+      "version": "0.3.2-alpha.1",
+      "tag": "v0.3.2-alpha",
+      "channel": "alpha",
+      "file": "v0.3.2-alpha.md"
+    },
+    {
+      "version": "0.3.0-alpha.1",
+      "tag": "v0.3.0-alpha",
+      "channel": "alpha",
+      "file": "v0.3.0-alpha.md"
+    },
+    {
+      "version": "0.2.2-alpha.1",
+      "tag": "v0.2.2-alpha",
+      "channel": "alpha",
+      "file": "v0.2.2-alpha.md"
+    },
+    {
+      "version": "0.2.0-alpha.1",
+      "tag": "v0.2.0-alpha",
+      "channel": "alpha",
+      "file": "v0.2.0-alpha.md"
+    },
+    {
+      "version": "0.1.0-alpha.1",
+      "tag": "v0.1.0-alpha.1",
+      "channel": "alpha",
+      "file": "v0.1.0-alpha.1.md"
+    }
+  ]
+}

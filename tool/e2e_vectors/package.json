@@ -1,0 +1,13 @@
+{
+  "name": "bbu-e2e-vectors",
+  "private": true,
+  "type": "module",
+  "description": "Independent cross-check of test/sync/e2e_vectors_v2.json with @noble",
+  "scripts": {
+    "verify": "node verify.mjs"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@noble/hashes": "^2.4.0"
+  }
+}

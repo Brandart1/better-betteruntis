@@ -49,3 +49,5 @@ app.*.map.json
 
 # Local raw API dumps (personal data)
 debug/
+
+tool/e2e_vectors/node_modules/

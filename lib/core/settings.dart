@@ -323,15 +323,22 @@ final timetableSettingsProvider =
 class TimetableSettingsNotifier extends Notifier<TimetableSettings> {
   static const storeKey = 'timetable';
   bool _changed = false;
+  Future<void> _loading = Future.value();
 
   @override
   TimetableSettings build() {
     final store = ref.watch(settingsStoreProvider);
     final cached = store.peek(storeKey);
-    if (cached != null) return TimetableSettings.fromJson(cached);
-    unawaited(_load(store));
+    if (cached != null) {
+      _loading = Future.value();
+      return TimetableSettings.fromJson(cached);
+    }
+    _loading = _load(store);
     return const TimetableSettings();
   }
+
+  /// Completes once the stored settings are loaded (or found missing).
+  Future<void> get ready => _loading;
 
   Future<void> _load(SettingsStore store) async {
     try {

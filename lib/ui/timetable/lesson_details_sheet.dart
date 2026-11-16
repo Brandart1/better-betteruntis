@@ -498,6 +498,8 @@ class _LessonDetailsDialogState extends State<_LessonDetailsDialog> {
         autofocus: true,
         minLines: 2,
         maxLines: 6,
+        // Sync limit (worker: 4 000 characters per note).
+        maxLength: 4000,
         textCapitalization: TextCapitalization.sentences,
         decoration: const InputDecoration(
           hintText: 'e.g. mündliche Wiederholung, topics, pages',
