@@ -1,6 +1,12 @@
 {
   "releases": [
     {
+      "version": "0.5.3-beta",
+      "tag": "v0.5.3-beta",
+      "channel": "beta",
+      "file": "v0.5.3-beta.md"
+    },
+    {
       "version": "0.5.2-beta",
       "tag": "v0.5.2-beta",
       "channel": "beta",
