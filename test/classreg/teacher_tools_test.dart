@@ -385,6 +385,32 @@ void main() {
       expect(entry.json, isNot(contains('otp')));
     });
 
+    test('submitPeriodInfo2017: params, success', () async {
+      handler = (_) => rpc({'success': true});
+      final ok = await api.submitPeriodInfo(
+        host: 'h',
+        school: 's',
+        auth: creds,
+        periodId: 7,
+        text: 'Atlas',
+      );
+      expect(ok, isTrue);
+      expect(method(), 'submitPeriodInfo2017');
+      expect(params()['periodId'], 7);
+      expect(params()['periodInfo'], 'Atlas');
+      handler = (_) => rpc({'success': false});
+      expect(
+        await api.submitPeriodInfo(
+          host: 'h',
+          school: 's',
+          auth: creds,
+          periodId: 7,
+          text: 'Atlas',
+        ),
+        isFalse,
+      );
+    });
+
     test('exam types: one getUserData2017 call, then remembered', () async {
       handler = (_) => rpc({
         'masterData': {
@@ -537,6 +563,21 @@ void main() {
       await repo.changeRoom(a, [moved], orgRoomId: 31, roomId: 31);
       expect(bookableRoomOf(await maths(api))!.id, 31);
       expect(api.roomChanges, isEmpty);
+    });
+
+    test('lesson info goes to the server and shows in the timetable', () async {
+      final a = teacherAccount();
+      final p = await maths(api);
+      await repo.setLessonInfo(a, [p], '  Bring your atlas ');
+      expect(api.periodInfos[p.id], 'Bring your atlas');
+      expect(timetables.refreshed, [DateTime(2026, 11, 9)]);
+      expect((await maths(api)).infoText, 'Bring your atlas');
+      await repo.setLessonInfo(a, [p], '');
+      expect((await maths(api)).infoText, '');
+      expect(
+        () => repo.setLessonInfo(demoAccount(), [p], 'x'),
+        throwsA(isA<UntisException>()),
+      );
     });
 
     test('an occupied or unknown room: the server errors come back', () async {
@@ -717,6 +758,32 @@ void main() {
       expect(booked, same(block));
       await t.tap(find.byKey(const ValueKey('lesson-exam-create')));
       expect(exam, same(block));
+    });
+
+    testWidgets('lesson sheet: teachers add details on the server', (t) async {
+      final p = await t.runAsync(() => maths(api));
+      final block = LessonBlock([p!.withUserNote(noteKey: 'k')]);
+      LessonBlock? edited;
+      Future<void> pump({bool teacher = true}) => t.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: LessonDetailsSheet(
+                blocks: [block],
+                names: demoSchoolNames(),
+                onEditLessonInfo: teacher ? (b) => edited = b : null,
+              ),
+            ),
+          ),
+        ),
+      );
+      await pump(teacher: false);
+      expect(find.byKey(const ValueKey('lesson-details-edit')), findsOneWidget);
+      expect(find.byKey(const ValueKey('lesson-info-edit')), findsNothing);
+      await pump();
+      expect(find.byKey(const ValueKey('lesson-details-edit')), findsNothing);
+      await t.tap(find.byKey(const ValueKey('lesson-info-edit')));
+      expect(edited, same(block));
     });
 
     Future<String?> openBooking(WidgetTester t, Period p) async {

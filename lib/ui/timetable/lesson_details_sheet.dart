@@ -26,6 +26,7 @@ Future<void> showLessonDetails(
   ValueChanged<LessonBlock>? onOpenClassRegister,
   ValueChanged<LessonBlock>? onBookRoom,
   ValueChanged<LessonBlock>? onCreateExam,
+  ValueChanged<LessonBlock>? onEditLessonInfo,
 }) {
   ValueChanged<LessonBlock>? closing(
     BuildContext sheetContext,
@@ -60,6 +61,7 @@ Future<void> showLessonDetails(
             },
       onBookRoom: closing(sheetContext, onBookRoom),
       onCreateExam: closing(sheetContext, onCreateExam),
+      onEditLessonInfo: closing(sheetContext, onEditLessonInfo),
     ),
   );
 }
@@ -75,6 +77,7 @@ class LessonDetailsSheet extends StatefulWidget {
     this.onOpenClassRegister,
     this.onBookRoom,
     this.onCreateExam,
+    this.onEditLessonInfo,
   });
 
   final List<LessonBlock> blocks;
@@ -91,6 +94,10 @@ class LessonDetailsSheet extends StatefulWidget {
   /// Teachers with the class register: creates an exam on the server
   /// (replaces the device-only "Mark as exam").
   final ValueChanged<LessonBlock>? onCreateExam;
+
+  /// Teachers with the class register: edits the lesson info everyone sees
+  /// on the server (replaces the device-only "Add details").
+  final ValueChanged<LessonBlock>? onEditLessonInfo;
 
   @override
   State<LessonDetailsSheet> createState() => _LessonDetailsSheetState();
@@ -118,6 +125,7 @@ class _LessonDetailsSheetState extends State<LessonDetailsSheet> {
           onOpenClassRegister: widget.onOpenClassRegister,
           onBookRoom: widget.onBookRoom,
           onCreateExam: widget.onCreateExam,
+          onEditLessonInfo: widget.onEditLessonInfo,
         ),
     ];
     if (pages.length == 1) {
@@ -157,6 +165,7 @@ class LessonDetailsPage extends ConsumerWidget {
     this.onOpenClassRegister,
     this.onBookRoom,
     this.onCreateExam,
+    this.onEditLessonInfo,
   });
 
   final LessonBlock block;
@@ -165,6 +174,7 @@ class LessonDetailsPage extends ConsumerWidget {
   final ValueChanged<LessonBlock>? onOpenClassRegister;
   final ValueChanged<LessonBlock>? onBookRoom;
   final ValueChanged<LessonBlock>? onCreateExam;
+  final ValueChanged<LessonBlock>? onEditLessonInfo;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -290,11 +300,14 @@ class LessonDetailsPage extends ConsumerWidget {
               label: const Text('Create exam'),
             ),
           ),
-        if (noteKeys.isNotEmpty)
+        if (noteKeys.isNotEmpty || onEditLessonInfo != null)
           _UserNoteSection(
             block: block,
             noteKeys: noteKeys,
             serverExams: onCreateExam != null,
+            onEditLessonInfo: onEditLessonInfo == null
+                ? null
+                : () => onEditLessonInfo!(this.block),
           ),
         _ElementSection(
           'Teachers',
@@ -584,9 +597,14 @@ class _UserNoteSection extends ConsumerWidget {
     required this.block,
     required this.noteKeys,
     this.serverExams = false,
+    this.onEditLessonInfo,
   });
   final LessonBlock block;
   final List<String> noteKeys;
+
+  /// Teachers: "Add details" edits the lesson info on the server, which
+  /// everyone sees, instead of a note on this device.
+  final VoidCallback? onEditLessonInfo;
 
   /// Teachers with the class register create exams on the server ("Create
   /// exam" above), so the device-only "Mark as exam" is not offered.
@@ -599,6 +617,7 @@ class _UserNoteSection extends ConsumerWidget {
     final note = LessonNote(exam: p.userExam, text: p.userNote);
     final notes = ref.read(lessonNotesProvider.notifier);
     final schoolExam = block.periods.any((q) => q.isSchoolExam);
+    final serverInfo = block.first.infoText.trim();
 
     // Saves and brings calendars synced from the app up to date.
     void save(LessonNote n) {
@@ -645,7 +664,11 @@ class _UserNoteSection extends ConsumerWidget {
               child: ListTile(
                 leading: const Icon(Icons.edit_note),
                 title: Text(note.text),
-                subtitle: const Text('Your details'),
+                subtitle: Text(
+                  onEditLessonInfo == null
+                      ? 'Your details'
+                      : 'Your details · only on this device',
+                ),
                 trailing: IconButton(
                   key: const ValueKey('lesson-details-remove'),
                   tooltip: 'Remove details',
@@ -660,12 +683,28 @@ class _UserNoteSection extends ConsumerWidget {
             spacing: 8,
             runSpacing: 4,
             children: [
-              TextButton.icon(
-                key: const ValueKey('lesson-details-edit'),
-                onPressed: editDetails,
-                icon: Icon(note.text.isEmpty ? Icons.add : Icons.edit_outlined),
-                label: Text(note.text.isEmpty ? 'Add details' : 'Edit details'),
-              ),
+              if (onEditLessonInfo != null)
+                TextButton.icon(
+                  key: const ValueKey('lesson-info-edit'),
+                  onPressed: onEditLessonInfo,
+                  icon: Icon(
+                    serverInfo.isEmpty ? Icons.add : Icons.edit_outlined,
+                  ),
+                  label: Text(
+                    serverInfo.isEmpty ? 'Add details' : 'Edit details',
+                  ),
+                )
+              else
+                TextButton.icon(
+                  key: const ValueKey('lesson-details-edit'),
+                  onPressed: editDetails,
+                  icon: Icon(
+                    note.text.isEmpty ? Icons.add : Icons.edit_outlined,
+                  ),
+                  label: Text(
+                    note.text.isEmpty ? 'Add details' : 'Edit details',
+                  ),
+                ),
               if (note.exam)
                 TextButton.icon(
                   key: const ValueKey('lesson-exam-remove'),

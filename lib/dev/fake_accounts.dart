@@ -437,6 +437,7 @@ class FakeUntisApi
                     text: exam.text,
                   ),
             substitutionText: substituted ? 'Vertretung' : '',
+            infoText: periodInfos[ttId] ?? '',
           ),
         );
       }
@@ -1097,6 +1098,9 @@ class FakeUntisApi
   /// Room changes made in the demo: new room by timetable id.
   final roomChanges = <int, int>{};
 
+  /// Lesson info ("Info zur Stunde") set with submitPeriodInfo, by period.
+  final periodInfos = <int, String>{};
+
   /// Exams created in the demo.
   final createdExams = <ExamItem>[];
   var _nextExamId = 8000;
@@ -1189,6 +1193,23 @@ class FakeUntisApi
           if (!busy.contains(r)) r,
       ],
     );
+  }
+
+  @override
+  Future<bool> submitPeriodInfo({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+    required String text,
+  }) async {
+    await _delay();
+    if (text.isEmpty) {
+      periodInfos.remove(periodId);
+    } else {
+      periodInfos[periodId] = text;
+    }
+    return true;
   }
 
   @override

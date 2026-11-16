@@ -115,6 +115,37 @@ class TeacherToolsRepositoryImpl implements TeacherToolsRepository {
     });
   }
 
+  @override
+  Future<void> setLessonInfo(
+    Account account,
+    List<Period> periods,
+    String text,
+  ) {
+    _check(account);
+    return _wrap(() async {
+      if (periods.isEmpty) {
+        throw const UntisException(-1, 'No lesson selected.');
+      }
+      final auth = await accounts.credentials(account.id);
+      for (final p in periods) {
+        final ok = await _api.submitPeriodInfo(
+          host: account.host,
+          school: account.school.loginName,
+          auth: auth,
+          periodId: p.id,
+          text: text.trim(),
+        );
+        if (!ok) {
+          throw const UntisException(
+            -1,
+            'The server did not save the lesson info.',
+          );
+        }
+      }
+      await _refresh(account, [for (final p in periods) p.start]);
+    });
+  }
+
   /// Exam types per account, loaded once per session.
   final _examTypes = <String, List<ExamType>>{};
 

@@ -141,6 +141,17 @@ abstract interface class TeacherToolsApi {
     required int roomId,
   });
 
+  /// submitPeriodInfo2017 `{periodId, periodInfo}` → `{success}` (from the
+  /// official app): the lesson info everyone sees ("Info zur Stunde", the
+  /// period's `text.info`). '' removes it. Returns `success`.
+  Future<bool> submitPeriodInfo({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+    required String text,
+  });
+
   /// Master data `examTypes` (empty when the server has none).
   Future<List<ExamType>> examTypes({
     required String host,
@@ -180,6 +191,15 @@ abstract interface class TeacherToolsRepository {
     required int orgRoomId,
     required int roomId,
   });
+
+  /// Sets the lesson info everyone sees ("Info zur Stunde") of every period
+  /// of the block to [text] ('' removes it), then refreshes the teacher's own
+  /// timetable week. Throws [UntisException] when the server refuses.
+  Future<void> setLessonInfo(
+    Account account,
+    List<Period> periods,
+    String text,
+  );
 
   /// Exam types (empty when unknown or not loadable; never throws).
   Future<List<ExamType>> examTypes(Account account);

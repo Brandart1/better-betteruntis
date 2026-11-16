@@ -10,6 +10,7 @@ import '../../core/lesson_notes.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/settings.dart';
+import '../../core/teacher_tools.dart';
 import '../classreg/class_register_screen.dart';
 import '../classreg/class_register_overview_screen.dart';
 import '../classreg/exam_editor_screen.dart';
@@ -416,6 +417,45 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
               if (created) {
                 messenger.showSnackBar(
                   const SnackBar(content: Text('Exam created.')),
+                );
+              }
+            },
+      // Teachers' lesson details go to the server ("Info zur Stunde"), so
+      // pupils and colleagues see them too.
+      onEditLessonInfo: !ownTeacherTimetable
+          ? null
+          : (block) async {
+              final periods = block.periods
+                  .where((p) => !p.isCancelled)
+                  .toList();
+              if (periods.isEmpty) return;
+              final before = periods.first.infoText.trim();
+              final messenger = ScaffoldMessenger.of(context);
+              final repo = ref.read(teacherToolsRepositoryProvider);
+              final text = await askLessonDetails(
+                context,
+                title: before.isEmpty
+                    ? 'Add lesson details'
+                    : 'Edit lesson details',
+                initial: before,
+              );
+              if (text == null || text.trim() == before) return;
+              try {
+                await repo.setLessonInfo(account, periods, text);
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      text.trim().isEmpty
+                          ? 'Lesson details removed.'
+                          : 'Lesson details saved — pupils see them too.',
+                    ),
+                  ),
+                );
+              } on UntisException catch (e) {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('Could not save the details: ${e.message}'),
+                  ),
                 );
               }
             },

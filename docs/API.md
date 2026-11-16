@@ -164,6 +164,13 @@ Client: photos are kept in memory per account and pupil for the session (also "h
 ### Substitutions (teachers)
 A lesson of the teacher held by a substitute: in their own timetable the teacher element has `orgId` = own id and `id` = the substitute (or `id` 0 with an added teacher). The app treats such a lesson as the substitute's: the class register screen is read-only, saves / new entries are refused in the repository, getPeriodData2017 for such lessons is sent separately from the own ones (a refusal must not break the overview or previous topics). A lesson where the teacher is `id` (also with another `orgId`, i.e. they substitute) is their own and editable. **Assumed**: that the server shows the substituted lesson (not CANCELLED) and shares its data with the original teacher.
 
+## Lesson info (teachers)
+"Add details" on a teacher's own lesson writes the lesson info everyone sees ("Info zur Stunde", read back as the period's `text.info` → `Period.infoText`) instead of a device-only note. Built on branch `teacher` (0.6.0+109).
+
+From the decompiled official app (see "Room booking and exams" below): `submitPeriodInfo2017 {periodId, periodInfo, auth}` (`SubmitPeriodInfoRequest extends AuthenticatedRequest`, `periodId: long`, `periodInfo: String`) → `{success: bool}`. Sent once per period of the block; `''` is sent to remove the text (assumed to clear it). The request body is in the Debug log as `submitPeriodInfo2017 request body`. **Not yet seen against a real server.**
+
+Other write methods in that build, for later: `submitLessonTopic`, `submitHomeWork {ttId, homeWork}`, `submitClassRegEvents {ttId, event}`, `submitAbsences`, `createAbsences2017`, `editAbsence2017`, `createImmediateLateness2017`, `submitExcuse2017`, `getLessonTopic2017`, `getClassregData2017`.
+
 ## Room booking and exams (teachers)
 Teacher accounts with the class register get "Book a room" on lessons of their own timetable, "Create exam" on lessons (instead of the device-only "Mark as exam") and "Exams" in the drawer (their exam list and "New exam"). Built on branch `teacher` (0.6.0 alphas).
 

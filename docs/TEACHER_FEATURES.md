@@ -56,6 +56,7 @@ Untis' feature list for teachers with the class register module ("WebUntis Klass
 Basic package (no class register needed): enter notes for pupils ("Info zur Stunde") and notes for teachers, link a video conference to a lesson.
 
 ## Built (0.6.0 alphas)
+- [x] **Lesson details on the server** — wish 2026-11-16 ("details added should be global, just like the exam thing"): for teachers, "Add details" in the lesson sheet of an own lesson sets the lesson info everyone sees ("Info zur Stunde", `submitPeriodInfo2017`) instead of a note on the device. Old device notes still show, marked "only on this device".
 - [x] **Absences & lesson topic per lesson** ("Abwesenheiten" + "Lehrstoff"): tap a lesson in your own timetable → "Absences & lesson topic". Tap pupils to mark them absent, type the topic, save. Saving also confirms the attendance check. Double lessons are saved for both periods.
 - [x] **Class register** (drawer, "Klassenbuch"; was "Open lessons"): **Today** — all of today's own lessons in time order, upcoming ones included (open them to prepare the topic) — and **Last 7 / 14 / 30 days**, newest first. Each lesson shows whether the attendance check and the topic are done. Filter chips: All · Attendance missing · Topic missing · Done. Tap a lesson to fill it in; the list reloads afterwards.
 - [x] **Previous topics**: below the topic field, the topics of the latest 5 earlier lessons of the same course (same lesson id, else same subject + class; from your own timetable, up to 6 weeks back), newest first with the date; the newest two show, "Show N more" for the rest. Tap one to copy it into the field. Loads after the screen is up (inline loading / error with Retry).
@@ -69,6 +70,7 @@ Basic package (no class register needed): enter notes for pupils ("Info zur Stun
 - [x] Demo: log in with user `teacher` at the demo school to try it without a real account.
 
 ## To confirm with a real teacher account
+- [ ] Lesson details: `submitPeriodInfo2017` saves, the text shows in WebUntis/Untis Mobile as "Info zur Stunde", and an empty text removes it
 - [ ] Pupils and existing absences load (getPeriodData2017)
 - [ ] Marking absent / present again works
 - [ ] Lesson topic is saved and shows up in WebUntis

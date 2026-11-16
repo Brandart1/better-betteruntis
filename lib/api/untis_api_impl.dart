@@ -1176,6 +1176,26 @@ class UntisApiImpl
     );
   }
 
+  @override
+  Future<bool> submitPeriodInfo({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+    required String text,
+  }) async {
+    final params = {'periodId': periodId, 'periodInfo': text};
+    _recordRequest('submitPeriodInfo2017', params);
+    final result = await _rpc.call(
+      rpcUrl(host, school),
+      'submitPeriodInfo2017',
+      {...params, 'auth': _rpc.auth(auth)},
+    );
+    // `{success: bool}`; a bare true or no answer at all counts as done.
+    if (result is Map) return result['success'] != false;
+    return result != false;
+  }
+
   /// Exam types per `host|school`, loaded once per session.
   final _examTypes = <String, List<ExamType>>{};
 

@@ -398,6 +398,21 @@ class RoutingUntisApi
   );
 
   @override
+  Future<bool> submitPeriodInfo({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+    required String text,
+  }) => _tools(host).submitPeriodInfo(
+    host: host,
+    school: school,
+    auth: auth,
+    periodId: periodId,
+    text: text,
+  );
+
+  @override
   Future<List<ExamType>> examTypes({
     required String host,
     required String school,
