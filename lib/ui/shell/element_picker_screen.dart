@@ -12,6 +12,7 @@ import '../classreg/time_range_field.dart';
 import '../common/search_field.dart';
 import '../common/large_text.dart';
 import '../timetable/timetable_utils.dart';
+import 'teacher_timetable_notice.dart';
 
 enum _FreeMode { off, now, next, custom }
 
@@ -70,26 +71,49 @@ class _ElementPickerScreenState extends ConsumerState<ElementPickerScreen> {
             : TabBarView(
                 children: [
                   for (final t in _tabs)
-                    _ElementList(
-                      header: _header(t.$1, _browsable(names, t.$1), account),
-                      elements: _browsable(names, t.$1)
-                          .where(
-                            (e) =>
-                                _query.isEmpty ||
-                                e.name.toLowerCase().contains(_query) ||
-                                e.longName.toLowerCase().contains(_query),
-                          )
-                          // Free-room filter: only the free rooms.
-                          .where(
-                            (e) =>
-                                t.$1 != ElementType.room ||
-                                _freeIds == null ||
-                                _freeIds!.contains(e.id),
-                          )
-                          .toList(),
+                    _gated(
+                      t.$1,
+                      _ElementList(
+                        header: _header(t.$1, _browsable(names, t.$1), account),
+                        elements: _browsable(names, t.$1)
+                            .where(
+                              (e) =>
+                                  _query.isEmpty ||
+                                  e.name.toLowerCase().contains(_query) ||
+                                  e.longName.toLowerCase().contains(_query),
+                            )
+                            // Free-room filter: only the free rooms.
+                            .where(
+                              (e) =>
+                                  t.$1 != ElementType.room ||
+                                  _freeIds == null ||
+                                  _freeIds!.contains(e.id),
+                            )
+                            .toList(),
+                      ),
                     ),
                 ],
               ),
+      ),
+    );
+  }
+
+  /// The Teachers tab asks once per device not to use teacher timetables
+  /// to contact teachers in their free periods (teacher_timetable_notice);
+  /// cancelling goes back to the first tab.
+  Widget _gated(ElementType type, Widget list) {
+    if (type != ElementType.teacher) return list;
+    // Teachers themselves aren't asked.
+    final account = ref.watch(activeAccountProvider).value;
+    if (account != null &&
+        !account.anonymous &&
+        account.elementType == ElementType.teacher) {
+      return list;
+    }
+    return Builder(
+      builder: (context) => TeacherTimetableNoticeGate(
+        onCancel: () => DefaultTabController.of(context).animateTo(0),
+        child: list,
       ),
     );
   }

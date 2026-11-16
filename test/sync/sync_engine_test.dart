@@ -530,6 +530,53 @@ void main() {
     expect(_ident(server), isNull);
   });
 
+  test('checkServer: new account, then enable reuses its session', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    final check = await a.engine.checkServer('acc1');
+    expect([check.existing, check.e2e], [false, false]);
+    expect(server.sessions, hasLength(1));
+    await a.enable();
+    expect(a.state.phase, SyncPhase.on);
+    // The check's session was used: no second login.
+    expect(server.sessions, hasLength(1));
+  });
+
+  test('checkServer finds an existing sync, with and without E2E', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    a.write('1', 'one');
+    await a.enable();
+    final b = Device(server);
+    addTearDown(b.dispose);
+    var check = await b.engine.checkServer('acc1');
+    expect([check.existing, check.e2e], [true, false]);
+    await b.engine.discardCheck('acc1');
+    // Only b's session went away; the account and a's session stay.
+    expect(server.sessions, hasLength(1));
+    expect(_ident(server)!.notes.length, 1);
+
+    await a.engine.enableE2e('acc1', 'correct horse battery');
+    await a.idle();
+    check = await b.engine.checkServer('acc1');
+    expect([check.existing, check.e2e], [true, true]);
+    final r = await b.enable();
+    expect(r.state.phase, SyncPhase.locked);
+  });
+
+  test('discardCheck removes the entry the check created', () async {
+    final a = Device(server);
+    addTearDown(a.dispose);
+    await a.engine.checkServer('acc1');
+    expect(_ident(server), isNotNull);
+    await a.engine.discardCheck('acc1');
+    expect(_ident(server), isNull);
+    expect(server.sessions, isEmpty);
+    expect(a.state.phase, SyncPhase.off);
+    // So the next check doesn't find a "sync".
+    expect((await a.engine.checkServer('acc1')).existing, isFalse);
+  });
+
   test('state survives a restart; signOutDevice keeps server data', () async {
     final a = Device(server);
     a.write('1', 'one');

@@ -70,6 +70,15 @@ class FakeSync extends SyncController {
         lastSync: DateTime(2026, 11, 15, 10, 30),
       );
 
+  /// What checkServer finds (default: nothing, the normal opt-in).
+  static SyncServerCheck serverCheck = SyncServerCheck.unknown;
+
+  @override
+  Future<SyncServerCheck> checkServer(String id) async => serverCheck;
+
+  @override
+  Future<void> discardCheck(String id) async => calls.add('discardCheck');
+
   @override
   Future<SyncEnableResult> enable(String id, SyncEnableOptions o) async {
     calls.add(
@@ -208,6 +217,7 @@ void main() {
   setUp(() {
     FakeSync.initial = const {};
     FakeSync.serverHasE2e = false;
+    FakeSync.serverCheck = SyncServerCheck.unknown;
     FakeSync.isAvailable = true;
     FakeSync.singleAccount = false;
     FakeSync.webKeys = false;
@@ -344,6 +354,71 @@ void main() {
     await tap(tester, key('sync-unlock-submit'));
     expect(sync.calls.last, 'unlock:$_passphrase');
     expect(find.text('Sync is on'), findsOneWidget);
+  });
+
+  testWidgets('account already syncs without passphrase: only confirm', (
+    tester,
+  ) async {
+    FakeSync.serverCheck = const SyncServerCheck(existing: true, e2e: false);
+    final sync = await pump(tester);
+    await tap(tester, key('sync-turn-on'));
+    await tap(tester, key('sync-agree'));
+    expect(key('sync-encryption-choice'), findsNothing);
+    expect(find.text('This account already syncs'), findsOneWidget);
+    await tap(tester, key('sync-confirm'));
+    expect(sync.calls, ['enable:null:true']);
+    expect(find.text('Sync is on'), findsOneWidget);
+    expect(find.text('End-to-end encryption is off'), findsOneWidget);
+  });
+
+  testWidgets('account already syncs: cancelling drops the check', (
+    tester,
+  ) async {
+    FakeSync.serverCheck = const SyncServerCheck(existing: true, e2e: false);
+    final sync = await pump(tester);
+    await tap(tester, key('sync-turn-on'));
+    await tap(tester, key('sync-agree'));
+    await tap(tester, find.text('Cancel'));
+    expect(sync.calls, ['discardCheck']);
+    expect(find.text('Sync is off'), findsOneWidget);
+  });
+
+  testWidgets('account already syncs with passphrase: asks for it', (
+    tester,
+  ) async {
+    FakeSync.serverCheck = const SyncServerCheck(existing: true, e2e: true);
+    FakeSync.serverHasE2e = true;
+    final sync = await pump(tester);
+    await tap(tester, key('sync-turn-on'));
+    await tap(tester, key('sync-agree'));
+    expect(key('sync-encryption-choice'), findsNothing);
+    expect(key('sync-unlock-dialog'), findsOneWidget);
+    expect(find.textContaining('already end-to-end'), findsOneWidget);
+    await tester.enterText(key('sync-unlock-field'), 'wrong one!');
+    await tap(tester, key('sync-unlock-submit'));
+    expect(find.text('Wrong passphrase.'), findsOneWidget);
+    await tester.enterText(key('sync-unlock-field'), _passphrase);
+    await tap(tester, key('sync-unlock-submit'));
+    expect(sync.calls, [
+      'enable:null:true',
+      'unlock:wrong one!',
+      'unlock:$_passphrase',
+    ]);
+    expect(find.text('Sync is on'), findsOneWidget);
+    expect(find.text('End-to-end encryption is on'), findsOneWidget);
+  });
+
+  testWidgets('account already syncs with passphrase: cancel turns it off', (
+    tester,
+  ) async {
+    FakeSync.serverCheck = const SyncServerCheck(existing: true, e2e: true);
+    FakeSync.serverHasE2e = true;
+    final sync = await pump(tester);
+    await tap(tester, key('sync-turn-on'));
+    await tap(tester, key('sync-agree'));
+    await tap(tester, find.text('Cancel'));
+    expect(sync.calls, ['enable:null:true', 'signOutDevice']);
+    expect(find.text('Sync is off'), findsOneWidget);
   });
 
   testWidgets('locked → wrong passphrase → correct → on', (tester) async {

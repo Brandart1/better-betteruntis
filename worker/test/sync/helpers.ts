@@ -66,7 +66,7 @@ export function req(method: string, path: string, init: { token?: string; body?:
 export interface Login {
   token: string;
   cookie: string;
-  body: { token: string; expiresAt: string; identity: IdentityJson; e2e: boolean };
+  body: { token: string; expiresAt: string; identity: IdentityJson; e2e: boolean; existing: boolean };
 }
 
 /** Logs [userId] of [school] in and returns the session. */

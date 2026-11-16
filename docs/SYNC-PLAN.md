@@ -48,7 +48,7 @@ All JSON, `cache-control: no-store`, errors `{"error": "<code>", "message"}`.
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/sync/session` | `{host, school, untisToken}` → verify with WebUntis `app/data`, create session; returns `{token, expiresAt, identity, e2e}` + cookie (`token` omitted when the request has an `Origin`, i.e. from a browser) |
+| `POST /api/sync/session` | `{host, school, untisToken}` → verify with WebUntis `app/data`, create session; returns `{token, expiresAt, identity, e2e, existing}` + cookie (`existing`: the identity existed before this login, i.e. this account already syncs) (`token` omitted when the request has an `Origin`, i.e. from a browser) |
 | `DELETE /api/sync/session` | log out this session |
 | `GET /api/sync/notes?since=<seq>` | changes after seq (paged, max 1000) |
 | `PUT /api/sync/notes` | upsert up to 500 notes, last write wins (a tie keeps the stored version) |

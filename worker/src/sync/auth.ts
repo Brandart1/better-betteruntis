@@ -301,7 +301,8 @@ export async function createSessionHandler(request: Request, env: Env, deps: Syn
 
   const token = newSessionToken();
   const expiresAt = now + SESSION_TTL_MS;
-  const stored = await db.createSession(env.DB, await hashSessionToken(token), identity, now, expiresAt, newEpoch());
+  const epoch = newEpoch();
+  const stored = await db.createSession(env.DB, await hashSessionToken(token), identity, now, expiresAt, epoch);
   // Browsers (they send Origin) use the HttpOnly cookie; keeping the token
   // out of the body keeps it away from page scripts. Native apps send no
   // Origin and get the token for their bearer header.
@@ -312,6 +313,9 @@ export async function createSessionHandler(request: Request, env: Env, deps: Syn
       expiresAt: new Date(expiresAt).toISOString(),
       identity: { ...identity, epoch: stored.epoch },
       e2e: stored.e2e,
+      // The epoch is only stored when the identity is created: a different
+      // one means the identity (a sync of this account) existed already.
+      existing: stored.epoch !== epoch,
     },
     200,
     { "set-cookie": sessionCookie(token, SESSION_TTL_MS / 1000) },
