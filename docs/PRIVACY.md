@@ -7,7 +7,8 @@
 Last updated: 2026-11-16
 
 **Scope:** this notice covers the BetterBetterUntis service at
-`better-betteruntis.brandart1.workers.dev`: the hosted web version, its WebUntis
+`better-betteruntis.eu` (also reachable as
+`better-betteruntis.brandart1.workers.dev`): the hosted web version, its WebUntis
 relay and the optional sync. The service runs on Cloudflare Workers; there is
 no self-hosted or home server. The phone apps (Android, iOS) talk to WebUntis
 directly and only contact this service if you turn on sync.
@@ -33,7 +34,7 @@ school.
 ## 1. Web version and WebUntis relay
 
 Browsers can't talk to WebUntis directly, so the web version (served from
-`better-betteruntis.brandart1.workers.dev`) sends its WebUntis requests to `better-betteruntis.brandart1.workers.dev/proxy/...`, which
+`better-betteruntis.eu`) sends its WebUntis requests to `better-betteruntis.eu/proxy/...`, which
 forwards them to your school's WebUntis server (only `*.webuntis.com`) and
 returns the answer.
 
@@ -123,7 +124,7 @@ Limits:
 - **Cloudflare, Inc.** (101 Townsend St, San Francisco, CA 94107, USA) runs
   the service for us as our processor: Cloudflare Workers (web version,
   relay, sync), Cloudflare D1 (sync database) and its network (TLS, DDoS
-  protection). All traffic to `better-betteruntis.brandart1.workers.dev` passes through Cloudflare, which
+  protection). All traffic to `better-betteruntis.eu` (and the workers.dev address) passes through Cloudflare, which
   processes your IP address and request data under its Data Processing
   Addendum: https://www.cloudflare.com/cloudflare-customer-dpa/ . Cloudflare's
   privacy policy: https://www.cloudflare.com/privacypolicy/

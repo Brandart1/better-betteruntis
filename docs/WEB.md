@@ -22,9 +22,10 @@ Deployment, local development, rollback and database operations are in
 
 ## Which version
 
-- **Production** (beta and stable releases): `https://better-betteruntis.brandart1.workers.dev`.
-- **Alpha preview**: every alpha release is uploaded under the preview alias
-  `alpha`, `https://alpha-better-betteruntis.<subdomain>.workers.dev`. It
+- **Production** (beta and stable releases): `https://better-betteruntis.eu` (also reachable at `https://better-betteruntis.brandart1.workers.dev`).
+- **Alpha preview**: only while the repository variable `ALPHA_SYNC` is `on`
+  (since 0.5.0-beta it is off), alpha releases are uploaded under the preview
+  alias `alpha`, `https://alpha-better-betteruntis.brandart1.workers.dev`. It
   shares the sync database with production.
 
 ## Building it yourself
