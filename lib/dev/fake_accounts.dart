@@ -7,12 +7,17 @@
 library;
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import '../core/absence_details.dart';
+import '../core/absence_summary.dart';
 import '../core/class_register.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
+import '../core/pupil_photos.dart';
+import '../core/teacher_tools.dart';
+import 'fake_pupil_photos.dart';
 
 /// Scripted [UntisApi].
 ///
@@ -35,7 +40,8 @@ import '../core/models.dart';
 /// Search rules: queries shorter than 3 chars or matching more than
 /// [maxResults] schools -> [UntisException.tooManyResults]; query `offline`
 /// -> network error.
-class FakeUntisApi implements FullUntisApi {
+class FakeUntisApi
+    implements FullUntisApi, TeacherToolsApi, PupilPhotoApi, ClassAbsencesApi {
   FakeUntisApi({this.latency = const Duration(milliseconds: 400)});
 
   /// Artificial delay for every call. Use [Duration.zero] in widget tests.
@@ -325,6 +331,25 @@ class FakeUntisApi implements FullUntisApi {
         name: 'PH1',
         longName: 'Physiksaal',
       ),
+      // Not used by the demo week: free for room booking.
+      MasterElement(
+        type: ElementType.room,
+        id: 34,
+        name: 'EDV1',
+        longName: 'Informatikraum',
+      ),
+      MasterElement(
+        type: ElementType.room,
+        id: 35,
+        name: 'R110',
+        longName: 'Raum 110',
+      ),
+      MasterElement(
+        type: ElementType.room,
+        id: 36,
+        name: 'TH',
+        longName: 'Turnhalle',
+      ),
     ],
     timeGrid: TimeGrid({
       for (var d = 1; d <= 5; d++)
@@ -350,11 +375,7 @@ class FakeUntisApi implements FullUntisApi {
     required int masterDataTimestamp,
   }) async {
     await _delay();
-    const plan = [
-      // (subject, teacher, room) per unit, cycling through the week.
-      (21, 11, 31), (22, 12, 31), (23, 13, 32), (24, 11, 33), (21, 11, 31),
-      (23, 13, 32),
-    ];
+    const plan = demoPlan;
     final periods = <Period>[];
     for (
       var day = DateTime(start.year, start.month, start.day);
@@ -367,14 +388,24 @@ class FakeUntisApi implements FullUntisApi {
         final s = day.add(Duration(minutes: 8 * 60 + unit * 50));
         final substituted = day.weekday == 3 && unit == 1;
         // Teachers only see their own lessons.
+        // A substituted lesson stays in the original teacher's timetable
+        // with their entry struck through (orgId = them, id = substitute).
         if (target.type == ElementType.teacher &&
-            target.id != (substituted ? 12 : p.$2)) {
+            target.id != (substituted ? 12 : p.$2) &&
+            target.id != p.$2) {
           continue;
         }
+        final ttId = demoPeriodId(day, unit);
+        if (target.type == ElementType.teacher) {
+          _issuedTeacherIds.add(ttId);
+          if (substituted) _substitutedIds.add(ttId);
+        }
+        final room = roomChanges[ttId] ?? p.$3;
+        final exam = _examAt(s, s.add(const Duration(minutes: 45)));
         periods.add(
           Period(
             // Unique per date and unit, like real timetable ids.
-            id: demoPeriodId(day, unit),
+            id: ttId,
             lessonId: p.$1,
             start: s,
             end: s.add(const Duration(minutes: 45)),
@@ -386,16 +417,25 @@ class FakeUntisApi implements FullUntisApi {
                 orgId: p.$2,
               ),
               ElementRef(type: ElementType.subject, id: p.$1, orgId: p.$1),
-              ElementRef(type: ElementType.room, id: p.$3, orgId: p.$3),
+              ElementRef(type: ElementType.room, id: room, orgId: p.$3),
             ],
             flags: {
               if (day.weekday == 5 && unit == 4)
                 PeriodFlag.cancelled
-              else if (substituted)
+              else if (substituted || room != p.$3)
                 PeriodFlag.irregular
               else
                 PeriodFlag.regular,
+              if (exam != null) PeriodFlag.exam,
             },
+            exam: exam == null
+                ? null
+                : Exam(
+                    id: exam.id,
+                    type: exam.examType,
+                    name: exam.name,
+                    text: exam.text,
+                  ),
             substitutionText: substituted ? 'Vertretung' : '',
           ),
         );
@@ -526,6 +566,10 @@ class FakeUntisApi implements FullUntisApi {
       );
       off += 9;
     }
+    items.addAll(
+      createdExams.where((e) => e.end.isAfter(start) && e.start.isBefore(end)),
+    );
+    items.sort((a, b) => a.start.compareTo(b.start));
     return items;
   }
 
@@ -687,6 +731,28 @@ class FakeUntisApi implements FullUntisApi {
 
   // ---- Class register demo (teacher login) ------------------------------
 
+  /// Demo pupils without a photo (shown with initials).
+  static const demoStudentsWithoutPhoto = {506};
+
+  /// How often [pupilPhoto] was asked (tests check the session cache).
+  int pupilPhotoCalls = 0;
+
+  /// Generated placeholder portraits; [demoStudentsWithoutPhoto] have none.
+  @override
+  Future<Uint8List?> pupilPhoto({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int studentId,
+    String? imageUrl,
+  }) async {
+    pupilPhotoCalls++;
+    await _delay();
+    if (demoStudentsWithoutPhoto.contains(studentId)) return null;
+    if (!demoStudents.any((s) => s.id == studentId)) return null;
+    return placeholderPortrait(studentId);
+  }
+
   /// Made-up pupils of demo class 1.
   static const demoStudents = [
     ClassRegStudent(id: 501, firstName: 'Lena', lastName: 'Bauer', klasseId: 1),
@@ -746,11 +812,17 @@ class FakeUntisApi implements FullUntisApi {
         for (final id in ttIds)
           id: PeriodRegister(
             ttId: id,
-            absenceChecked: registerChecked.contains(id) || _seededChecked(id),
+            absenceChecked:
+                registerChecked.contains(id) ||
+                _seededChecked(id) ||
+                (_isDemoSubstitution(id) && _seededPast(id)),
             studentIds: [for (final s in demoStudents) s.id],
-            absences: [...?registerAbsences[id]],
+            absences: [..._absencesOf(id)],
             topic:
-                registerTopics[id] ?? (_seededTopic(id) ? _demoTopic(id) : ''),
+                registerTopics[id] ??
+                (_isDemoSubstitution(id) && _seededPast(id)
+                    ? 'Substitute: worksheet on percentages'
+                    : (_seededTopic(id) ? _demoTopic(id) : '')),
             events: _demoEvents(id),
           ),
       },
@@ -813,6 +885,126 @@ class FakeUntisApi implements FullUntisApi {
   }) async {
     await _delay();
     registerChecked.addAll(ttIds);
+  }
+
+  /// Demo lessons on Wednesdays in unit 1 are held by teacher 12 instead of
+  /// the planned teacher (see [timetable]); [periodData] seeds what "the
+  /// substitute" entered there.
+  bool _isDemoSubstitution(int ttId) => _substitutedIds.contains(ttId);
+
+  /// Ids of teacher lessons this fake handed out (only those get seeded
+  /// absences / substitute entries, so tests with their own timetables see
+  /// a clean register).
+  final _issuedTeacherIds = <int>{};
+  final _substitutedIds = <int>{};
+
+  /// The day of a [demoPeriodId], null for other ids (e.g. in tests).
+  static DateTime? _demoDay(int ttId) {
+    final ymd = ttId ~/ 10;
+    if (ymd < 20000101 || ymd > 29991231) return null;
+    return DateTime(ymd ~/ 10000, (ymd ~/ 100) % 100, ymd % 100);
+  }
+
+  /// Absences of a lesson: seeded ones for past demo lessons (a few per
+  /// week, some late, a mix of excused / unexcused / open), materialized on
+  /// first read so they can be deleted like created ones.
+  List<ClassRegAbsence> _absencesOf(int ttId, {bool seed = false}) =>
+      registerAbsences.putIfAbsent(
+        ttId,
+        () => seed || _issuedTeacherIds.contains(ttId)
+            ? _seededAbsences(ttId)
+            : [],
+      );
+
+  List<ClassRegAbsence> _seededAbsences(int ttId) {
+    final day = _demoDay(ttId);
+    if (day == null || !_seededPast(ttId)) return [];
+    final unit = ttId % 10;
+    final start = day.add(Duration(minutes: 8 * 60 + unit * 50));
+    final end = start.add(const Duration(minutes: 45));
+    final ymd = ttId ~/ 10;
+    final out = <ClassRegAbsence>[];
+    final h = (ymd * 7 + unit * 3) % 11;
+    if (h < 3) {
+      out.add(
+        ClassRegAbsence(
+          id: ttId * 10 + 1,
+          studentId: demoStudents[(ymd + unit) % demoStudents.length].id,
+          start: start,
+          end: h == 0 ? start.add(const Duration(minutes: 10)) : end,
+          excused: ymd % 3 == 0,
+          excuseStatusId: ymd % 3 == 1 ? 2 : null,
+          excuseStatus: ymd % 3 == 1 ? 'nicht entschuldigt' : '',
+          text: h == 0 ? 'Bus late' : '',
+        ),
+      );
+    }
+    // Every ninth day Paul Koch is away all day (excused).
+    if (ymd % 9 == 0) {
+      out.add(
+        ClassRegAbsence(
+          id: ttId * 10 + 2,
+          studentId: 504,
+          start: start,
+          end: end,
+          excused: true,
+          excuseStatusId: 1,
+          excuseStatus: 'entschuldigt',
+          reasonId: 1,
+        ),
+      );
+    }
+    return out;
+  }
+
+  /// All-subjects scope of the absence summary: the absences of every demo
+  /// lesson of class 1 in the range (all teachers).
+  @override
+  Future<List<ClassAbsenceRecord>> classAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int klasseId,
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    await _delay();
+    if (klasseId != 1) return const [];
+    final names = {for (final s in demoStudents) s.id: s.displayName};
+    final out = <ClassAbsenceRecord>[];
+    for (
+      var day = DateTime(start.year, start.month, start.day);
+      !day.isAfter(end);
+      day = DateTime(day.year, day.month, day.day + 1)
+    ) {
+      if (day.weekday > 5) continue;
+      for (var unit = 0; unit < 5; unit++) {
+        if (day.weekday == 5 && unit == 4) continue; // cancelled
+        for (final a in _absencesOf(demoPeriodId(day, unit), seed: true)) {
+          out.add(
+            ClassAbsenceRecord(
+              id: a.id,
+              studentId: a.studentId,
+              studentName: names[a.studentId] ?? '',
+              klasseId: 1,
+              start: a.start,
+              end: a.end,
+              state: a.excused
+                  ? ExcuseState.excused
+                  : a.excuseStatusId != null
+                  ? ExcuseState.unexcused
+                  : ExcuseState.open,
+              reason: a.reasonId == null
+                  ? ''
+                  : (demoLookups.reasons[a.reasonId] ?? ''),
+              text: a.text,
+              late: a.end.difference(a.start).inMinutes < 40,
+            ),
+          );
+        }
+      }
+    }
+    return out;
   }
 
   /// Class register entries created in the demo, by timetable id.
@@ -885,6 +1077,214 @@ class FakeUntisApi implements FullUntisApi {
         date: DateTime.now(),
       ),
     );
+  }
+
+  // ---- Room booking and exams demo (teacher login) ----------------------
+
+  /// (subject, teacher, room) per unit of the demo week, cycling through it.
+  static const demoPlan = [
+    (21, 11, 31),
+    (22, 12, 31),
+    (23, 13, 32),
+    (24, 11, 33),
+    (21, 11, 31),
+    (23, 13, 32),
+  ];
+
+  /// Rooms of the demo school.
+  static const demoRoomIds = [31, 32, 33, 34, 35, 36];
+
+  /// Room changes made in the demo: new room by timetable id.
+  final roomChanges = <int, int>{};
+
+  /// Exams created in the demo.
+  final createdExams = <ExamItem>[];
+  var _nextExamId = 8000;
+
+  /// Every submitRoomChange / createExam call, for test assertions.
+  final roomChangeCalls =
+      <({List<int> periodIds, int orgRoomId, int roomId})>[];
+  final createExamCalls = <NewExam>[];
+
+  ExamItem? _examAt(DateTime start, DateTime end) {
+    for (final e in createdExams) {
+      if (e.start.isBefore(end) && e.end.isAfter(start)) return e;
+    }
+    return null;
+  }
+
+  /// Rooms the demo week uses from [start] to [end] (one class, so one
+  /// lesson per unit), with room changes applied; [except] are left out.
+  Set<int> _busyRooms(
+    DateTime start,
+    DateTime end, {
+    Set<int> except = const {},
+  }) {
+    final busy = <int>{};
+    for (
+      var day = DateTime(start.year, start.month, start.day);
+      day.isBefore(end);
+      day = DateTime(day.year, day.month, day.day + 1)
+    ) {
+      if (day.weekday > 5) continue;
+      for (var unit = 0; unit < 5; unit++) {
+        final s = DateTime(day.year, day.month, day.day, 8, unit * 50);
+        final e = s.add(const Duration(minutes: 45));
+        if (!s.isBefore(end) || !e.isAfter(start)) continue;
+        final id = demoPeriodId(day, unit);
+        if (except.contains(id)) continue;
+        if (day.weekday == 5 && unit == 4) continue; // cancelled
+        busy.add(roomChanges[id] ?? demoPlan[(unit + day.weekday) % 6].$3);
+      }
+    }
+    // The gym is booked on Mondays.
+    if (start.weekday == DateTime.monday) busy.add(36);
+    return busy;
+  }
+
+  static DateTime _demoStart(int ttId) {
+    final d = ttId ~/ 10;
+    return DateTime(d ~/ 10000, d ~/ 100 % 100, d % 100, 8, (ttId % 10) * 50);
+  }
+
+  @override
+  Future<FreeRooms> roomChangeData({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> periodIds,
+  }) async {
+    await _delay();
+    if (periodIds.isEmpty) return const FreeRooms();
+    final starts = [for (final id in periodIds) _demoStart(id)]..sort();
+    final start = starts.first;
+    final end = starts.last.add(const Duration(minutes: 45));
+    // The lesson's own room counts as busy (it is in use by this lesson).
+    final own = {
+      for (final id in periodIds)
+        roomChanges[id] ?? demoPlan[(id % 10 + _demoStart(id).weekday) % 6].$3,
+    };
+    final busy = {..._busyRooms(start, end, except: periodIds.toSet()), ...own};
+    return FreeRooms(
+      roomIds: [
+        for (final r in demoRoomIds)
+          if (!busy.contains(r)) r,
+      ],
+    );
+  }
+
+  @override
+  Future<FreeRooms> availableRooms({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    await _delay();
+    final busy = _busyRooms(start, end);
+    return FreeRooms(
+      roomIds: [
+        for (final r in demoRoomIds)
+          if (!busy.contains(r)) r,
+      ],
+    );
+  }
+
+  @override
+  Future<RoomChangeResult> submitRoomChange({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> periodIds,
+    required int orgRoomId,
+    required int roomId,
+  }) async {
+    await _delay();
+    roomChangeCalls.add((
+      periodIds: periodIds,
+      orgRoomId: orgRoomId,
+      roomId: roomId,
+    ));
+    if (!demoRoomIds.contains(roomId)) {
+      return const RoomChangeResult(
+        errors: [TeacherToolError(code: 'ROOM_UNKNOWN', title: 'Unknown room')],
+      );
+    }
+    for (final id in periodIds) {
+      final planned = demoPlan[(id % 10 + _demoStart(id).weekday) % 6].$3;
+      final busy = _busyRooms(
+        _demoStart(id),
+        _demoStart(id).add(const Duration(minutes: 45)),
+        except: {id},
+      );
+      if (roomId != planned && busy.contains(roomId)) {
+        return const RoomChangeResult(
+          errors: [
+            TeacherToolError(
+              code: 'ROOM_OCCUPIED',
+              title: 'Room is occupied',
+              details: 'Another lesson uses this room.',
+            ),
+          ],
+        );
+      }
+    }
+    for (final id in periodIds) {
+      final planned = demoPlan[(id % 10 + _demoStart(id).weekday) % 6].$3;
+      if (roomId == planned) {
+        roomChanges.remove(id);
+      } else {
+        roomChanges[id] = roomId;
+      }
+    }
+    return RoomChangeResult(periodCount: periodIds.length);
+  }
+
+  static const demoExamTypes = [
+    ExamType(id: 1, name: 'SA', longName: 'Schularbeit'),
+    ExamType(id: 2, name: 'Test', longName: 'Test'),
+    ExamType(id: 3, name: 'MÜ', longName: 'Mündliche Prüfung'),
+  ];
+
+  @override
+  Future<List<ExamType>> examTypes({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    await _delay();
+    return demoExamTypes;
+  }
+
+  @override
+  Future<int?> createExam({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required NewExam exam,
+  }) async {
+    await _delay();
+    createExamCalls.add(exam);
+    if (!exam.end.isAfter(exam.start)) {
+      throw const UntisException(-1, 'The end must be after the start.');
+    }
+    final id = _nextExamId++;
+    createdExams.add(
+      ExamItem(
+        id: id,
+        start: exam.start,
+        end: exam.end,
+        examType: exam.examType,
+        name: exam.name,
+        text: exam.text,
+        subjectId: exam.subjectId,
+        klassenIds: exam.klasseIds,
+        roomIds: exam.roomIds,
+        teacherIds: exam.teacherIds,
+      ),
+    );
+    return id;
   }
 
   @override

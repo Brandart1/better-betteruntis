@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/absence_summary.dart';
 import '../../core/class_register.dart';
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
+import '../../core/providers.dart';
+import '../../core/pupil_photos.dart';
 import '../common/large_text.dart';
 import '../timetable/timetable_utils.dart';
+import 'absence_summary_screen.dart';
+import 'pupil_avatar.dart';
+import 'substitute_note.dart';
 
 /// Opens the class register of one lesson block ([periods]: one lesson, or
 /// the periods of a double lesson). Resolves to true when something was saved.
@@ -79,6 +85,26 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
   /// Only the two newest previous topics are shown until expanded, so the
   /// pupils stay near the top.
   bool _showAllTopics = false;
+
+  /// The substitute who held this lesson instead of the account's teacher;
+  /// then everything is read-only (it is the substitute's class register).
+  /// Lessons the teacher substituted in themselves stay editable.
+  late final ElementRef? _substitute =
+      heldBySubstitute(widget.periods, widget.account.elementId)
+      ? substituteOf(widget.periods.first, widget.account.elementId)
+      : null;
+
+  bool get _readOnly => _substitute != null;
+
+  void _openSummary() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => AbsenceSummaryScreen(
+        account: widget.account,
+        periods: widget.periods,
+        title: widget.title,
+      ),
+    ),
+  );
 
   ClassRegisterRepository get _repo =>
       ref.read(classRegisterRepositoryProvider);
@@ -293,9 +319,10 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
               Text(widget.subtitle, style: theme.textTheme.bodySmall),
             ],
           ),
+          actions: [_photosToggle()],
         ),
         body: _body(theme),
-        bottomNavigationBar: _data == null
+        bottomNavigationBar: _data == null || _readOnly
             ? null
             : SafeArea(
                 child: Padding(
@@ -348,11 +375,19 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
     return ListView(
       padding: const EdgeInsets.only(bottom: 16),
       children: [
+        if (_readOnly)
+          SubstituteNote(
+            name: substituteName(
+              _substitute,
+              ref.watch(nameResolverProvider).value,
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
           child: TextField(
             key: const ValueKey('classreg-topic'),
             controller: _topic,
+            readOnly: _readOnly,
             minLines: 2,
             maxLines: 6,
             textCapitalization: TextCapitalization.sentences,
@@ -385,6 +420,15 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
                 label: Text(_checked ? 'Checked' : 'Not checked yet'),
                 visualDensity: VisualDensity.compact,
               ),
+              // Absence summary (lesson / subject / all subjects).
+              TextButton.icon(
+                key: const ValueKey('classreg-summary'),
+                onPressed: _openSummary,
+                icon: isLargeText(context)
+                    ? null
+                    : const Icon(Icons.insights_outlined, size: 18),
+                label: const Text('Summary'),
+              ),
             ],
           ),
         ),
@@ -394,7 +438,8 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
             _students.isEmpty
                 ? 'The server sent no pupils for this lesson.'
                 : '${_students.length - absentCount} present · '
-                      '$absentCount absent — tap a pupil to switch',
+                      '$absentCount absent'
+                      '${_readOnly ? '' : ' — tap a pupil to switch'}',
             style: muted,
           ),
         ),
@@ -431,10 +476,11 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
           ),
         )
       else ...[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 2, 16, 0),
-          child: Text('Tap one to copy it into the field', style: muted),
-        ),
+        if (!_readOnly)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 0),
+            child: Text('Tap one to copy it into the field', style: muted),
+          ),
         for (final l in _showAllTopics ? h.topics : h.topics.take(2))
           _topicTile(theme, l),
         if (h.topics.length > 2)
@@ -465,9 +511,16 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
       key: ValueKey('classreg-prev-topic-${l.period.id}'),
       dense: !large,
       title: Text(topic),
-      subtitle: Text(_date(l.period.start)),
-      trailing: large ? null : const Icon(Icons.content_copy, size: 18),
-      onTap: _saving ? null : () => _useTopic(topic),
+      subtitle: Text(
+        l.substitutedBy == null
+            ? _date(l.period.start)
+            : '${_date(l.period.start)} · substitute '
+                  '${substituteName(l.substitutedBy, ref.watch(nameResolverProvider).value)}',
+      ),
+      trailing: large || _readOnly
+          ? null
+          : const Icon(Icons.content_copy, size: 18),
+      onTap: _saving || _readOnly ? null : () => _useTopic(topic),
     );
   }
 
@@ -515,7 +568,7 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
     );
     final button = FilledButton.tonalIcon(
       key: const ValueKey('classreg-new-entry'),
-      onPressed: _saving ? null : _newEntry,
+      onPressed: _saving || _readOnly ? null : _newEntry,
       icon: const Icon(Icons.add),
       label: const Text('New entry'),
     );
@@ -609,21 +662,28 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
 
   Widget _studentTile(ThemeData theme, ClassRegStudent s) {
     final absent = _absent.contains(s.id);
-    final cs = theme.colorScheme;
     return ListTile(
       key: ValueKey('classreg-student-${s.id}'),
-      leading: CircleAvatar(
-        backgroundColor: absent ? cs.errorContainer : cs.secondaryContainer,
-        foregroundColor: absent ? cs.onErrorContainer : cs.onSecondaryContainer,
-        child: Icon(absent ? Icons.close : Icons.check),
-      ),
+      leading: PupilAvatar(account: widget.account, student: s, absent: absent),
       title: Text(s.displayName),
       subtitle: Text(absent ? 'Absent' : 'Present'),
-      onTap: _saving
+      onTap: _saving || _readOnly
           ? null
           : () => setState(() {
               absent ? _absent.remove(s.id) : _absent.add(s.id);
             }),
+      onLongPress: () => showPupilPhotoDialog(context, ref, widget.account, s),
+    );
+  }
+
+  /// App bar button to show / hide pupil photos (stored on this device).
+  Widget _photosToggle() {
+    final on = ref.watch(showPupilPhotosProvider);
+    return IconButton(
+      key: const ValueKey('classreg-photos-toggle'),
+      tooltip: on ? 'Hide pupil photos' : 'Show pupil photos',
+      icon: Icon(on ? Icons.hide_image_outlined : Icons.image_outlined),
+      onPressed: () => ref.read(showPupilPhotosProvider.notifier).set(!on),
     );
   }
 }

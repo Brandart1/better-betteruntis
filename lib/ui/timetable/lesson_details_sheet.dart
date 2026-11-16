@@ -24,7 +24,19 @@ Future<void> showLessonDetails(
   required NameResolver names,
   ValueChanged<TimetableTarget>? onOpenElement,
   ValueChanged<LessonBlock>? onOpenClassRegister,
+  ValueChanged<LessonBlock>? onBookRoom,
+  ValueChanged<LessonBlock>? onCreateExam,
 }) {
+  ValueChanged<LessonBlock>? closing(
+    BuildContext sheetContext,
+    ValueChanged<LessonBlock>? cb,
+  ) => cb == null
+      ? null
+      : (b) {
+          Navigator.of(sheetContext).pop();
+          cb(b);
+        };
+
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -46,6 +58,8 @@ Future<void> showLessonDetails(
               Navigator.of(sheetContext).pop();
               onOpenClassRegister(b);
             },
+      onBookRoom: closing(sheetContext, onBookRoom),
+      onCreateExam: closing(sheetContext, onCreateExam),
     ),
   );
 }
@@ -59,6 +73,8 @@ class LessonDetailsSheet extends StatefulWidget {
     this.initialIndex = 0,
     this.onOpenElement,
     this.onOpenClassRegister,
+    this.onBookRoom,
+    this.onCreateExam,
   });
 
   final List<LessonBlock> blocks;
@@ -68,6 +84,13 @@ class LessonDetailsSheet extends StatefulWidget {
 
   /// Teachers' own timetable: opens the class register of a block.
   final ValueChanged<LessonBlock>? onOpenClassRegister;
+
+  /// Teachers' own timetable: books another room for a block.
+  final ValueChanged<LessonBlock>? onBookRoom;
+
+  /// Teachers with the class register: creates an exam on the server
+  /// (replaces the device-only "Mark as exam").
+  final ValueChanged<LessonBlock>? onCreateExam;
 
   @override
   State<LessonDetailsSheet> createState() => _LessonDetailsSheetState();
@@ -93,6 +116,8 @@ class _LessonDetailsSheetState extends State<LessonDetailsSheet> {
           names: widget.names,
           onOpenElement: widget.onOpenElement,
           onOpenClassRegister: widget.onOpenClassRegister,
+          onBookRoom: widget.onBookRoom,
+          onCreateExam: widget.onCreateExam,
         ),
     ];
     if (pages.length == 1) {
@@ -130,12 +155,16 @@ class LessonDetailsPage extends ConsumerWidget {
     required this.names,
     this.onOpenElement,
     this.onOpenClassRegister,
+    this.onBookRoom,
+    this.onCreateExam,
   });
 
   final LessonBlock block;
   final NameResolver names;
   final ValueChanged<TimetableTarget>? onOpenElement;
   final ValueChanged<LessonBlock>? onOpenClassRegister;
+  final ValueChanged<LessonBlock>? onBookRoom;
+  final ValueChanged<LessonBlock>? onCreateExam;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -239,8 +268,34 @@ class LessonDetailsPage extends ConsumerWidget {
               label: const Text('Absences & lesson topic'),
             ),
           ),
+        if (onBookRoom != null && !block.isCancelled)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: OutlinedButton.icon(
+              key: const ValueKey('details-book-room'),
+              onPressed: () => onBookRoom!(this.block),
+              icon: const Icon(Icons.meeting_room_outlined),
+              label: const Text('Book a room'),
+            ),
+          ),
+        if (onCreateExam != null &&
+            !block.isCancelled &&
+            !block.periods.any((q) => q.isSchoolExam))
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: OutlinedButton.icon(
+              key: const ValueKey('lesson-exam-create'),
+              onPressed: () => onCreateExam!(this.block),
+              icon: const Icon(Icons.assignment_add),
+              label: const Text('Create exam'),
+            ),
+          ),
         if (noteKeys.isNotEmpty)
-          _UserNoteSection(block: block, noteKeys: noteKeys),
+          _UserNoteSection(
+            block: block,
+            noteKeys: noteKeys,
+            serverExams: onCreateExam != null,
+          ),
         _ElementSection(
           'Teachers',
           ElementType.teacher,
@@ -525,9 +580,17 @@ class _LessonDetailsDialogState extends State<_LessonDetailsDialog> {
 
 /// The user's own additions: lesson details and the custom exam mark.
 class _UserNoteSection extends ConsumerWidget {
-  const _UserNoteSection({required this.block, required this.noteKeys});
+  const _UserNoteSection({
+    required this.block,
+    required this.noteKeys,
+    this.serverExams = false,
+  });
   final LessonBlock block;
   final List<String> noteKeys;
+
+  /// Teachers with the class register create exams on the server ("Create
+  /// exam" above), so the device-only "Mark as exam" is not offered.
+  final bool serverExams;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -616,7 +679,7 @@ class _UserNoteSection extends ConsumerWidget {
                     style: TextStyle(color: theme.colorScheme.error),
                   ),
                 )
-              else if (!schoolExam)
+              else if (!schoolExam && !serverExams)
                 TextButton.icon(
                   key: const ValueKey('lesson-exam-add'),
                   onPressed: markExam,

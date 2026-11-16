@@ -1,12 +1,15 @@
 import '../core/absence_details.dart';
+import '../core/absence_summary.dart';
 import '../core/class_register.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
+import '../core/teacher_tools.dart';
 
 /// Sends demo accounts (host `*.invalid`) to [demo] and everything else to
 /// [real], so demo profiles live alongside real ones in the same database.
-class RoutingUntisApi implements FullUntisApi {
+class RoutingUntisApi
+    implements FullUntisApi, TeacherToolsApi, ClassAbsencesApi {
   RoutingUntisApi({required this.real, required this.demo});
 
   final FullUntisApi real;
@@ -336,4 +339,97 @@ class RoutingUntisApi implements FullUntisApi {
     eventReasonId: eventReasonId,
     text: text,
   );
+
+  // ---- Teacher tools (room changes, exams) --------------------------------
+
+  TeacherToolsApi _tools(String host) {
+    final Object a = _for(host);
+    if (a is TeacherToolsApi) return a;
+    throw const UntisException(-1, 'Not supported for this account.');
+  }
+
+  @override
+  Future<FreeRooms> roomChangeData({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> periodIds,
+  }) => _tools(host).roomChangeData(
+    host: host,
+    school: school,
+    auth: auth,
+    periodIds: periodIds,
+  );
+
+  @override
+  Future<FreeRooms> availableRooms({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required DateTime start,
+    required DateTime end,
+  }) => _tools(host).availableRooms(
+    host: host,
+    school: school,
+    auth: auth,
+    start: start,
+    end: end,
+  );
+
+  @override
+  Future<RoomChangeResult> submitRoomChange({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> periodIds,
+    required int orgRoomId,
+    required int roomId,
+  }) => _tools(host).submitRoomChange(
+    host: host,
+    school: school,
+    auth: auth,
+    periodIds: periodIds,
+    orgRoomId: orgRoomId,
+    roomId: roomId,
+  );
+
+  @override
+  Future<List<ExamType>> examTypes({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) => _tools(host).examTypes(host: host, school: school, auth: auth);
+
+  @override
+  Future<int?> createExam({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required NewExam exam,
+  }) =>
+      _tools(host)
+          .createExam(host: host, school: school, auth: auth, exam: exam);
+
+  @override
+  Future<List<ClassAbsenceRecord>> classAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int klasseId,
+    required DateTime start,
+    required DateTime end,
+  }) {
+    final Object a = _for(host);
+    if (a is! ClassAbsencesApi) {
+      throw const UntisException(-1, 'Not supported for this account.');
+    }
+    return a.classAbsences(
+      host: host,
+      school: school,
+      auth: auth,
+      klasseId: klasseId,
+      start: start,
+      end: end,
+    );
+  }
 }

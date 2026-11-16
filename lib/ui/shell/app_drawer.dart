@@ -61,11 +61,23 @@ class AppDrawer extends StatelessWidget {
               ),
             );
             if (!teacher) return const SizedBox.shrink();
-            return ListTile(
-              leading: const Icon(Icons.menu_book_outlined),
-              title: const Text('Class register'),
-              subtitle: const Text("Today's and past lessons"),
-              onTap: () => go('/classreg'),
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.menu_book_outlined),
+                  title: const Text('Class register'),
+                  subtitle: const Text("Today's and past lessons"),
+                  onTap: () => go('/classreg'),
+                ),
+                ListTile(
+                  key: const ValueKey('drawer-exams'),
+                  leading: const Icon(Icons.assignment_outlined),
+                  title: const Text('Exams'),
+                  subtitle: const Text('Your exams, create new ones'),
+                  onTap: () => go('/exams'),
+                ),
+              ],
             );
           },
         ),

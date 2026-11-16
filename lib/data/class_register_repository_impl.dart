@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../core/absence_summary.dart';
 import '../core/class_register.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
@@ -38,6 +39,46 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
     }
   }
 
+  /// Lessons of [periods] a substitute held instead of the account's teacher
+  /// are read-only: their class register belongs to the substitute.
+  void _checkWritable(Account a, List<Period> periods) {
+    if (heldBySubstitute(periods, a.elementId)) {
+      throw const UntisException(
+        UntisException.noRight,
+        'A substitute held this lesson; only they can change its class '
+        'register.',
+      );
+    }
+  }
+
+  /// [_periodData] for lessons a substitute held instead of the account's
+  /// teacher ([substituted]) and the others ([own]) separately: the server
+  /// may refuse the substitute's lessons to the original teacher, which
+  /// must not break the rest. Lessons whose data could not be read are
+  /// simply missing.
+  Future<PeriodRegisterData> _periodDataSplit(
+    Account a,
+    List<Period> lessons,
+  ) async {
+    final own = <int>[];
+    final substituted = <int>[];
+    for (final p in lessons) {
+      (substituteOf(p, a.elementId) == null ? own : substituted).add(p.id);
+    }
+    final d = await _periodData(a, own);
+    if (substituted.isEmpty) return d;
+    try {
+      final s = await _periodData(a, substituted);
+      return PeriodRegisterData(
+        periods: {...d.periods, ...s.periods},
+        students: {...s.students, ...d.students},
+      );
+    } on UntisException catch (e) {
+      if (e.isNetwork || e.isTimeout) rethrow;
+      return d;
+    }
+  }
+
   Future<PeriodRegisterData> _periodData(Account a, List<int> ids) async {
     final auth = await accounts.credentials(a.id);
     final periods = <int, PeriodRegister>{};
@@ -71,6 +112,7 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
     ClassRegChanges changes,
   ) {
     _check(account);
+    _checkWritable(account, periods);
     return _wrapAsync(() async {
       final auth = await accounts.credentials(account.id);
       final host = account.host;
@@ -146,10 +188,19 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
         );
       }
       if (periods.isEmpty) return const <ClassRegLesson>[];
-      final data = await _periodData(account, [for (final p in periods) p.id]);
+      final data = await _periodDataSplit(account, periods);
       return [
         for (final p in periods)
-          if (data.periods[p.id] case final r?) ClassRegLesson(p, r),
+          if (substituteOf(p, account.elementId) case final sub?)
+            // Held by a substitute: listed even without data, never missing.
+            ClassRegLesson(
+              p,
+              data.periods[p.id] ?? PeriodRegister(ttId: p.id),
+              substitutedBy: sub,
+              registerMissing: !data.periods.containsKey(p.id),
+            )
+          else if (data.periods[p.id] case final r?)
+            ClassRegLesson(p, r),
       ]..sort((a, b) => a.period.start.compareTo(b.period.start));
     });
   }
@@ -220,9 +271,8 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
         candidates.removeRange(want, candidates.length);
       }
       if (candidates.isEmpty) return const CourseHistory();
-      final data = await _periodData(account, [
-        for (final p in candidates) p.id,
-      ]);
+      // Lessons a substitute held are included (their topics too).
+      final data = await _periodDataSplit(account, candidates);
       final withTopic = <ClassRegLesson>[];
       final events = <ClassRegEvent>[];
       final seenEvents = <int>{};
@@ -236,7 +286,13 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
             !(prev != null &&
                 _sameDay(prev.period.start, p.start) &&
                 prev.register.topic.trim() == r.topic.trim())) {
-          withTopic.add(ClassRegLesson(p, r));
+          withTopic.add(
+            ClassRegLesson(
+              p,
+              r,
+              substitutedBy: substituteOf(p, account.elementId),
+            ),
+          );
         }
         for (final e in r.events) {
           if (e.id != null && !seenEvents.add(e.id!)) continue;
@@ -299,6 +355,7 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
     NewClassRegEvent event,
   ) {
     _check(account);
+    _checkWritable(account, periods);
     return _wrapAsync(() async {
       if (periods.isEmpty) {
         throw const UntisException(-1, 'No lesson selected.');

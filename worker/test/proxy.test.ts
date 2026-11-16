@@ -219,6 +219,29 @@ describe("proxy forwarding", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("binary image answers (pupil photos) pass through byte-for-byte with the bearer token", async () => {
+    // JPEG header plus every byte value, so nothing is re-encoded as text.
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...Array.from({ length: 256 }, (_, i) => i)]);
+    let seen: Request | undefined;
+    const res = await call(
+      req("GET", "/proxy/x.webuntis.com/WebUntis/api/portrait/students/501", {
+        headers: { accept: "image/*", authorization: "Bearer jwt" },
+      }),
+      {
+        fetch: async (r) => {
+          seen = r;
+          return new Response(bytes, { status: 200, headers: { "content-type": "image/jpeg" } });
+        },
+      },
+    );
+    expect(seen?.url).toBe("https://x.webuntis.com/WebUntis/api/portrait/students/501");
+    expect(seen?.headers.get("accept")).toBe("image/*");
+    expect(seen?.headers.get("authorization")).toBe("Bearer jwt");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/jpeg");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
+  });
+
   it("redirects are not followed and their location is dropped", async () => {
     const r = new Recorder(302, null);
     const res = await call(req("GET", "/proxy/x.webuntis.com/x"), { fetch: r.fetch });

@@ -20,12 +20,28 @@ class ClassRegStudent {
     required this.firstName,
     required this.lastName,
     this.klasseId,
+    this.imageUrl,
   });
 
   final int id;
   final String firstName;
   final String lastName;
   final int? klasseId;
+
+  /// Photo URL sent with the pupil, if any (key unknown, see
+  /// `PupilPhotoApi` in pupil_photos.dart).
+  final String? imageUrl;
+
+  /// Up to two initials ("Bauer Lena" -> "LB"), '' when there are none.
+  String get initials {
+    String first(String s) {
+      final t = s.trim();
+      if (t.isEmpty || t.startsWith('#')) return '';
+      return String.fromCharCode(t.runes.first).toUpperCase();
+    }
+
+    return '${first(firstName)}${first(lastName)}';
+  }
 
   /// "Last First", which is how class lists are usually sorted.
   String get sortKey => '${lastName.toLowerCase()} ${firstName.toLowerCase()}';
@@ -43,6 +59,8 @@ class ClassRegAbsence {
     this.reasonId,
     this.text = '',
     this.excused = false,
+    this.excuseStatusId,
+    this.excuseStatus = '',
   });
 
   final int id;
@@ -52,6 +70,12 @@ class ClassRegAbsence {
   final int? reasonId;
   final String text;
   final bool excused;
+
+  /// Excuse status (master data `excuseStatuses`) when the school set one.
+  final int? excuseStatusId;
+
+  /// Excuse status name as sent inline ('' when not).
+  final String excuseStatus;
 }
 
 /// Class register data of one lesson (one timetable id).
@@ -264,9 +288,24 @@ class ClassRegChanges {
 
 /// One of the teacher's own lessons with its class register state.
 class ClassRegLesson {
-  const ClassRegLesson(this.period, this.register);
+  const ClassRegLesson(
+    this.period,
+    this.register, {
+    this.substitutedBy,
+    this.registerMissing = false,
+  });
   final Period period;
   final PeriodRegister register;
+
+  /// The teacher who held this lesson instead of the account's teacher
+  /// (see `substituteOf` in absence_summary.dart); null for own lessons and
+  /// lessons the teacher substituted in.
+  final ElementRef? substitutedBy;
+
+  /// The server sent no class register for it ([register] is empty).
+  final bool registerMissing;
+
+  bool get isSubstituted => substitutedBy != null;
 }
 
 abstract interface class ClassRegisterRepository {

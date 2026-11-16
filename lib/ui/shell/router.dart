@@ -10,6 +10,7 @@ import '../accounts/manage_accounts_screen.dart';
 import '../calendar/calendar_sync_screen.dart';
 import '../calendar/calendar_syncs_screen.dart';
 import '../classreg/class_register_overview_screen.dart';
+import '../classreg/teacher_exams_screen.dart';
 import '../infocenter/info_center_screen.dart';
 import '../infocenter/messages_tab.dart';
 import '../login/login_form_screen.dart';
@@ -88,6 +89,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       // Old name of the class register overview ("Open lessons").
       GoRoute(path: '/classreg/open', redirect: (_, _) => '/classreg'),
+      GoRoute(path: '/exams', builder: (_, _) => const TeacherExamsScreen()),
       GoRoute(
         path: '/info',
         builder: (_, _) => const InfoCenterScreen(),

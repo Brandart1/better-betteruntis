@@ -1,21 +1,29 @@
 /// WebUntis client implementing the [UntisApi] contract.
 library;
 
+import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
 import '../core/absence_details.dart';
+import '../core/absence_summary.dart';
 import '../core/class_register.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
+import '../core/teacher_tools.dart';
+import '../core/pupil_photos.dart';
+import 'absence_summary_parsers.dart';
 import 'class_register_parsers.dart';
 import 'json_rpc.dart';
 import 'parsers.dart';
 import 'rest_teachers.dart';
+import 'teacher_tools_parsers.dart';
 
-class UntisApiImpl implements FullUntisApi {
+class UntisApiImpl
+    implements FullUntisApi, PupilPhotoApi, TeacherToolsApi, ClassAbsencesApi {
   /// [interceptors] are added to the default client (e.g. the web proxy
   /// rewrite); ignored when [dio] is given.
   UntisApiImpl({
@@ -726,12 +734,16 @@ class UntisApiImpl implements FullUntisApi {
     required List<int> ttIds,
   }) async {
     if (ttIds.isEmpty) return const PeriodRegisterData();
-    return parsePeriodData(
-      await _rpc.call(rpcUrl(host, school), 'getPeriodData2017', {
-        'ttIds': ttIds,
-        'auth': _rpc.auth(auth),
-      }),
+    final raw = await _rpc.call(rpcUrl(host, school), 'getPeriodData2017', {
+      'ttIds': ttIds,
+      'auth': _rpc.auth(auth),
+    });
+    // Where photos might be (keys only, no names or values).
+    _rpc.record(
+      'getPeriodData2017 referencedStudents keys',
+      jsonEncode(referencedStudentsShape(raw)),
     );
+    return parsePeriodData(raw);
   }
 
   @override
@@ -842,6 +854,416 @@ class UntisApiImpl implements FullUntisApi {
       ...params,
       'auth': _rpc.auth(auth),
     });
+  }
+
+  // ---- Absence summaries (teachers, assumed) ---------------------------
+  // docs/API.md "Absence summaries (teachers)": the class absence list of
+  // the WebUntis web client (`absences/students` with `studentId=-1` and a
+  // `klasseId`), else getStudentAbsences2017 with a `klasseId`. Both are
+  // guesses; requests and answers are in the Debug log.
+
+  @override
+  Future<List<ClassAbsenceRecord>> classAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int klasseId,
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    final from = ymdNumber(start);
+    final to = ymdNumber(end);
+    final path =
+        'absences/students?startDate=$from&endDate=$to'
+        '&studentId=-1&klasseId=$klasseId&excuseStatusId=-1';
+    _rpc.record(
+      'REST classreg class absences request',
+      jsonEncode({'GET': '/WebUntis/api/classreg/$path'}),
+    );
+    late UntisException classicError;
+    try {
+      return parseClassAbsenceRecords(
+        await _classic(
+          host,
+          school,
+          auth,
+          'GET',
+          classregUrl(host, path),
+          'REST classreg absences/students klasseId=$klasseId $from..$to',
+        ),
+      );
+    } on UntisException catch (e) {
+      if (e.isNetwork || e.isTimeout) rethrow;
+      classicError = e;
+    }
+    final params = {
+      'startDate': formatDate(start),
+      'endDate': formatDate(end),
+      'includeExcused': true,
+      'includeUnExcused': true,
+      'klasseId': klasseId,
+    };
+    _recordRequest('getStudentAbsences2017 (class)', params);
+    try {
+      return parseClassAbsenceRecords(
+        await _rpc.call(rpcUrl(host, school), 'getStudentAbsences2017', {
+          ...params,
+          'auth': _rpc.auth(auth),
+        }),
+      );
+    } on UntisException catch (e) {
+      if (e.isNetwork || e.isTimeout) rethrow;
+      // The first answer is usually the more telling one.
+      throw UntisException(
+        classicError.code,
+        '${classicError.message} (fallback getStudentAbsences2017: '
+        '${e.message})',
+      );
+    }
+  }
+
+  // ---- Pupil photos (assumed, docs/API.md "Pupil photos") ---------------
+
+  /// Guessed photo endpoints, tried in this order until one answers with an
+  /// image; `{id}` is the student id. None is confirmed.
+  static const pupilPhotoPaths = [
+    '/WebUntis/api/rest/view/v1/students/{id}/image',
+    '/WebUntis/api/portrait/students/{id}',
+    '/WebUntis/api/classreg/students/{id}/image',
+  ];
+
+  /// After this many pupils for whom no guessed endpoint gave an image, the
+  /// guesses are given up for the session.
+  static const pupilPhotoMaxMisses = 2;
+
+  /// Working [pupilPhotoPaths] index per `host|school`; -1 = none works.
+  final _photoSources = <String, int>{};
+  final _photoMisses = <String, int>{};
+  final _photoProbes = <String, Future<void>>{};
+
+  /// Absolute URL of a photo [url] (absolute or a server path) on [host].
+  static String pupilPhotoUrl(String host, String url) =>
+      url.startsWith('/') ? 'https://$host$url' : url;
+
+  @override
+  Future<Uint8List?> pupilPhoto({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int studentId,
+    String? imageUrl,
+  }) async {
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      return _photoGet(
+        host,
+        school,
+        auth,
+        pupilPhotoUrl(host, imageUrl),
+        'pupil photo (imageUrl)',
+      );
+    }
+    final key = '$host|$school';
+    String url(int i) =>
+        'https://$host${pupilPhotoPaths[i].replaceAll('{id}', '$studentId')}';
+    while (true) {
+      final src = _photoSources[key];
+      if (src == -1) return null;
+      if (src != null) {
+        return _photoGet(host, school, auth, url(src), 'pupil photo #$src');
+      }
+      final running = _photoProbes[key];
+      if (running != null) {
+        await running;
+        continue;
+      }
+      // Probe the guesses once at a time; the others wait for the result.
+      final done = Completer<void>();
+      _photoProbes[key] = done.future;
+      try {
+        for (var i = 0; i < pupilPhotoPaths.length; i++) {
+          final img = await _photoGet(
+            host,
+            school,
+            auth,
+            url(i),
+            'pupil photo probe #$i',
+          );
+          if (img != null) {
+            _photoSources[key] = i;
+            return img;
+          }
+        }
+        final misses = (_photoMisses[key] ?? 0) + 1;
+        _photoMisses[key] = misses;
+        if (misses >= pupilPhotoMaxMisses) {
+          _photoSources[key] = -1;
+          _rpc.record(
+            'pupil photo: no source',
+            jsonEncode({'triedPaths': pupilPhotoPaths, 'pupils': misses}),
+          );
+        }
+        return null;
+      } finally {
+        _photoProbes.remove(key);
+        done.complete();
+      }
+    }
+  }
+
+  /// GET of an image: with the bearer token (only to [host]), and once more
+  /// with the web session if that is refused. Logs status, content type
+  /// and size, never the bytes. Null unless the answer is an image.
+  Future<Uint8List?> _photoGet(
+    String host,
+    String school,
+    UntisCredentials auth,
+    String url,
+    String label,
+  ) async {
+    final sameHost = Uri.tryParse(url)?.host == host;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      Map<String, String>? session;
+      String? token;
+      if (attempt == 1) {
+        session = await _webSession(host, school, auth);
+        if (session == null) return null;
+      } else if (sameHost) {
+        try {
+          token = await _token(host, school, auth);
+        } on UntisException {
+          token = null;
+        }
+      }
+      final Response<List<int>> resp;
+      try {
+        resp = await _dio.get<List<int>>(
+          url,
+          options: Options(
+            responseType: ResponseType.bytes,
+            validateStatus: (_) => true,
+            followRedirects: false,
+            maxRedirects: 0,
+            headers: {
+              'Accept': 'image/*',
+              'Authorization': ?(token == null ? null : 'Bearer $token'),
+              ...?session,
+            },
+          ),
+        );
+      } on DioException catch (e) {
+        _rpc.record(
+          '$label [no response]',
+          jsonEncode({'_requestFailed': e.message ?? e.type.name}),
+        );
+        throw UntisException(0, 'Network error: ${e.message ?? e.type.name}');
+      }
+      final status = resp.statusCode ?? 0;
+      final bytes = resp.data ?? const <int>[];
+      final type = resp.headers.value('content-type');
+      final location = resp.headers.value('location');
+      final image = isImageResponse(status, type, bytes);
+      _rpc.record(
+        '$label${attempt == 1 ? ' (web session)' : ''} [HTTP $status]',
+        jsonEncode({
+          'url': _stripQuery(url).replaceAll(RegExp(r'/\d+(?=/|$)'), '/<id>'),
+          'contentType': type,
+          'bytes': bytes.length,
+          'image': image,
+          if (location != null) '_redirectTo': _stripQuery(location),
+        }),
+      );
+      if (image) return Uint8List.fromList(bytes);
+      final refused =
+          status == 401 || status == 403 || (status >= 300 && status < 400);
+      if (!refused || !sameHost) return null;
+    }
+    return null;
+  }
+
+  /// A 200 with an `image/*` type, or with JPEG / PNG / GIF / WebP bytes
+  /// (some servers say `application/octet-stream`).
+  static bool isImageResponse(int status, String? contentType, List<int> b) {
+    if (status != 200 || b.isEmpty) return false;
+    final type = (contentType ?? '').toLowerCase();
+    if (type.startsWith('image/')) return true;
+    if (type.contains('json') ||
+        type.contains('html') ||
+        type.startsWith('text/')) {
+      return false;
+    }
+    bool at(int i, List<int> m) {
+      if (b.length < i + m.length) return false;
+      for (var k = 0; k < m.length; k++) {
+        if (b[i + k] != m[k]) return false;
+      }
+      return true;
+    }
+
+    return at(0, const [0xFF, 0xD8, 0xFF]) ||
+        at(0, const [0x89, 0x50, 0x4E, 0x47]) ||
+        at(0, const [0x47, 0x49, 0x46, 0x38]) ||
+        (at(0, const [0x52, 0x49, 0x46, 0x46]) &&
+            at(8, const [0x57, 0x45, 0x42, 0x50]));
+  }
+
+  // ---- Room changes and exams (teachers) ---------------------------------
+  // Room calls: method names and params from the official Untis Mobile app's
+  // API classes (GetRoomChangeDataRequest {periodIds}, GetAvailableRoomsRequest
+  // {startDateTime, endDateTime}, SubmitRoomChangeRequest {periodIds,
+  // orgRoomId, roomId}). Exam creation: no Untis Mobile call exists; the
+  // WebUntis web endpoint is a guess. docs/API.md "Room booking and exams
+  // (teachers)". Request bodies (no credentials) are logged.
+
+  @override
+  Future<FreeRooms> roomChangeData({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> periodIds,
+  }) async {
+    if (periodIds.isEmpty) return const FreeRooms();
+    final params = {'periodIds': periodIds};
+    _recordRequest('getRoomChangeData2017', params);
+    return parseFreeRooms(
+      await _rpc.call(rpcUrl(host, school), 'getRoomChangeData2017', {
+        ...params,
+        'auth': _rpc.auth(auth),
+      }),
+    );
+  }
+
+  @override
+  Future<FreeRooms> availableRooms({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    final params = {
+      'startDateTime': formatUntisDateTime(start),
+      'endDateTime': formatUntisDateTime(end),
+    };
+    _recordRequest('getAvailableRooms2017', params);
+    return parseFreeRooms(
+      await _rpc.call(rpcUrl(host, school), 'getAvailableRooms2017', {
+        ...params,
+        'auth': _rpc.auth(auth),
+      }),
+    );
+  }
+
+  @override
+  Future<RoomChangeResult> submitRoomChange({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required List<int> periodIds,
+    required int orgRoomId,
+    required int roomId,
+  }) async {
+    final params = {
+      'periodIds': periodIds,
+      'orgRoomId': orgRoomId,
+      'roomId': roomId,
+    };
+    _recordRequest('submitRoomChange2017', params);
+    return parseRoomChangeResult(
+      await _rpc.call(rpcUrl(host, school), 'submitRoomChange2017', {
+        ...params,
+        'auth': _rpc.auth(auth),
+      }),
+    );
+  }
+
+  /// Exam types per `host|school`, loaded once per session.
+  final _examTypes = <String, List<ExamType>>{};
+
+  /// Master data `examTypes` of one getUserData2017 call (assumed key).
+  @override
+  Future<List<ExamType>> examTypes({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    final key = '$host|$school';
+    final known = _examTypes[key];
+    if (known != null) return known;
+    final result = await _rpc.call(rpcUrl(host, school), 'getUserData2017', {
+      'elementId': 0,
+      'deviceOs': isIos ? 'IOS' : 'AND',
+      'deviceOsVersion': '',
+      'auth': _rpc.auth(auth),
+    });
+    return _examTypes[key] = parseExamTypes(
+      result is Map ? result['masterData'] : null,
+    );
+  }
+
+  /// URLs tried in order for creating an exam (assumed): the classic web
+  /// endpoint that `GET` exams are read from, then the class register one.
+  static List<String> examCreateUrls(String host) => [
+    'https://$host/WebUntis/api/exams',
+    classregUrl(host, 'exams'),
+  ];
+
+  @override
+  Future<int?> createExam({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required NewExam exam,
+  }) async {
+    if (!exam.end.isAfter(exam.start)) {
+      throw const UntisException(-1, 'The end must be after the start.');
+    }
+    final body = examPayload(exam);
+    _rpc.record('REST exams request body', jsonEncode(body));
+    final urls = examCreateUrls(host);
+    for (var i = 0; i < urls.length; i++) {
+      final url = urls[i];
+      final Object? answer;
+      try {
+        answer = await _classic(
+          host,
+          school,
+          auth,
+          'POST',
+          url,
+          'REST POST ${Uri.parse(url).path}',
+          body: body,
+        );
+      } on UntisException catch (e) {
+        // Not offered under this path: try the next one.
+        final missing =
+            e.code == -1 &&
+            (e.message.contains('HTTP 404') || e.message.contains('HTTP 405'));
+        if (missing && i < urls.length - 1) continue;
+        if (e.code == UntisException.noRight) {
+          throw UntisException(
+            e.code,
+            "Your school doesn't allow creating exams for this account "
+            '(${e.message}).',
+          );
+        }
+        if (e.code == sessionRequired) {
+          throw const UntisException(
+            sessionRequired,
+            "The school's server didn't accept the app's sign-in for "
+            'creating exams (it asked for a browser login). Please create '
+            'the exam on the WebUntis website for now, and send the Debug '
+            'log so this can be fixed.',
+          );
+        }
+        rethrow;
+      }
+      final errors = parseExamErrors(answer);
+      if (errors.isNotEmpty) {
+        throw UntisException(-1, errors.map((e) => e.message).join('\n'));
+      }
+      return parseCreatedExamId(answer);
+    }
+    return null;
   }
 
   /// Client-side checks before anything is sent.

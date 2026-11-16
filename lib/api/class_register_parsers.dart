@@ -55,7 +55,52 @@ ClassRegStudent? parseClassRegStudent(Map<String, Object?> j) {
     firstName: first,
     lastName: last,
     klasseId: _int(j['klasseId'] ?? j['classId']),
+    imageUrl: studentImageUrl(j),
   );
+}
+
+/// Keys a pupil's photo URL might come in. None seen in a real
+/// getPeriodData2017 answer yet; `imageUrl` is what the WebUntis REST API
+/// uses for persons (`api/rest/view/v1/app/data`, messenger).
+const studentImageKeys = [
+  'imageUrl',
+  'imageURL',
+  'image',
+  'photoUrl',
+  'photo',
+  'pictureUrl',
+  'picture',
+  'avatarUrl',
+  'portraitUrl',
+];
+
+/// The photo URL of a pupil object, or null. Only URLs (absolute http(s) or
+/// a server path starting with `/`) count; inline data and ids don't.
+String? studentImageUrl(Map<String, Object?> j) {
+  for (final k in studentImageKeys) {
+    final v = j[k];
+    final s = (v is Map ? _firstStr(_map(v), ['url', 'href', 'src']) : _str(v))
+        .trim();
+    if (s.startsWith('/') && !s.startsWith('//')) return s;
+    final u = Uri.tryParse(s);
+    if (u != null &&
+        (u.scheme == 'https' || u.scheme == 'http') &&
+        u.host.isNotEmpty) {
+      return s;
+    }
+  }
+  return null;
+}
+
+/// For the Debug log: every key the pupils of a getPeriodData2017 answer
+/// carry (sorted, no values) and how many have a photo URL.
+Map<String, Object?> referencedStudentsShape(Object? raw) {
+  final students = _maps(_map(raw)['referencedStudents']).toList();
+  return {
+    'count': students.length,
+    'keys': {for (final s in students) ...s.keys}.toList()..sort(),
+    'withImageUrl': students.where((s) => studentImageUrl(s) != null).length,
+  };
 }
 
 ClassRegAbsence? parseClassRegAbsence(Map<String, Object?> j) {
@@ -75,6 +120,10 @@ ClassRegAbsence? parseClassRegAbsence(Map<String, Object?> j) {
     reasonId: _int(j['absenceReasonId'] ?? j['reasonId']),
     text: _firstStr(j, ['text', 'reason']),
     excused: _bool(j['excused'] ?? j['isExcused'] ?? excuse['isExcused']),
+    excuseStatusId: _int(j['excuseStatusId'] ?? excuse['excuseStatusId']),
+    excuseStatus: j['excuseStatus'] is String
+        ? _str(j['excuseStatus']).trim()
+        : _firstStr(excuse, ['excuseStatus']),
   );
 }
 

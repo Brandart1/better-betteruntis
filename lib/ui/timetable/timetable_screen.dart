@@ -12,6 +12,8 @@ import '../../core/providers.dart';
 import '../../core/settings.dart';
 import '../classreg/class_register_screen.dart';
 import '../classreg/class_register_overview_screen.dart';
+import '../classreg/exam_editor_screen.dart';
+import '../classreg/room_booking_screen.dart';
 import '../export/export_sheet.dart';
 import '../shell/app_drawer.dart' show isWebProvider;
 import 'day_speech.dart';
@@ -369,6 +371,53 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                   names,
                 ),
               );
+            },
+      onBookRoom: !ownTeacherTimetable
+          ? null
+          : (block) async {
+              final periods = block.periods
+                  .where((p) => !p.isCancelled)
+                  .toList();
+              if (periods.isEmpty) return;
+              final p = periods.first;
+              final messenger = ScaffoldMessenger.of(context);
+              final done = await openRoomBooking(
+                context,
+                account: account,
+                periods: periods,
+                title: classRegLessonTitle(p, names),
+                subtitle: classRegLessonSubtitle(
+                  context,
+                  periods.first.start,
+                  periods.last.end,
+                  p,
+                  names,
+                ),
+              );
+              if (done != null) {
+                messenger.showSnackBar(SnackBar(content: Text(done)));
+              }
+            },
+      // Teachers with the class register create exams on the server
+      // instead of marking them on the device.
+      onCreateExam: account == null || !hasClassRegister(account)
+          ? null
+          : (block) async {
+              final periods = block.periods
+                  .where((p) => !p.isCancelled)
+                  .toList();
+              if (periods.isEmpty) return;
+              final messenger = ScaffoldMessenger.of(context);
+              final created = await openExamEditor(
+                context,
+                account: account,
+                periods: periods,
+              );
+              if (created) {
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Exam created.')),
+                );
+              }
             },
     );
     _refocus();

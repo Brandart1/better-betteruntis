@@ -4,15 +4,21 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 
+import '../core/absence_summary.dart';
 import '../core/class_register.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/providers.dart';
+import '../core/pupil_photos.dart';
+import '../core/teacher_tools.dart';
+import 'absence_summary_repository_impl.dart';
 import 'account_repository_impl.dart';
 import 'class_register_repository_impl.dart';
 import 'db/database.dart';
 import 'info_center_repository_impl.dart';
+import 'pupil_photo_repository_impl.dart';
 import 'secret_store.dart';
+import 'teacher_tools_repository_impl.dart';
 import 'timetable_repository_impl.dart';
 
 /// The app database. Overridden by [dataOverrides]; tests may override it with
@@ -69,6 +75,28 @@ List<Override> dataOverrides({
       accounts: ref.watch(accountRepositoryProvider),
       timetables: ref.watch(timetableRepositoryProvider),
       clock: clock,
+    ),
+  ),
+  absenceSummaryRepositoryProvider.overrideWith(
+    (ref) => AbsenceSummaryRepositoryImpl(
+      api: api ?? ref.watch(untisApiProvider),
+      accounts: ref.watch(accountRepositoryProvider),
+      timetables: ref.watch(timetableRepositoryProvider),
+      clock: clock,
+    ),
+  ),
+  teacherToolsRepositoryProvider.overrideWith(
+    (ref) => TeacherToolsRepositoryImpl(
+      api: api ?? ref.watch(untisApiProvider),
+      accounts: ref.watch(accountRepositoryProvider),
+      timetables: ref.watch(timetableRepositoryProvider),
+      clock: clock,
+    ),
+  ),
+  pupilPhotoRepositoryProvider.overrideWith(
+    (ref) => PupilPhotoRepositoryImpl(
+      api: api ?? ref.watch(untisApiProvider),
+      accounts: ref.watch(accountRepositoryProvider),
     ),
   ),
 ];

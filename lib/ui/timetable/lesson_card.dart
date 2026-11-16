@@ -228,19 +228,31 @@ class LessonCard extends ConsumerWidget {
     final classes = p.ofType(ElementType.klasse).toList();
     final classLine = elementSpans(names, classes, oldStyle: oldStyle);
     final viewType = viewing?.type;
+    // The viewed element's own line is normally left out (it's the same in
+    // every lesson), but not when it changed: a teacher substituted in their
+    // own timetable, a lesson moved out of the viewed room, a class swapped.
+    bool changed(List<ElementRef> l) =>
+        l.any((e) => e.change != ElementChange.regular);
     if (viewType == ElementType.room) {
       // Room timetable: who is there. No class if the room is struck through.
+      if (changed(rooms)) {
+        line(elementSpans(names, rooms, long: detailed, oldStyle: oldStyle));
+      }
       line(elementSpans(names, teachers, long: detailed, oldStyle: oldStyle));
       if (!roomVacated(p, viewing!.id)) line(classLine);
     } else if (viewType == ElementType.teacher) {
       // Teacher timetable: where and with whom.
+      if (changed(teachers)) {
+        line(elementSpans(names, teachers, long: detailed, oldStyle: oldStyle));
+      }
       line(classLine);
       line(elementSpans(names, rooms, long: detailed, oldStyle: oldStyle));
     } else {
       // Teachers first: they must never be clipped away (BetterUntis bug).
       line(elementSpans(names, teachers, long: detailed, oldStyle: oldStyle));
       line(elementSpans(names, rooms, long: detailed, oldStyle: oldStyle));
-      if (detailed) {
+      // Several classes (shared course) also show in a class's timetable.
+      if (detailed || changed(classes) || classes.length > 1) {
         line(classLine, st: TextStyle(color: fg.withValues(alpha: 0.75)));
       }
     }

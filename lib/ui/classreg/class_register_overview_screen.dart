@@ -8,6 +8,7 @@ import '../../core/providers.dart';
 import '../common/large_text.dart';
 import '../timetable/timetable_utils.dart';
 import 'class_register_screen.dart';
+import 'substitute_note.dart';
 
 /// Subject (long) names of [p], else its lesson text, else "Lesson".
 String classRegLessonTitle(Period p, NameResolver? names) {
@@ -72,6 +73,11 @@ enum ClassRegFilter {
     topicMissing => !r.hasTopic,
     done => !r.isIncomplete,
   };
+
+  /// Lessons a substitute held are never missing anything for the original
+  /// teacher: they only show under [all].
+  bool matchesLesson(ClassRegLesson l) =>
+      l.isSubstituted ? this == all : matches(l.register);
 }
 
 final _lessonsProvider = FutureProvider.autoDispose
@@ -178,9 +184,10 @@ class _ClassRegisterOverviewScreenState
       for (final l in lessons)
         if (l.period.start.isBefore(today)) l,
     ]..sort((a, b) => b.period.start.compareTo(a.period.start));
-    final open = past.where((l) => l.register.isIncomplete).length;
-    final shownToday = todays.where((l) => _filter.matches(l.register));
-    final shownPast = past.where((l) => _filter.matches(l.register));
+    final own = past.where((l) => !l.isSubstituted);
+    final open = own.where((l) => l.register.isIncomplete).length;
+    final shownToday = todays.where(_filter.matchesLesson);
+    final shownPast = past.where(_filter.matchesLesson);
     final theme = Theme.of(context);
 
     Widget header(String text, {Key? key}) => Padding(
@@ -230,7 +237,7 @@ class _ClassRegisterOverviewScreenState
             child: Text(
               open == 0
                   ? 'Everything entered.'
-                  : '$open of ${past.length} lessons miss the attendance '
+                  : '$open of ${own.length} lessons miss the attendance '
                         'check or the topic.',
               style: theme.textTheme.bodySmall,
             ),
@@ -253,6 +260,7 @@ class _ClassRegisterOverviewScreenState
   }) {
     final p = l.period;
     final r = l.register;
+    if (l.isSubstituted) return _substitutedTile(account, names, l, reload);
     final upcoming = p.start.isAfter(now);
     final running = !upcoming && p.end.isAfter(now);
     final title = classRegLessonTitle(p, names);
@@ -303,6 +311,59 @@ class _ClassRegisterOverviewScreenState
             ],
           ),
         ],
+      ),
+      isThreeLine: true,
+      trailing: large ? null : const Icon(Icons.chevron_right),
+      onTap: () async {
+        await openClassRegister(
+          context,
+          account: account,
+          periods: [p],
+          title: title,
+          subtitle: subtitle,
+        );
+        if (mounted) await reload();
+      },
+    );
+  }
+}
+
+extension on _ClassRegisterOverviewScreenState {
+  /// A lesson a substitute held instead of the teacher: "Substituted by X"
+  /// with what they entered; opens the read-only class register.
+  Widget _substitutedTile(
+    Account account,
+    NameResolver? names,
+    ClassRegLesson l,
+    Future<void> Function() reload,
+  ) {
+    final p = l.period;
+    final r = l.register;
+    final title = classRegLessonTitle(p, names);
+    final subtitle = classRegLessonSubtitle(context, p.start, p.end, p, names);
+    final large = isLargeText(context);
+    final entered = l.registerMissing
+        ? 'What they entered is not visible to you.'
+        : [
+            r.hasTopic ? 'Topic: ${r.topic.trim()}' : 'No topic entered',
+            r.absenceChecked
+                ? '${r.absences.map((a) => a.studentId).toSet().length} '
+                      'absent'
+                : 'Attendance not checked',
+          ].join(' · ');
+    return ListTile(
+      key: ValueKey('classreg-lesson-${p.id}'),
+      leading: large
+          ? null
+          : Icon(
+              Icons.swap_horiz,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+      title: Text(title),
+      subtitle: Text(
+        '$subtitle\n'
+        'Substituted by ${substituteName(l.substitutedBy, names)}\n'
+        '$entered',
       ),
       isThreeLine: true,
       trailing: large ? null : const Icon(Icons.chevron_right),
