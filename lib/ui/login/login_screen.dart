@@ -632,6 +632,16 @@ class _SecondaryActions extends StatelessWidget {
           style: Theme.of(context).textTheme.bodySmall
               ?.copyWith(color: scheme.onSurfaceVariant),
         ),
+        const SizedBox(height: 16),
+        Text(
+          'BetterBetterUntis is an independent app. It is not affiliated '
+          'with, endorsed by or connected to Untis GmbH in any way. '
+          'WebUntis is a trademark of Untis GmbH.',
+          key: const ValueKey('login-disclaimer'),
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall
+              ?.copyWith(color: scheme.onSurfaceVariant),
+        ),
       ],
     );
   }

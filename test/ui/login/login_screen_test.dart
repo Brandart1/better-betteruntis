@@ -17,6 +17,13 @@ void main() {
     expect(find.text('Scan QR code'), findsOneWidget);
     expect(find.text('Enter details manually'), findsOneWidget);
     expect(find.text('Try the demo'), findsOneWidget);
+    expect(
+      find.textContaining(
+        'not affiliated with, endorsed by or connected to '
+        'Untis GmbH',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('debounces and shows results', (tester) async {
