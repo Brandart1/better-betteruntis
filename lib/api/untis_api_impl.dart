@@ -1140,9 +1140,10 @@ class UntisApiImpl
     required DateTime start,
     required DateTime end,
   }) async {
+    // The official app's format: local time with a literal 'Z'.
     final params = {
-      'startDateTime': formatUntisDateTime(start),
-      'endDateTime': formatUntisDateTime(end),
+      'startDateTime': formatAvailableRoomsDateTime(start),
+      'endDateTime': formatAvailableRoomsDateTime(end),
     };
     _recordRequest('getAvailableRooms2017', params);
     return parseFreeRooms(
@@ -1194,6 +1195,81 @@ class UntisApiImpl
     // `{success: bool}`; a bare true or no answer at all counts as done.
     if (result is Map) return result['success'] != false;
     return result != false;
+  }
+
+  /// URLs tried in order for a room booking without a lesson (**guessed**;
+  /// the official app has no such call): the REST calendar API the
+  /// official app edits lesson rooms with (`PATCH view/v1/calendar-entry/
+  /// {id}`), then a classic web endpoint. A 404 / 405 tries the next one.
+  static List<String> roomBookingUrls(String host) => [
+    'https://$host/WebUntis/api/rest/view/v1/calendar-entry',
+    'https://$host/WebUntis/api/bookings',
+  ];
+
+  @override
+  Future<RoomBookingResult> createRoomBooking({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required RoomBookingRequest booking,
+  }) async {
+    if (!booking.end.isAfter(booking.start)) {
+      throw const UntisException(-1, 'The end must be after the start.');
+    }
+    final urls = roomBookingUrls(host);
+    for (var i = 0; i < urls.length; i++) {
+      final url = urls[i];
+      final body = i == 0
+          ? roomBookingCalendarPayload(booking)
+          : roomBookingClassicPayload(booking);
+      final path = Uri.parse(url).path;
+      _rpc.record('REST POST $path request body', jsonEncode(body));
+      final Object? answer;
+      try {
+        answer = await _classic(
+          host,
+          school,
+          auth,
+          'POST',
+          url,
+          'REST POST $path',
+          body: body,
+        );
+      } on UntisException catch (e) {
+        final missing =
+            e.code == -1 &&
+            (e.message.contains('HTTP 404') || e.message.contains('HTTP 405'));
+        if (missing && i < urls.length - 1) continue;
+        if (missing) {
+          throw const UntisException(
+            -1,
+            "The app doesn't know yet how this school's WebUntis books rooms "
+            'without a lesson (no endpoint answered). Please book on the '
+            'WebUntis website for now, and send the Debug log so this can be '
+            'fixed.',
+          );
+        }
+        if (e.code == UntisException.noRight) {
+          throw UntisException(
+            e.code,
+            "Your school doesn't allow booking rooms for this account "
+            '(${e.message}).',
+          );
+        }
+        if (e.code == sessionRequired) {
+          throw const UntisException(
+            sessionRequired,
+            "The school's server didn't accept the app's sign-in for "
+            'booking rooms (it asked for a browser login). Please book on the '
+            'WebUntis website for now, and send the Debug log so this can be '
+            'fixed.',
+          );
+        }
+        rethrow;
+      }
+      return parseRoomBookingResult(answer);
+    }
+    return const RoomBookingResult();
   }
 
   /// Exam types per `host|school`, loaded once per session.

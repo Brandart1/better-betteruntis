@@ -53,6 +53,11 @@ const List<String> _timetableFields = [
   'examMode',
   'irregularMode',
   'cancelledMode',
+  'supervisionColor',
+  'roomBookingColor',
+  'supervisionMode',
+  'roomBookingMode',
+  'showColleagueLessons',
 ];
 
 /// Synced fields of [AccessibilitySettings.toJson] (all of them: the

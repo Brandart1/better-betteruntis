@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/accessibility.dart';
+import '../../core/colleague_lessons.dart';
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/settings.dart';
@@ -48,6 +49,13 @@ class LessonCard extends ConsumerWidget {
       accessibilityProvider.select((a) => a.highContrast),
     );
     var style = LessonStyle.of(cs, block, settings, names, highContrast);
+    // A teacher's own timetable: lessons someone else gives (a colleague's
+    // lesson of their class and subject, or one a substitute holds for
+    // them) are faded and outlined, never like their own.
+    final ownTeacher = ViewingTarget.ownTeacherOf(context);
+    final notOwn =
+        ownTeacher != null && !teachesLesson(block.first, ownTeacher);
+    if (notOwn) style = style.notOwn(cs.surface);
     if (past) style = style.dimmed(pastSurface ?? pastSurfaceOf(cs));
     final radius = BorderRadius.circular(detailed ? 10 : 6);
     final fg = style.foreground;
@@ -67,7 +75,79 @@ class LessonCard extends ConsumerWidget {
     );
     final align = centered ? TextAlign.center : TextAlign.start;
     final scaler = MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.3);
-    Widget content = Padding(
+    Widget content = LayoutBuilder(
+      builder: (context, outer) {
+        // Very short lessons (e.g. a 10-minute supervision in the week
+        // grid): the first line scaled down to fit, instead of a half line
+        // cut off.
+        final line = scaler.scale(settings.subjectFontSize) * 1.25;
+        if (outer.hasBoundedHeight &&
+            outer.maxHeight < line + padding.vertical) {
+          return Padding(
+            padding: EdgeInsets.symmetric(horizontal: padding.left),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: centered
+                  ? Alignment.center
+                  : AlignmentDirectional.centerStart,
+              child: Text.rich(
+                text,
+                style: textStyle,
+                maxLines: 1,
+                softWrap: false,
+                textScaler: scaler,
+              ),
+            ),
+          );
+        }
+        return _padded(
+          padding,
+          centered,
+          text,
+          textStyle,
+          align,
+          scaler,
+          settings,
+        );
+      },
+    );
+    if (style.cancelled) {
+      content = CustomPaint(
+        foregroundPainter: CancelledHatchPainter(fg.withValues(alpha: 0.18)),
+        child: content,
+      );
+    }
+
+    Widget card = Material(
+      color: style.background,
+      shape: RoundedRectangleBorder(
+        borderRadius: radius,
+        side: style.border == null
+            ? BorderSide.none
+            : BorderSide(color: style.border!, width: style.borderWidth),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox.expand(child: content),
+      ),
+    );
+    if (notOwn) {
+      card = Semantics(hint: 'Not your lesson', child: card);
+    }
+    return card;
+  }
+
+  Widget _padded(
+    EdgeInsets padding,
+    bool centered,
+    TextSpan text,
+    TextStyle textStyle,
+    TextAlign align,
+    TextScaler scaler,
+    TimetableSettings settings,
+  ) {
+    return Padding(
       padding: padding,
       child: Align(
         alignment: centered ? Alignment.center : AlignmentDirectional.topStart,
@@ -93,27 +173,6 @@ class LessonCard extends ConsumerWidget {
             ),
           ),
         ),
-      ),
-    );
-    if (style.cancelled) {
-      content = CustomPaint(
-        foregroundPainter: CancelledHatchPainter(fg.withValues(alpha: 0.18)),
-        child: content,
-      );
-    }
-
-    return Material(
-      color: style.background,
-      shape: RoundedRectangleBorder(
-        borderRadius: radius,
-        side: style.border == null
-            ? BorderSide.none
-            : BorderSide(color: style.border!, width: style.borderWidth),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: SizedBox.expand(child: content),
       ),
     );
   }
@@ -241,8 +300,9 @@ class LessonCard extends ConsumerWidget {
       line(elementSpans(names, teachers, long: detailed, oldStyle: oldStyle));
       if (!roomVacated(p, viewing!.id)) line(classLine);
     } else if (viewType == ElementType.teacher) {
-      // Teacher timetable: where and with whom.
-      if (changed(teachers)) {
+      // Teacher timetable: where and with whom (and who, when it's someone
+      // else's lesson).
+      if (changed(teachers) || !teachers.any((t) => t.id == viewing!.id)) {
         line(elementSpans(names, teachers, long: detailed, oldStyle: oldStyle));
       }
       line(classLine);

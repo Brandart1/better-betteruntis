@@ -191,6 +191,7 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
   List<Period> _matchingLessons() => [
     for (final p in _dayLessons ?? const <Period>[])
       if (_subjectId != null &&
+          p.canHoldExam &&
           p.ofType(ElementType.subject).any((s) => s.id == _subjectId) &&
           (_klasseIds.isEmpty ||
               p

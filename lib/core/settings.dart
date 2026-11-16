@@ -45,6 +45,11 @@ class TimetableSettings {
     this.examMode = StateColorMode.fill,
     this.irregularMode = StateColorMode.fill,
     this.cancelledMode = StateColorMode.fill,
+    this.supervisionColor,
+    this.roomBookingColor,
+    this.supervisionMode = StateColorMode.fill,
+    this.roomBookingMode = StateColorMode.fill,
+    this.showColleagueLessons = true,
   });
 
   static const minSubjectFontSize = 11.0;
@@ -73,6 +78,18 @@ class TimetableSettings {
   final StateColorMode examMode;
   final StateColorMode irregularMode;
   final StateColorMode cancelledMode;
+
+  /// Break / corridor supervisions ("Gangaufsicht").
+  final int? supervisionColor;
+
+  /// Rooms booked without a class (see [Period.isRoomBooking]).
+  final int? roomBookingColor;
+  final StateColorMode supervisionMode;
+  final StateColorMode roomBookingMode;
+
+  /// Teachers: in their own timetable, also show (faded) the lessons that
+  /// colleagues give in the classes and subjects the teacher is assigned to.
+  final bool showColleagueLessons;
 
   /// Normalized key for [subjectColors]: trimmed, upper case.
   static String subjectKey(String shortName) => shortName.trim().toUpperCase();
@@ -113,6 +130,11 @@ class TimetableSettings {
     StateColorMode? examMode,
     StateColorMode? irregularMode,
     StateColorMode? cancelledMode,
+    Object? supervisionColor = _keep,
+    Object? roomBookingColor = _keep,
+    StateColorMode? supervisionMode,
+    StateColorMode? roomBookingMode,
+    bool? showColleagueLessons,
   }) {
     int? pick(Object? v, int? old) => identical(v, _keep) ? old : v as int?;
     return TimetableSettings(
@@ -132,6 +154,11 @@ class TimetableSettings {
       examMode: examMode ?? this.examMode,
       irregularMode: irregularMode ?? this.irregularMode,
       cancelledMode: cancelledMode ?? this.cancelledMode,
+      supervisionColor: pick(supervisionColor, this.supervisionColor),
+      roomBookingColor: pick(roomBookingColor, this.roomBookingColor),
+      supervisionMode: supervisionMode ?? this.supervisionMode,
+      roomBookingMode: roomBookingMode ?? this.roomBookingMode,
+      showColleagueLessons: showColleagueLessons ?? this.showColleagueLessons,
     );
   }
 
@@ -150,6 +177,11 @@ class TimetableSettings {
     'examMode': examMode.name,
     'irregularMode': irregularMode.name,
     'cancelledMode': cancelledMode.name,
+    'supervisionColor': supervisionColor,
+    'roomBookingColor': roomBookingColor,
+    'supervisionMode': supervisionMode.name,
+    'roomBookingMode': roomBookingMode.name,
+    'showColleagueLessons': showColleagueLessons,
   };
 
   /// Tolerant parse: missing or wrongly typed fields fall back to defaults,
@@ -228,6 +260,17 @@ class TimetableSettings {
         json['cancelledMode'],
         d.cancelledMode,
       ),
+      supervisionColor: color('supervisionColor'),
+      roomBookingColor: color('roomBookingColor'),
+      supervisionMode: StateColorMode.parse(
+        json['supervisionMode'],
+        d.supervisionMode,
+      ),
+      roomBookingMode: StateColorMode.parse(
+        json['roomBookingMode'],
+        d.roomBookingMode,
+      ),
+      showColleagueLessons: b('showColleagueLessons', d.showColleagueLessons),
     );
   }
 
@@ -247,7 +290,12 @@ class TimetableSettings {
       _mapEquals(other.subjectColors, subjectColors) &&
       other.examMode == examMode &&
       other.irregularMode == irregularMode &&
-      other.cancelledMode == cancelledMode;
+      other.cancelledMode == cancelledMode &&
+      other.supervisionColor == supervisionColor &&
+      other.roomBookingColor == roomBookingColor &&
+      other.supervisionMode == supervisionMode &&
+      other.roomBookingMode == roomBookingMode &&
+      other.showColleagueLessons == showColleagueLessons;
 
   static bool _mapEquals(Map<String, int> a, Map<String, int> b) {
     if (identical(a, b)) return true;
@@ -276,6 +324,13 @@ class TimetableSettings {
     examMode,
     irregularMode,
     cancelledMode,
+    Object.hash(
+      supervisionColor,
+      roomBookingColor,
+      supervisionMode,
+      roomBookingMode,
+      showColleagueLessons,
+    ),
   );
 }
 

@@ -1,8 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/colleague_lessons.dart';
 import '../../core/lesson_notes.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
+import '../../core/settings.dart';
 
 /// Key of one week of one timetable. Equality uses the account id (not the
 /// Account instance) so re-emitted accounts don't resubscribe the stream.
@@ -43,4 +45,53 @@ final weekPeriodsProvider = Provider.autoDispose
       return ref
           .watch(rawWeekPeriodsProvider(req))
           .whenData((p) => applyLessonNotes(p, req.account.id, notes));
+    });
+
+/// Whether [target] is [account]'s own timetable as a teacher (the only
+/// timetable that gets colleagues' lessons, see [colleagueLessonsProvider]).
+bool isOwnTeacherTimetable(Account account, TimetableTarget target) =>
+    !account.anonymous &&
+    account.elementType == ElementType.teacher &&
+    account.elementId > 0 &&
+    target == TimetableTarget(ElementType.teacher, account.elementId);
+
+/// Teachers' own timetable: the lessons that colleagues give in the classes
+/// and subjects the teacher is assigned to (see lib/core/colleague_lessons.dart),
+/// to be shown faded next to the own ones. Empty for everyone else and when
+/// [TimetableSettings.showColleagueLessons] is off.
+///
+/// Starts only once the own week is there, then loads (cache-first, like any
+/// timetable) the week of each assigned class through
+/// [rawWeekPeriodsProvider]. A class week that is still loading or fails is
+/// simply left out: this never errors and never holds up the own timetable.
+final colleagueLessonsProvider = Provider.autoDispose
+    .family<List<Period>, WeekRequest>((ref, req) {
+      if (!isOwnTeacherTimetable(req.account, req.target)) return const [];
+      final enabled = ref.watch(
+        timetableSettingsProvider.select((s) => s.showColleagueLessons),
+      );
+      if (!enabled) return const [];
+      final own = ref.watch(rawWeekPeriodsProvider(req)).value;
+      if (own == null) return const [];
+      final me = req.account.elementId;
+      final assignments = teachingAssignments(own, me);
+      if (assignments.isEmpty) return const [];
+      final classIds = {for (final a in assignments) a.$1}.toList()..sort();
+      final seen = {for (final p in own) p.id};
+      final out = <Period>[];
+      for (final c in classIds) {
+        final week = ref.watch(
+          rawWeekPeriodsProvider(
+            WeekRequest(
+              req.account,
+              TimetableTarget(ElementType.klasse, c),
+              req.weekStart,
+            ),
+          ),
+        );
+        final periods = week.hasValue ? week.value : null;
+        if (periods == null) continue;
+        out.addAll(colleagueLessons(periods, assignments, me, seen));
+      }
+      return out;
     });

@@ -420,6 +420,16 @@ class RoutingUntisApi
   }) => _tools(host).examTypes(host: host, school: school, auth: auth);
 
   @override
+  Future<RoomBookingResult> createRoomBooking({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required RoomBookingRequest booking,
+  }) => _tools(
+    host,
+  ).createRoomBooking(host: host, school: school, auth: auth, booking: booking);
+
+  @override
   Future<int?> createExam({
     required String host,
     required String school,

@@ -10,6 +10,7 @@ import '../accounts/manage_accounts_screen.dart';
 import '../calendar/calendar_sync_screen.dart';
 import '../calendar/calendar_syncs_screen.dart';
 import '../classreg/class_register_overview_screen.dart';
+import '../classreg/free_room_booking_screen.dart';
 import '../classreg/teacher_exams_screen.dart';
 import '../infocenter/info_center_screen.dart';
 import '../infocenter/messages_tab.dart';
@@ -30,6 +31,7 @@ import 'whats_new.dart';
 ///   /timetable/:type/:id   any element's timetable
 ///   /browse                pick a class / teacher / room / subject
 ///   /info                  info center (messages, homework, exams, …)
+///   /rooms/book            teachers: book a room without a lesson
 ///   /info/message/:id      one inbox message
 ///   /login, /login/add, /login/form (extra: School?), /login/qr,
 ///   /login/idaustria       how to log in when the school uses ID Austria
@@ -90,6 +92,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Old name of the class register overview ("Open lessons").
       GoRoute(path: '/classreg/open', redirect: (_, _) => '/classreg'),
       GoRoute(path: '/exams', builder: (_, _) => const TeacherExamsScreen()),
+      GoRoute(
+        path: '/rooms/book',
+        builder: (_, _) => const FreeRoomBookingScreen(),
+      ),
       GoRoute(
         path: '/info',
         builder: (_, _) => const InfoCenterScreen(),

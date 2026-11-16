@@ -350,6 +350,13 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
       blocks: blocks,
       index: index,
       names: names,
+      // Own timetable: colleagues' lessons (faded) open read-only.
+      ownTeacherId:
+          account != null &&
+              target != null &&
+              isOwnTeacherTimetable(account, target)
+          ? account.elementId
+          : null,
       onOpenElement: _openElement,
       onOpenClassRegister: !ownTeacherTimetable
           ? null
@@ -373,19 +380,21 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                 ),
               );
             },
-      onBookRoom: !ownTeacherTimetable
+      // Rooms of own lessons: replace / remove / add (before they start).
+      onRoomAction: !ownTeacherTimetable
           ? null
-          : (block) async {
+          : (block, action) {
               final periods = block.periods
                   .where((p) => !p.isCancelled)
                   .toList();
               if (periods.isEmpty) return;
               final p = periods.first;
-              final messenger = ScaffoldMessenger.of(context);
-              final done = await openRoomBooking(
+              runRoomAction(
                 context,
+                ref,
                 account: account,
                 periods: periods,
+                action: action,
                 title: classRegLessonTitle(p, names),
                 subtitle: classRegLessonSubtitle(
                   context,
@@ -395,17 +404,15 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                   names,
                 ),
               );
-              if (done != null) {
-                messenger.showSnackBar(SnackBar(content: Text(done)));
-              }
             },
       // Teachers with the class register create exams on the server
       // instead of marking them on the device.
       onCreateExam: account == null || !hasClassRegister(account)
           ? null
           : (block) async {
+              // No exams in supervisions or lessons without a class.
               final periods = block.periods
-                  .where((p) => !p.isCancelled)
+                  .where((p) => !p.isCancelled && p.canHoldExam)
                   .toList();
               if (periods.isEmpty) return;
               final messenger = ScaffoldMessenger.of(context);
@@ -682,6 +689,9 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
 
     return ViewingTarget(
       target: widget.target,
+      ownTeacherId: isOwnTeacherTimetable(account, target)
+          ? account.elementId
+          : null,
       child: PopScope(
         canPop: day == null || _drawerOpen,
         onPopInvokedWithResult: (didPop, _) {

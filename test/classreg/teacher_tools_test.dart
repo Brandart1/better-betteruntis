@@ -356,8 +356,9 @@ void main() {
         end: DateTime(2026, 11, 10, 9, 35),
       );
       expect(method(), 'getAvailableRooms2017');
-      expect(params()['startDateTime'], '2026-11-10T08:00');
-      expect(params()['endDateTime'], '2026-11-10T09:35');
+      // The official app's format: local time with a literal 'Z'.
+      expect(params()['startDateTime'], '2026-11-10T08:00Z');
+      expect(params()['endDateTime'], '2026-11-10T09:35Z');
     });
 
     test('submitRoomChange2017: params, logged body without auth', () async {
@@ -560,9 +561,29 @@ void main() {
         (await repo.freeRoomsBetween(a, p.start, p.end)).roomIds,
         isNot(contains(34)),
       );
-      await repo.changeRoom(a, [moved], orgRoomId: 31, roomId: 31);
+      // Back: orgRoomId is the room the lesson has now (34), not the
+      // planned one — the server refused the planned one (teacher test).
+      final back = RoomEdit.replace(room.id, 31);
+      final r2 = await repo.changeRoom(
+        a,
+        [moved],
+        orgRoomId: back.orgRoomId,
+        roomId: back.roomId,
+      );
+      expect(r2.ok, isTrue);
+      expect(api.roomChangeCalls.last.orgRoomId, 34);
       expect(bookableRoomOf(await maths(api))!.id, 31);
       expect(api.roomChanges, isEmpty);
+      // The planned room as orgRoomId is refused like by the real server.
+      await repo.changeRoom(a, [moved], orgRoomId: 31, roomId: 34);
+      final wrong = await repo.changeRoom(
+        a,
+        [moved],
+        orgRoomId: 31,
+        roomId: 35,
+      );
+      expect(wrong.ok, isFalse);
+      expect(wrong.errors.single.code, 'ROOM_NOT_IN_PERIOD');
     });
 
     test('lesson info goes to the server and shows in the timetable', () async {
@@ -725,22 +746,28 @@ void main() {
       accounts.secrets['teacher'] = 'S';
     });
 
-    testWidgets('lesson sheet: book a room, create exam replaces mark', (
+    testWidgets('lesson sheet: room actions, create exam replaces mark', (
       t,
     ) async {
+      tall(t);
       final p = await t.runAsync(() => maths(api));
       // With a note key, like after the lesson notes were applied.
       final block = LessonBlock([p!.withUserNote(noteKey: 'k')]);
-      LessonBlock? booked;
+      final actions = <(LessonBlock, RoomAction)>[];
       LessonBlock? exam;
-      Future<void> pump({bool teacher = true}) => t.pumpWidget(
+      Future<void> pump({bool teacher = true, DateTime? now}) => t.pumpWidget(
         ProviderScope(
+          overrides: [
+            teacherToolsClockProvider.overrideWithValue(
+              () => now ?? DateTime(2026, 11, 10, 7),
+            ),
+          ],
           child: MaterialApp(
             home: Scaffold(
               body: LessonDetailsSheet(
                 blocks: [block],
                 names: demoSchoolNames(),
-                onBookRoom: teacher ? (b) => booked = b : null,
+                onRoomAction: teacher ? (b, a) => actions.add((b, a)) : null,
                 onCreateExam: teacher ? (b) => exam = b : null,
               ),
             ),
@@ -749,15 +776,38 @@ void main() {
       );
       await pump(teacher: false);
       expect(find.byKey(const ValueKey('details-book-room')), findsNothing);
+      expect(find.byKey(const ValueKey('room-add')), findsNothing);
       expect(find.byKey(const ValueKey('lesson-exam-create')), findsNothing);
       expect(find.byKey(const ValueKey('lesson-exam-add')), findsOneWidget);
 
       await pump();
+      // The old separate button is gone: the room row has the actions.
+      expect(find.byKey(const ValueKey('details-book-room')), findsNothing);
       expect(find.byKey(const ValueKey('lesson-exam-add')), findsNothing);
-      await t.tap(find.byKey(const ValueKey('details-book-room')));
-      expect(booked, same(block));
+      await t.tap(find.byKey(const ValueKey('room-replace-31')));
+      await t.tap(find.byKey(const ValueKey('room-remove-31')));
+      await t.tap(find.byKey(const ValueKey('room-add')));
+      expect(
+        [for (final a in actions) (a.$2.kind, a.$2.room?.id)],
+        [
+          (RoomEditKind.replace, 31),
+          (RoomEditKind.remove, 31),
+          (RoomEditKind.add, null),
+        ],
+      );
+      expect(actions.first.$1, same(block));
       await t.tap(find.byKey(const ValueKey('lesson-exam-create')));
       expect(exam, same(block));
+
+      // Once the lesson has started, rooms can't change.
+      await t.pumpWidget(const SizedBox());
+      await pump(now: DateTime(2026, 11, 10, 9, 45));
+      expect(find.byKey(const ValueKey('room-add')), findsNothing);
+      expect(find.byKey(const ValueKey('room-replace-31')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('details-rooms-locked')),
+        findsOneWidget,
+      );
     });
 
     testWidgets('lesson sheet: teachers add details on the server', (t) async {
@@ -786,7 +836,11 @@ void main() {
       expect(edited, same(block));
     });
 
-    Future<String?> openBooking(WidgetTester t, Period p) async {
+    Future<String?> openBooking(
+      WidgetTester t,
+      Period p, {
+      bool add = false,
+    }) async {
       String? result;
       await t.pumpWidget(
         app(
@@ -799,6 +853,7 @@ void main() {
                   periods: [p],
                   title: 'Mathematik',
                   subtitle: 'Tue 10 Nov',
+                  replacing: add ? null : bookableRoomOf(p),
                 ),
                 child: const Text('open'),
               ),
@@ -825,6 +880,7 @@ void main() {
                   periods: [p],
                   title: 'Mathematik',
                   subtitle: 'Tue 10 Nov',
+                  replacing: bookableRoomOf(p),
                 ),
                 child: const Text('open'),
               ),
@@ -852,7 +908,7 @@ void main() {
       expect(api.roomChangeCalls.single.orgRoomId, 31);
     });
 
-    testWidgets('room booking: changed room can go back; errors stay', (
+    testWidgets('room booking: a changed room goes back via replace', (
       t,
     ) async {
       api.roomChanges[202611102] = 34;
@@ -862,15 +918,39 @@ void main() {
         find.text('Room: Informatikraum (planned: Raum 101)'),
         findsOneWidget,
       );
-      await t.tap(find.byKey(const ValueKey('roombook-back')));
+      expect(find.byKey(const ValueKey('roombook-back')), findsNothing);
+      // The planned room is free again and listed first.
+      expect(find.textContaining('Planned room'), findsOneWidget);
+      await t.tap(find.byKey(const ValueKey('freeroom-31')));
       await t.pumpAndSettle();
+      expect(
+        find.text('Replace Informatikraum with Raum 101?'),
+        findsOneWidget,
+      );
       await t.tap(find.byKey(const ValueKey('roombook-confirm')));
       await t.pumpAndSettle();
       expect(api.roomChanges, isEmpty);
+      // The fix: orgRoomId is the current room, not the planned one.
+      expect(api.roomChangeCalls.single.orgRoomId, 34);
       expect(api.roomChangeCalls.single.roomId, 31);
     });
 
+    testWidgets('room booking: add a room (orgRoomId 0)', (t) async {
+      final p = (await t.runAsync(() => maths(api)))!;
+      await openBooking(t, p, add: true);
+      expect(find.byKey(const ValueKey('roombook-adding')), findsOneWidget);
+      await t.tap(find.byKey(const ValueKey('freeroom-35')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const ValueKey('roombook-confirm')));
+      await t.pumpAndSettle();
+      final c = api.roomChangeCalls.single;
+      expect((c.orgRoomId, c.roomId), (0, 35));
+      final now = (await t.runAsync(() => maths(api)))!;
+      expect([for (final r in currentRoomsOf(now)) r.id], [31, 35]);
+    });
+
     testWidgets('room booking: server errors are shown', (t) async {
+      tall(t);
       api = RejectingRoomApi();
       final p = (await t.runAsync(() => maths(api)))!;
       final result = await openBooking(t, p);

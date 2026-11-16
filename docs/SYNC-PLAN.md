@@ -281,10 +281,10 @@ DECISIONS-PENDING R9.
 
 | Setting (store key) | Record names |
 |---|---|
-| Lesson colours: regular / substitution / cancelled / exam colour, school colours on/off, fill vs. border per state (`timetable`) | `timetable.regularColor`, `.irregularColor`, `.cancelledColor`, `.examColor`, `.useSchoolColors`, `.examMode`, `.irregularMode`, `.cancelledMode` |
+| Lesson colours: regular / substitution / cancelled / exam colour, school colours on/off, fill vs. border per state (`timetable`) | `timetable.regularColor`, `.irregularColor`, `.cancelledColor`, `.examColor`, `.useSchoolColors`, `.examMode`, `.irregularMode`, `.cancelledMode`; supervision and room-booking colour (teacher branch): `.supervisionColor`, `.roomBookingColor`, `.supervisionMode`, `.roomBookingMode` |
 | Subject colours (`timetable.subjectColors`) | `timetable.subjectColor.<SUBJECT>` (one record per subject, short name trimmed + upper case) |
 | Text: subject / detail font size, bold subject, centre text (`timetable`) | `timetable.subjectFontSize`, `.detailFontSize`, `.boldSubject`, `.centerText` |
-| Lessons: show cancelled lessons (`timetable`) | `timetable.showCancelled` |
+| Lessons: show cancelled lessons, colleagues' lessons of my classes (teachers) (`timetable`) | `timetable.showCancelled`, `timetable.showColleagueLessons` |
 | Accessibility, everything on the screen (`accessibility`): contrast, day view by default, large day headers, read-aloud button, read-aloud language, text size, voice speed | `accessibility.contrast`, `.dayViewByDefault`, `.largeDayHeaders`, `.speakButton`, `.speechLanguage`, `.textScale`, `.speechRate` |
 
 Custom exams and lesson details ("own lesson titles/texts") were already

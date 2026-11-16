@@ -264,6 +264,30 @@ class Period {
   bool get isIrregular =>
       flags.contains(PeriodFlag.irregular) ||
       elements.any((e) => e.change != ElementChange.regular);
+
+  /// A break / corridor supervision ("Gangaufsicht", "Pausenaufsicht").
+  bool get isBreakSupervision => flags.contains(PeriodFlag.breakSupervision);
+
+  bool get isOfficeHour => flags.contains(PeriodFlag.officeHour);
+
+  /// Has at least one (not removed) class.
+  bool get hasClass =>
+      elements.any((e) => e.type == ElementType.klasse && e.id != 0);
+
+  /// A room booked without a class (a room reservation): a room, but no
+  /// class and no subject (a lesson whose class is just missing from the
+  /// data keeps its subject), and not a supervision or office hour.
+  bool get isRoomBooking =>
+      !hasClass &&
+      !elements.any((e) => e.type == ElementType.subject && e.id != 0) &&
+      !isBreakSupervision &&
+      !isOfficeHour &&
+      elements.any((e) => e.type == ElementType.room && e.id != 0);
+
+  /// Whether an exam can be held in this lesson: it needs a class, and
+  /// supervisions ("Gangaufsicht", an on-call "Aufsichtsstunde" without
+  /// class) and office hours never are exams.
+  bool get canHoldExam => hasClass && !isBreakSupervision && !isOfficeHour;
 }
 
 class TimeUnit {

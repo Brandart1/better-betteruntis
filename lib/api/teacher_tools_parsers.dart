@@ -122,6 +122,60 @@ String formatUntisDateTime(DateTime d) =>
     '${formatDate(d)}T${d.hour.toString().padLeft(2, '0')}:'
     '${d.minute.toString().padLeft(2, '0')}';
 
+/// getAvailableRooms2017's date-time, as the official app formats it
+/// (`yyyy-MM-dd'T'HH:mm'Z'`: local time with a literal `Z`):
+/// `2026-11-16T08:00Z`.
+String formatAvailableRoomsDateTime(DateTime d) => '${formatUntisDateTime(d)}Z';
+
+/// Local date-time with seconds, as the REST calendar API takes it:
+/// `2026-11-16T08:00:00`.
+String formatRestDateTime(DateTime d) => '${formatUntisDateTime(d)}:00';
+
+/// Bodies of the room booking without a lesson (**guessed**), per URL of
+/// `UntisApiImpl.roomBookingUrls`: first the REST calendar API's entry
+/// shape (the official app's calendar-entry updates send
+/// `{rooms:{value:[ids]}, teachers:[{value:id}], notesAll:{value:text}}`,
+/// its room form takes `startDateTime` / `endDateTime`), then a classic-web
+/// shape.
+Map<String, Object?> roomBookingCalendarPayload(RoomBookingRequest b) => {
+  'startDateTime': formatRestDateTime(b.start),
+  'endDateTime': formatRestDateTime(b.end),
+  'rooms': {
+    'value': [b.roomId],
+  },
+  if (b.teacherId != null)
+    'teachers': [
+      {'value': b.teacherId},
+    ],
+  if (b.text.trim().isNotEmpty) 'notesAll': {'value': b.text.trim()},
+};
+
+Map<String, Object?> roomBookingClassicPayload(RoomBookingRequest b) => {
+  'roomId': b.roomId,
+  'roomIds': [b.roomId],
+  'date': _yyyymmdd(b.start),
+  'startTime': _hhmm(b.start),
+  'endTime': _hhmm(b.end),
+  'startDateTime': formatUntisDateTime(b.start),
+  'endDateTime': formatUntisDateTime(b.end),
+  'teacherId': ?b.teacherId,
+  if (b.text.trim().isNotEmpty) 'text': b.text.trim(),
+};
+
+/// Answer of a room booking: the id (`{id}`, `{data:{id}}`, `{booking:{id}}`)
+/// and error lists / `success:false` like the exam answer.
+RoomBookingResult parseRoomBookingResult(Object? raw) {
+  final j = _map(raw);
+  final id = parseCreatedExamId(raw) ?? _int(_map(j['booking'])['id']);
+  return RoomBookingResult(
+    errors: [
+      ...parseExamErrors(raw),
+      ...parseTeacherToolErrors(j['validationErrors']),
+    ],
+    id: id != null && id > 0 ? id : null,
+  );
+}
+
 int _yyyymmdd(DateTime d) => d.year * 10000 + d.month * 100 + d.day;
 int _hhmm(DateTime d) => d.hour * 100 + d.minute;
 

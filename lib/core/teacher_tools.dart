@@ -36,13 +36,25 @@ class TeacherToolError {
 
 /// Rooms the server offers for a lesson or a time range.
 class FreeRooms {
-  const FreeRooms({this.roomIds = const [], this.errors = const []});
+  const FreeRooms({
+    this.roomIds = const [],
+    this.errors = const [],
+    this.partlyFree = const {},
+    this.slotCount = 1,
+  });
 
   /// Free room ids (names come from the master data).
   final List<int> roomIds;
 
   /// Why the room can't be changed (e.g. no right), from the server.
   final List<TeacherToolError> errors;
+
+  /// Repeated bookings: rooms free on some of the [slotCount] dates only,
+  /// with on how many ([roomIds] are free on all of them).
+  final Map<int, int> partlyFree;
+
+  /// How many dates (time slots) were asked.
+  final int slotCount;
 }
 
 /// The server's answer to a room change.
@@ -131,7 +143,10 @@ abstract interface class TeacherToolsApi {
   });
 
   /// submitRoomChange2017 `{periodIds, orgRoomId, roomId}`: replaces room
-  /// [orgRoomId] (0: the lesson has no room) by [roomId] in [periodIds].
+  /// [orgRoomId] — the room the lesson has **now** — by [roomId] in
+  /// [periodIds]. [orgRoomId] 0 adds [roomId], [roomId] 0 removes
+  /// [orgRoomId] (as the official app's room service sends a missing room).
+  /// See [RoomEdit].
   Future<RoomChangeResult> submitRoomChange({
     required String host,
     required String school,
@@ -150,6 +165,17 @@ abstract interface class TeacherToolsApi {
     required UntisCredentials auth,
     required int periodId,
     required String text,
+  });
+
+  /// Books room [RoomBookingRequest.roomId] from start to end without a
+  /// lesson (**guessed** endpoint, docs/API.md "Room bookings without a
+  /// lesson (assumed)"). Errors in a 2xx answer come back in the result;
+  /// a failed call throws [UntisException].
+  Future<RoomBookingResult> createRoomBooking({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required RoomBookingRequest booking,
   });
 
   /// Master data `examTypes` (empty when the server has none).
@@ -181,8 +207,32 @@ abstract interface class TeacherToolsRepository {
     DateTime end,
   );
 
-  /// Puts room [roomId] in place of [orgRoomId] for every period of the
-  /// block. On success the teacher's own timetable weeks of the block are
+  /// Like [freeRoomsBetween], for any account (the free-room filter in
+  /// Browse → Rooms). Throws [UntisException] when the server refuses.
+  Future<FreeRooms> freeRoomsAt(Account account, DateTime start, DateTime end);
+
+  /// Rooms free during every slot (getAvailableRooms2017 per slot); rooms
+  /// free on some slots only are in [FreeRooms.partlyFree].
+  Future<FreeRooms> freeRoomsForSlots(Account account, List<TimeSlot> slots);
+
+  /// The teacher's own lessons (not cancelled, no supervisions, office
+  /// hours or room bookings) overlapping any of [slots].
+  Future<List<Period>> lessonsDuring(Account account, List<TimeSlot> slots);
+
+  /// Books [roomId] for every slot, without a lesson. Refused (throws
+  /// [UntisException]) when the teacher has a lesson during one of them.
+  /// Stops at the first slot the server refuses; returns what happened per
+  /// slot sent. Refreshes the own timetable weeks afterwards.
+  Future<List<RoomBookingOutcome>> bookRoom(
+    Account account, {
+    required int roomId,
+    required List<TimeSlot> slots,
+    String text = '',
+  });
+
+  /// Puts room [roomId] in place of [orgRoomId] (the room the lesson has
+  /// now; 0 adds [roomId], [roomId] 0 removes [orgRoomId] — see [RoomEdit])
+  /// for every period of the block. On success the teacher's own timetable weeks of the block are
   /// refreshed. Errors the server lists come back in the result; a failed
   /// call throws [UntisException].
   Future<RoomChangeResult> changeRoom(
@@ -213,7 +263,8 @@ abstract interface class TeacherToolsRepository {
   Future<TeacherCourses> courses(Account account);
 
   /// The teacher's own lessons (not cancelled, no break supervisions /
-  /// office hours) on [day], in time order.
+  /// office hours, at least one class: see [Period.canHoldExam]) on [day],
+  /// in time order.
   Future<List<Period>> lessonsOn(Account account, DateTime day);
 }
 
@@ -259,4 +310,172 @@ ElementRef? bookableRoomOf(Period p) {
     if (e.type == ElementType.room && (e.id != 0 || e.orgId != 0)) return e;
   }
   return null;
+}
+
+/// The rooms [p] has now (not removed ones), in order.
+List<ElementRef> currentRoomsOf(Period p) => [
+  for (final e in p.elements)
+    if (e.type == ElementType.room && e.id != 0) e,
+];
+
+/// The clock the teacher tools compare lesson times with (overridden in
+/// tests).
+final teacherToolsClockProvider = Provider<DateTime Function()>(
+  (ref) => DateTime.now,
+);
+
+enum RoomEditKind { replace, add, remove }
+
+/// What the room row of the lesson sheet asks for: replace or remove
+/// [room] (a room the lesson has now), or add one ([room] null).
+class RoomAction {
+  const RoomAction.replace(ElementRef this.room) : kind = RoomEditKind.replace;
+  const RoomAction.remove(ElementRef this.room) : kind = RoomEditKind.remove;
+  const RoomAction.add() : kind = RoomEditKind.add, room = null;
+
+  final RoomEditKind kind;
+  final ElementRef? room;
+}
+
+/// One room edit of a lesson, as submitRoomChange2017 params. From the
+/// official app: its room service sends `orgRoomId` = the room replaced and
+/// `roomId` = the new one, 0 for a missing one; its calendar API replaces
+/// the id of a room the lesson has now. So [orgRoomId] is always a
+/// **current** room (`ElementRef.id`), never the planned one.
+class RoomEdit {
+  const RoomEdit._(this.kind, this.orgRoomId, this.roomId);
+
+  /// [current] (a room the lesson has now) becomes [room].
+  const RoomEdit.replace(int current, int room)
+    : this._(RoomEditKind.replace, current, room);
+
+  /// [room] in addition to the lesson's rooms (`orgRoomId` 0, assumed).
+  const RoomEdit.add(int room) : this._(RoomEditKind.add, 0, room);
+
+  /// [current] is dropped (`roomId` 0, assumed).
+  const RoomEdit.remove(int current) : this._(RoomEditKind.remove, current, 0);
+
+  final RoomEditKind kind;
+  final int orgRoomId;
+  final int roomId;
+
+  @override
+  bool operator ==(Object other) =>
+      other is RoomEdit &&
+      other.kind == kind &&
+      other.orgRoomId == orgRoomId &&
+      other.roomId == roomId;
+
+  @override
+  int get hashCode => Object.hash(kind, orgRoomId, roomId);
+
+  @override
+  String toString() => 'RoomEdit.${kind.name}($orgRoomId → $roomId)';
+}
+
+/// A time span of a booking or a free-room search.
+class TimeSlot {
+  const TimeSlot(this.start, this.end);
+  final DateTime start;
+  final DateTime end;
+
+  bool overlaps(DateTime s, DateTime e) => start.isBefore(e) && end.isAfter(s);
+
+  @override
+  bool operator ==(Object other) =>
+      other is TimeSlot && other.start == start && other.end == end;
+
+  @override
+  int get hashCode => Object.hash(start, end);
+
+  @override
+  String toString() => 'TimeSlot($start – $end)';
+}
+
+/// How often a room booking repeats.
+enum BookingRepeat { once, daily, weekly, biweekly, everyNDays }
+
+/// At most this many dates per booking.
+const maxBookingSlots = 60;
+
+/// The dates of a booking from [start] to [end] (same day), repeated
+/// [repeat] until [until] (inclusive; ignored for [BookingRepeat.once]).
+/// [BookingRepeat.daily] and [BookingRepeat.everyNDays] skip Saturdays and
+/// Sundays. At most [maxBookingSlots] dates.
+List<TimeSlot> bookingSlots({
+  required DateTime start,
+  required DateTime end,
+  BookingRepeat repeat = BookingRepeat.once,
+  int everyDays = 2,
+  DateTime? until,
+}) {
+  final first = TimeSlot(start, end);
+  if (repeat == BookingRepeat.once || until == null) return [first];
+  final step = switch (repeat) {
+    BookingRepeat.once || BookingRepeat.daily => 1,
+    BookingRepeat.weekly => 7,
+    BookingRepeat.biweekly => 14,
+    BookingRepeat.everyNDays => everyDays < 1 ? 1 : everyDays,
+  };
+  final skipWeekend =
+      repeat == BookingRepeat.daily || repeat == BookingRepeat.everyNDays;
+  final last = DateTime(until.year, until.month, until.day);
+  final out = <TimeSlot>[];
+  for (var i = 0; out.length < maxBookingSlots; i += step) {
+    final day = DateTime(start.year, start.month, start.day + i);
+    if (day.isAfter(last)) break;
+    if (skipWeekend && day.weekday > 5) continue;
+    out.add(
+      TimeSlot(
+        DateTime(day.year, day.month, day.day, start.hour, start.minute),
+        DateTime(day.year, day.month, day.day, end.hour, end.minute),
+      ),
+    );
+  }
+  return out.isEmpty ? [first] : out;
+}
+
+/// A room booking without a lesson, as sent to the server.
+class RoomBookingRequest {
+  const RoomBookingRequest({
+    required this.roomId,
+    required this.start,
+    required this.end,
+    this.text = '',
+    this.teacherId,
+  });
+
+  final int roomId;
+  final DateTime start;
+  final DateTime end;
+
+  /// What the room is booked for (optional).
+  final String text;
+
+  /// The booking teacher (their own element id).
+  final int? teacherId;
+}
+
+/// The server's answer to a room booking.
+class RoomBookingResult {
+  const RoomBookingResult({this.errors = const [], this.id});
+
+  final List<TeacherToolError> errors;
+
+  /// The booking's id, when the server sends one.
+  final int? id;
+
+  bool get ok => errors.isEmpty;
+}
+
+/// What happened to one slot of [TeacherToolsRepository.bookRoom].
+class RoomBookingOutcome {
+  const RoomBookingOutcome(this.slot, {this.error});
+
+  final TimeSlot slot;
+
+  /// Null: booked.
+  final String? error;
+
+  bool get ok => error == null;
 }

@@ -7,13 +7,21 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../calendar/calendar_sync_service.dart';
 import '../../core/accessibility.dart';
+import '../../core/colleague_lessons.dart';
 import '../../core/interfaces.dart';
 import '../../core/lesson_notes.dart';
 import '../../core/models.dart';
 import '../../core/settings.dart';
+import '../../core/teacher_tools.dart';
 import 'lesson_layout.dart';
 import 'lesson_style.dart';
 import 'timetable_utils.dart';
+
+/// The lesson sheet's room row: [action] on [block].
+typedef RoomActionCallback = void Function(
+  LessonBlock block,
+  RoomAction action,
+);
 
 /// Opens the lesson details for [blocks] (several = overlapping lessons, shown
 /// in a pager) starting at [index].
@@ -24,9 +32,10 @@ Future<void> showLessonDetails(
   required NameResolver names,
   ValueChanged<TimetableTarget>? onOpenElement,
   ValueChanged<LessonBlock>? onOpenClassRegister,
-  ValueChanged<LessonBlock>? onBookRoom,
+  RoomActionCallback? onRoomAction,
   ValueChanged<LessonBlock>? onCreateExam,
   ValueChanged<LessonBlock>? onEditLessonInfo,
+  int? ownTeacherId,
 }) {
   ValueChanged<LessonBlock>? closing(
     BuildContext sheetContext,
@@ -59,9 +68,15 @@ Future<void> showLessonDetails(
               Navigator.of(sheetContext).pop();
               onOpenClassRegister(b);
             },
-      onBookRoom: closing(sheetContext, onBookRoom),
+      onRoomAction: onRoomAction == null
+          ? null
+          : (b, a) {
+              Navigator.of(sheetContext).pop();
+              onRoomAction(b, a);
+            },
       onCreateExam: closing(sheetContext, onCreateExam),
       onEditLessonInfo: closing(sheetContext, onEditLessonInfo),
+      ownTeacherId: ownTeacherId,
     ),
   );
 }
@@ -75,9 +90,10 @@ class LessonDetailsSheet extends StatefulWidget {
     this.initialIndex = 0,
     this.onOpenElement,
     this.onOpenClassRegister,
-    this.onBookRoom,
+    this.onRoomAction,
     this.onCreateExam,
     this.onEditLessonInfo,
+    this.ownTeacherId,
   });
 
   final List<LessonBlock> blocks;
@@ -88,8 +104,9 @@ class LessonDetailsSheet extends StatefulWidget {
   /// Teachers' own timetable: opens the class register of a block.
   final ValueChanged<LessonBlock>? onOpenClassRegister;
 
-  /// Teachers' own timetable: books another room for a block.
-  final ValueChanged<LessonBlock>? onBookRoom;
+  /// Teachers' own timetable: replace / remove / add a room of a block
+  /// (offered until the lesson starts).
+  final RoomActionCallback? onRoomAction;
 
   /// Teachers with the class register: creates an exam on the server
   /// (replaces the device-only "Mark as exam").
@@ -98,6 +115,10 @@ class LessonDetailsSheet extends StatefulWidget {
   /// Teachers with the class register: edits the lesson info everyone sees
   /// on the server (replaces the device-only "Add details").
   final ValueChanged<LessonBlock>? onEditLessonInfo;
+
+  /// Set in a teacher's own timetable: lessons someone else gives say so,
+  /// and colleagues' lessons get none of the own-lesson actions.
+  final int? ownTeacherId;
 
   @override
   State<LessonDetailsSheet> createState() => _LessonDetailsSheetState();
@@ -123,9 +144,10 @@ class _LessonDetailsSheetState extends State<LessonDetailsSheet> {
           names: widget.names,
           onOpenElement: widget.onOpenElement,
           onOpenClassRegister: widget.onOpenClassRegister,
-          onBookRoom: widget.onBookRoom,
+          onRoomAction: widget.onRoomAction,
           onCreateExam: widget.onCreateExam,
           onEditLessonInfo: widget.onEditLessonInfo,
+          ownTeacherId: widget.ownTeacherId,
         ),
     ];
     if (pages.length == 1) {
@@ -163,21 +185,35 @@ class LessonDetailsPage extends ConsumerWidget {
     required this.names,
     this.onOpenElement,
     this.onOpenClassRegister,
-    this.onBookRoom,
+    this.onRoomAction,
     this.onCreateExam,
     this.onEditLessonInfo,
+    this.ownTeacherId,
   });
 
   final LessonBlock block;
   final NameResolver names;
   final ValueChanged<TimetableTarget>? onOpenElement;
   final ValueChanged<LessonBlock>? onOpenClassRegister;
-  final ValueChanged<LessonBlock>? onBookRoom;
+  final RoomActionCallback? onRoomAction;
   final ValueChanged<LessonBlock>? onCreateExam;
   final ValueChanged<LessonBlock>? onEditLessonInfo;
 
+  /// See [LessonDetailsSheet.ownTeacherId].
+  final int? ownTeacherId;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // A colleague's lesson in the teacher's own timetable (shown faded):
+    // read-only, none of the own-lesson actions. Lessons a substitute holds
+    // for them keep theirs (the class register opens read-only).
+    final me = ownTeacherId;
+    final colleague = me != null && isColleagueLesson(this.block.first, me);
+    final notOwn = me != null && !teachesLesson(this.block.first, me);
+    final onOpenClassRegister = colleague ? null : this.onOpenClassRegister;
+    final onRoomAction = colleague ? null : this.onRoomAction;
+    final onCreateExam = colleague ? null : this.onCreateExam;
+    final onEditLessonInfo = colleague ? null : this.onEditLessonInfo;
     // The sheet stays open while the user edits their notes: apply the
     // current ones instead of those the block was built with.
     final notes = ref.watch(lessonNotesProvider);
@@ -268,34 +304,30 @@ class LessonDetailsPage extends ConsumerWidget {
           ),
         ),
         _StatusChips(block: block, settings: settings),
-        if (onOpenClassRegister != null && !block.isCancelled)
+        if (notOwn) _NotOwnNote(period: p, names: names, colleague: colleague),
+        // No class register for supervisions or lessons without a class.
+        if (onOpenClassRegister != null &&
+            !block.isCancelled &&
+            block.periods.any((q) => !q.isCancelled && q.canHoldExam))
           Padding(
             padding: const EdgeInsets.only(top: 12),
             child: FilledButton.tonalIcon(
               key: const ValueKey('details-classreg'),
-              onPressed: () => onOpenClassRegister!(this.block),
+              onPressed: () => onOpenClassRegister(this.block),
               icon: const Icon(Icons.fact_check_outlined),
               label: const Text('Absences & lesson topic'),
             ),
           ),
-        if (onBookRoom != null && !block.isCancelled)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: OutlinedButton.icon(
-              key: const ValueKey('details-book-room'),
-              onPressed: () => onBookRoom!(this.block),
-              icon: const Icon(Icons.meeting_room_outlined),
-              label: const Text('Book a room'),
-            ),
-          ),
         if (onCreateExam != null &&
             !block.isCancelled &&
+            // Never in supervisions or anything without a class.
+            block.periods.any((q) => !q.isCancelled && q.canHoldExam) &&
             !block.periods.any((q) => q.isSchoolExam))
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: OutlinedButton.icon(
               key: const ValueKey('lesson-exam-create'),
-              onPressed: () => onCreateExam!(this.block),
+              onPressed: () => onCreateExam(this.block),
               icon: const Icon(Icons.assignment_add),
               label: const Text('Create exam'),
             ),
@@ -307,7 +339,7 @@ class LessonDetailsPage extends ConsumerWidget {
             serverExams: onCreateExam != null,
             onEditLessonInfo: onEditLessonInfo == null
                 ? null
-                : () => onEditLessonInfo!(this.block),
+                : () => onEditLessonInfo(this.block),
           ),
         _ElementSection(
           'Teachers',
@@ -317,7 +349,19 @@ class LessonDetailsPage extends ConsumerWidget {
           onOpenElement,
         ),
         _ElementSection('Classes', ElementType.klasse, p, names, onOpenElement),
-        _ElementSection('Rooms', ElementType.room, p, names, onOpenElement),
+        if (onRoomAction != null && !block.isCancelled)
+          _RoomSection(
+            period: p,
+            names: names,
+            onOpen: onOpenElement,
+            // Rooms can only change before the lesson starts.
+            editable: ref
+                .watch(teacherToolsClockProvider)()
+                .isBefore(block.start),
+            onAction: (a) => onRoomAction(this.block, a),
+          )
+        else
+          _ElementSection('Rooms', ElementType.room, p, names, onOpenElement),
         for (final t in texts)
           Padding(
             padding: const EdgeInsets.only(top: 12),
@@ -373,6 +417,61 @@ class LessonDetailsPage extends ConsumerWidget {
   }
 }
 
+/// "Taught by …" on a lesson in a teacher's own timetable that someone else
+/// gives.
+class _NotOwnNote extends StatelessWidget {
+  const _NotOwnNote({
+    required this.period,
+    required this.names,
+    required this.colleague,
+  });
+
+  final Period period;
+  final NameResolver names;
+
+  /// A colleague's lesson (else one a substitute holds for the teacher).
+  final bool colleague;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final who = [
+      for (final t in period.ofType(ElementType.teacher))
+        if (t.id != 0) names.longName(t),
+    ].join(', ');
+    final text = colleague
+        ? '${who.isEmpty ? 'Another teacher' : who} teaches this lesson. '
+              'It shows in your timetable because you teach this subject in '
+              'this class.'
+        : who.isEmpty
+        ? "You don't give this lesson."
+        : '$who holds this lesson instead of you.';
+    return Padding(
+      key: const ValueKey('details-not-own'),
+      padding: const EdgeInsets.only(top: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.person_outline,
+            size: 20,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _StatusChips extends StatelessWidget {
   const _StatusChips({required this.block, required this.settings});
   final LessonBlock block;
@@ -398,6 +497,10 @@ class _StatusChips extends StatelessWidget {
       cs.tertiaryContainer,
       cs.onTertiaryContainer,
     );
+    final (sDefBg, sDefFg, _) = supervisionDefaults(cs);
+    final (sBg, sFg) = colors(settings.supervisionColor, sDefBg, sDefFg);
+    final (rDefBg, rDefFg, _) = roomBookingDefaults(cs);
+    final (rBg, rFg) = colors(settings.roomBookingColor, rDefBg, rDefFg);
     final chips = <Widget>[
       if (block.isCancelled) _chip(Icons.block, 'Cancelled', cBg, cFg),
       if (block.isExam)
@@ -409,6 +512,10 @@ class _StatusChips extends StatelessWidget {
         ),
       if (!block.isCancelled && block.isIrregular)
         _chip(Icons.swap_horiz, 'Substitution', iBg, iFg),
+      if (!block.isCancelled && block.first.isBreakSupervision)
+        _chip(Icons.visibility_outlined, 'Supervision', sBg, sFg),
+      if (!block.isCancelled && block.first.isRoomBooking)
+        _chip(Icons.meeting_room_outlined, 'Room booking', rBg, rFg),
     ];
     if (chips.isEmpty) return const SizedBox.shrink();
     return Padding(
@@ -460,6 +567,103 @@ class _ElementSection extends StatelessWidget {
                 ElementChip(element: r, names: names, onOpen: onOpen),
             ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The rooms of an own lesson, each with ⟳ (replace) and × (remove), and +
+/// (add) after them; only while [editable] (before the lesson starts).
+class _RoomSection extends StatelessWidget {
+  const _RoomSection({
+    required this.period,
+    required this.names,
+    required this.onOpen,
+    required this.editable,
+    required this.onAction,
+  });
+
+  final Period period;
+  final NameResolver names;
+  final ValueChanged<TimetableTarget>? onOpen;
+  final bool editable;
+  final ValueChanged<RoomAction> onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final refs = period.ofType(ElementType.room).toList();
+    Widget icon(String key, IconData i, String tip, VoidCallback onTap) =>
+        IconButton(
+          key: ValueKey(key),
+          icon: Icon(i, size: 20),
+          tooltip: tip,
+          visualDensity: VisualDensity.compact,
+          onPressed: onTap,
+        );
+    return Padding(
+      key: const ValueKey('details-rooms'),
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Rooms', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 4,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              for (final r in refs)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: ElementChip(
+                        element: r,
+                        names: names,
+                        onOpen: onOpen,
+                      ),
+                    ),
+                    // Removed rooms (id 0) have nothing to replace.
+                    if (editable && r.id != 0) ...[
+                      icon(
+                        'room-replace-${r.id}',
+                        Icons.autorenew,
+                        'Replace ${names.longName(r)}',
+                        () => onAction(RoomAction.replace(r)),
+                      ),
+                      icon(
+                        'room-remove-${r.id}',
+                        Icons.close,
+                        'Remove ${names.longName(r)}',
+                        () => onAction(RoomAction.remove(r)),
+                      ),
+                    ],
+                  ],
+                ),
+              if (editable)
+                icon(
+                  'room-add',
+                  Icons.add,
+                  'Add a room',
+                  () => onAction(const RoomAction.add()),
+                ),
+            ],
+          ),
+          if (refs.isEmpty && !editable) const Text('No room'),
+          if (!editable)
+            Padding(
+              key: const ValueKey('details-rooms-locked'),
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Rooms can be changed until the lesson starts.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
         ],
       ),
     );

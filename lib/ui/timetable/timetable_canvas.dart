@@ -174,6 +174,7 @@ class _TimetableCanvasState extends State<TimetableCanvas> {
         ),
     ];
 
+    final usedKeys = <String>{};
     for (var i = 0; i < days.length; i++) {
       final day = days[i];
       final x = timeColumnWidth + i * colW;
@@ -188,13 +189,21 @@ class _TimetableCanvasState extends State<TimetableCanvas> {
           ),
         );
       }
-      for (final b in day.blocks) {
+      for (var j = 0; j < day.blocks.length; j++) {
+        final b = day.blocks[j];
         final subW = colW / b.columns;
         final top = scale.yOf(b.start);
         final bottom = sameDay(b.start, b.end) ? scale.yOf(b.end) : height;
         children.add(
           Positioned(
-            key: ValueKey('lesson-${b.first.id}'),
+            // Supervisions and other extra periods may share an id: a
+            // repeated one gets day and position added (duplicate keys
+            // would drop cards).
+            key: ValueKey(
+              usedKeys.add('lesson-${b.first.id}')
+                  ? 'lesson-${b.first.id}'
+                  : 'lesson-${b.first.id}-$i-$j',
+            ),
             left: x + b.column * subW + gap,
             width: math.max(0, subW - 2 * gap),
             top: top + gap,

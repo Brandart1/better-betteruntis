@@ -255,7 +255,13 @@ class TimetableRepositoryImpl implements TimetableRepository {
     DateTime monday,
   ) async {
     final typeKey = '${account.id}|${target.type.apiName}';
-    if (target.id <= 0 || _directDenied.contains(typeKey)) {
+    // A teacher's own timetable is always asked for directly, even when
+    // other teachers' timetables were refused: rebuilt from class
+    // timetables it would miss supervisions, room bookings and anything
+    // else without a class.
+    final own =
+        target.type == account.elementType && target.id == account.elementId;
+    if (target.id <= 0 || (!own && _directDenied.contains(typeKey))) {
       return _aggregate(account, target, monday);
     }
     final TimetableResponse direct;
@@ -263,7 +269,7 @@ class TimetableRepositoryImpl implements TimetableRepository {
       direct = await _fetchDirect(account, target, monday);
     } on UntisException catch (e) {
       if (!_deniedError(e)) rethrow;
-      _directDenied.add(typeKey);
+      if (!own) _directDenied.add(typeKey);
       return _aggregate(account, target, monday);
     }
     if (direct.periods.isNotEmpty) return direct.periods;
@@ -273,7 +279,7 @@ class TimetableRepositoryImpl implements TimetableRepository {
     // request with an empty week. Check the class timetables.
     try {
       final agg = await _aggregate(account, target, monday);
-      if (agg.isNotEmpty) _directDenied.add(typeKey);
+      if (agg.isNotEmpty && !own) _directDenied.add(typeKey);
       return agg;
     } on UntisException {
       return direct.periods; // Genuinely empty as far as we can tell.

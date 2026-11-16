@@ -1,14 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/models.dart';
+import '../../core/providers.dart';
 import '../../core/settings.dart';
+import '../timetable/lesson_style.dart';
 import 'color_picker_sheet.dart';
 import 'lesson_preview.dart';
 import 'subject_colors_screen.dart';
 import '../common/large_text.dart';
 
 /// Lesson states with a configurable color.
-enum LessonColorKind { regular, irregular, cancelled, exam }
+enum LessonColorKind {
+  regular,
+  irregular,
+  cancelled,
+  exam,
+  supervision,
+  roomBooking,
+}
 
 extension on LessonColorKind {
   String get label => switch (this) {
@@ -16,6 +26,15 @@ extension on LessonColorKind {
     LessonColorKind.irregular => 'Substitution',
     LessonColorKind.cancelled => 'Cancelled',
     LessonColorKind.exam => 'Exam',
+    LessonColorKind.supervision => 'Supervision',
+    LessonColorKind.roomBooking => 'Room booking',
+  };
+
+  /// Explanation under the label (only where the name isn't obvious).
+  String? get hint => switch (this) {
+    LessonColorKind.supervision => 'Break / corridor supervision',
+    LessonColorKind.roomBooking => 'A booked room without a class',
+    _ => null,
   };
 
   int? valueIn(TimetableSettings s) => switch (this) {
@@ -23,6 +42,8 @@ extension on LessonColorKind {
     LessonColorKind.irregular => s.irregularColor,
     LessonColorKind.cancelled => s.cancelledColor,
     LessonColorKind.exam => s.examColor,
+    LessonColorKind.supervision => s.supervisionColor,
+    LessonColorKind.roomBooking => s.roomBookingColor,
   };
 
   TimetableSettings apply(TimetableSettings s, int? v) => switch (this) {
@@ -30,6 +51,8 @@ extension on LessonColorKind {
     LessonColorKind.irregular => s.copyWith(irregularColor: v),
     LessonColorKind.cancelled => s.copyWith(cancelledColor: v),
     LessonColorKind.exam => s.copyWith(examColor: v),
+    LessonColorKind.supervision => s.copyWith(supervisionColor: v),
+    LessonColorKind.roomBooking => s.copyWith(roomBookingColor: v),
   };
 
   /// Fill/border mode of a special state; null for regular lessons.
@@ -38,6 +61,8 @@ extension on LessonColorKind {
     LessonColorKind.irregular => s.irregularMode,
     LessonColorKind.cancelled => s.cancelledMode,
     LessonColorKind.exam => s.examMode,
+    LessonColorKind.supervision => s.supervisionMode,
+    LessonColorKind.roomBooking => s.roomBookingMode,
   };
 
   TimetableSettings applyMode(TimetableSettings s, StateColorMode m) =>
@@ -46,6 +71,8 @@ extension on LessonColorKind {
         LessonColorKind.irregular => s.copyWith(irregularMode: m),
         LessonColorKind.cancelled => s.copyWith(cancelledMode: m),
         LessonColorKind.exam => s.copyWith(examMode: m),
+        LessonColorKind.supervision => s.copyWith(supervisionMode: m),
+        LessonColorKind.roomBooking => s.copyWith(roomBookingMode: m),
       };
 
   /// Theme default color (mirrors [LessonStyle.of]): the background in fill
@@ -58,6 +85,10 @@ extension on LessonColorKind {
       LessonColorKind.cancelled =>
         border ? cs.outline : cs.surfaceContainerHighest,
       LessonColorKind.exam => border ? cs.error : cs.errorContainer,
+      LessonColorKind.supervision =>
+        border ? supervisionDefaults(cs).$3 : supervisionDefaults(cs).$1,
+      LessonColorKind.roomBooking =>
+        border ? roomBookingDefaults(cs).$3 : roomBookingDefaults(cs).$1,
     };
   }
 }
@@ -72,6 +103,11 @@ class TimetableSettingsScreen extends ConsumerWidget {
     final notifier = ref.read(timetableSettingsProvider.notifier);
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final account = ref.watch(activeAccountProvider).value;
+    final teacher =
+        account != null &&
+        !account.anonymous &&
+        account.elementType == ElementType.teacher;
 
     void resetAll() {
       final before = ref.read(timetableSettingsProvider);
@@ -207,6 +243,19 @@ class TimetableSettingsScreen extends ConsumerWidget {
                   onChanged: (v) =>
                       notifier.update((c) => c.copyWith(showCancelled: v)),
                 ),
+                if (teacher)
+                  AdaptiveSwitchTile(
+                    key: const ValueKey('show-colleague-lessons'),
+                    title: const Text("Colleagues' lessons of my classes"),
+                    subtitle: const Text(
+                      'In your timetable, show lessons that other teachers '
+                      'give in the classes and subjects you teach (faded)',
+                    ),
+                    value: s.showColleagueLessons,
+                    onChanged: (v) => notifier.update(
+                      (c) => c.copyWith(showColleagueLessons: v),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -277,10 +326,11 @@ class _ColorTile extends StatelessWidget {
       // The fill/border choice sits right under the color, so it reads as
       // part of the row without squeezing the title on narrow phones.
       subtitle: mode == null
-          ? Text(hex)
+          ? Text(kind.hint == null ? hex : '${kind.hint} · $hex')
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (kind.hint != null) Text(kind.hint!),
                 Text(hex),
                 const SizedBox(height: 6),
                 // Scales down instead of overflowing on very narrow screens.

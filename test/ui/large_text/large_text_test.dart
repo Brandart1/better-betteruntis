@@ -33,6 +33,7 @@ const routes = [
   '/accessibility',
   '/browse',
   '/exams',
+  '/rooms/book',
   '/info',
   '/accounts',
   '/calendar',

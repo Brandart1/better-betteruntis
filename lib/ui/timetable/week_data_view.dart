@@ -95,7 +95,12 @@ class _WeekDataViewState extends ConsumerState<WeekDataView> {
         Expanded(
           child: RefreshIndicator(
             onRefresh: _refresh,
-            child: widget.builder(context, periods.requireValue, names),
+            child: widget.builder(context, [
+              ...periods.requireValue,
+              // Teachers' own timetable: colleagues' lessons of their
+              // classes and subjects (loaded afterwards, never an error).
+              ...ref.watch(colleagueLessonsProvider(_req)),
+            ], names),
           ),
         ),
         UpdatedLabel(at: updated),

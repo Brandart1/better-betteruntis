@@ -88,6 +88,154 @@ class TeacherToolsRepositoryImpl implements TeacherToolsRepository {
   }
 
   @override
+  Future<FreeRooms> freeRoomsAt(
+    Account account,
+    DateTime start,
+    DateTime end,
+  ) => _wrap(() async {
+    if (!end.isAfter(start)) {
+      throw const UntisException(-1, 'The end must be after the start.');
+    }
+    final auth = await accounts.credentials(account.id);
+    return _api.availableRooms(
+      host: account.host,
+      school: account.school.loginName,
+      auth: auth,
+      start: start,
+      end: end,
+    );
+  });
+
+  @override
+  Future<FreeRooms> freeRoomsForSlots(Account account, List<TimeSlot> slots) {
+    _check(account);
+    return _wrap(() async {
+      if (slots.isEmpty) return const FreeRooms(slotCount: 0);
+      final auth = await accounts.credentials(account.id);
+      final count = <int, int>{};
+      final order = <int>[];
+      final errors = <TeacherToolError>[];
+      for (final s in slots) {
+        final r = await _api.availableRooms(
+          host: account.host,
+          school: account.school.loginName,
+          auth: auth,
+          start: s.start,
+          end: s.end,
+        );
+        for (final e in r.errors) {
+          if (!errors.any((x) => x.message == e.message)) errors.add(e);
+        }
+        for (final id in r.roomIds) {
+          if (!count.containsKey(id)) order.add(id);
+          count[id] = (count[id] ?? 0) + 1;
+        }
+      }
+      return FreeRooms(
+        roomIds: [
+          for (final id in order)
+            if (count[id] == slots.length) id,
+        ],
+        partlyFree: {
+          for (final id in order)
+            if (count[id]! < slots.length) id: count[id]!,
+        },
+        errors: errors,
+        slotCount: slots.length,
+      );
+    });
+  }
+
+  @override
+  Future<List<Period>> lessonsDuring(Account account, List<TimeSlot> slots) {
+    _check(account);
+    return _wrap(() async {
+      final mondays = {for (final s in slots) _mondayOf(s.start)};
+      final out = <Period>[];
+      for (final m in mondays) {
+        for (final p in await _ownWeek(account, m)) {
+          // Own room bookings aren't lessons (a second room may be wanted).
+          if (!_isLesson(p) || p.isRoomBooking) continue;
+          if (slots.any((s) => s.overlaps(p.start, p.end)) &&
+              !out.any((q) => q.id == p.id)) {
+            out.add(p);
+          }
+        }
+      }
+      return out..sort((a, b) => a.start.compareTo(b.start));
+    });
+  }
+
+  @override
+  Future<List<RoomBookingOutcome>> bookRoom(
+    Account account, {
+    required int roomId,
+    required List<TimeSlot> slots,
+    String text = '',
+  }) {
+    _check(account);
+    return _wrap(() async {
+      if (slots.isEmpty) throw const UntisException(-1, 'No time selected.');
+      if (roomId <= 0) throw const UntisException(-1, 'No room selected.');
+      for (final s in slots) {
+        if (!s.end.isAfter(s.start)) {
+          throw const UntisException(-1, 'The end must be after the start.');
+        }
+      }
+      final busy = await lessonsDuring(account, slots);
+      if (busy.isNotEmpty) {
+        throw UntisException(
+          -1,
+          'You have a lesson at that time (${busy.length == 1 ? '1 lesson' : '${busy.length} lessons'}). '
+          'Change the room of that lesson instead.',
+        );
+      }
+      final auth = await accounts.credentials(account.id);
+      final out = <RoomBookingOutcome>[];
+      for (final s in slots) {
+        try {
+          final r = await _api.createRoomBooking(
+            host: account.host,
+            school: account.school.loginName,
+            auth: auth,
+            booking: RoomBookingRequest(
+              roomId: roomId,
+              start: s.start,
+              end: s.end,
+              text: text.trim(),
+              teacherId: account.elementType == ElementType.teacher
+                  ? account.elementId
+                  : null,
+            ),
+          );
+          if (!r.ok) {
+            out.add(
+              RoomBookingOutcome(
+                s,
+                error: r.errors.map((e) => e.message).join('\n'),
+              ),
+            );
+            break;
+          }
+          out.add(RoomBookingOutcome(s));
+        } on UntisException catch (e) {
+          // The first refusal stops the rest (the same error each time).
+          if (out.isEmpty) rethrow;
+          out.add(RoomBookingOutcome(s, error: e.message));
+          break;
+        }
+      }
+      if (out.any((o) => o.ok)) {
+        await _refresh(account, [
+          for (final o in out)
+            if (o.ok) o.slot.start,
+        ]);
+      }
+      return out;
+    });
+  }
+
+  @override
   Future<RoomChangeResult> changeRoom(
     Account account,
     List<Period> periods, {
@@ -268,7 +416,10 @@ class TeacherToolsRepositoryImpl implements TeacherToolsRepository {
         if (error is UntisException) throw error;
         throw const UntisException(0, 'Timetable not available.');
       }
-      final c = TeacherCourses.of(periods.where(_isLesson));
+      // Exam subjects: only lessons with a class (no "Aufsichtsstunde").
+      final c = TeacherCourses.of(
+        periods.where((p) => _isLesson(p) && p.canHoldExam),
+      );
       if (!c.isEmpty) _courses[account.id] = c;
       return c;
     });
@@ -281,7 +432,9 @@ class TeacherToolsRepositoryImpl implements TeacherToolsRepository {
       final week = await _ownWeek(account, _mondayOf(day));
       return [
         for (final p in week)
+          // Exam periods: no supervisions or lessons without a class.
           if (_isLesson(p) &&
+              p.canHoldExam &&
               p.start.year == day.year &&
               p.start.month == day.month &&
               p.start.day == day.day)

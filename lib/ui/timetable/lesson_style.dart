@@ -86,6 +86,29 @@ class LessonStyle {
     );
   }
 
+  /// How far a lesson the viewer doesn't give (a colleague's lesson of their
+  /// class and subject, or one a substitute holds for them) is blended
+  /// towards the grid background: clearly weaker than a past lesson.
+  static const notOwnBackgroundFade = 0.72;
+  static const notOwnForegroundFade = 0.4;
+
+  /// Faded, outlined version for lessons in a teacher's own timetable that
+  /// someone else gives: the fill almost disappears into [surface], the
+  /// lesson's own color stays as a thin outline, so it never reads as one of
+  /// the teacher's own lessons. Combine with [dimmed] for past ones.
+  LessonStyle notOwn(Color surface) {
+    final bg = Color.lerp(background, surface, notOwnBackgroundFade)!;
+    final outline = border ?? background;
+    return LessonStyle(
+      background: bg,
+      foreground: Color.lerp(foreground, bg, notOwnForegroundFade)!,
+      border: Color.lerp(outline, surface, 0.25),
+      borderWidth: 1.5,
+      cancelled: cancelled,
+      exam: exam,
+    );
+  }
+
   /// A custom state color: background, readable foreground and a border that
   /// is a stronger shade of the same color.
   static (Color, Color, Color) _custom(int argb) {
@@ -128,7 +151,10 @@ class LessonStyle {
     final p = block.first;
     final cancelled = block.isCancelled;
     final exam = !cancelled && block.isExam;
-    final irregular = !cancelled && !exam && block.isIrregular;
+    final supervision = !cancelled && !exam && p.isBreakSupervision;
+    final booking = !cancelled && !exam && !supervision && p.isRoomBooking;
+    final irregular =
+        !cancelled && !exam && !supervision && !booking && block.isIrregular;
 
     if (highContrast) {
       return LessonStyle(
@@ -190,6 +216,25 @@ class LessonStyle {
         exam: true,
       );
     }
+    if (supervision || booking) {
+      final custom = supervision
+          ? settings.supervisionColor
+          : settings.roomBookingColor;
+      final mode = supervision
+          ? settings.supervisionMode
+          : settings.roomBookingMode;
+      final (dBg, dFg, dBorder) = supervision
+          ? supervisionDefaults(cs)
+          : roomBookingDefaults(cs);
+      if (mode == StateColorMode.border) {
+        return bordered(custom != null ? Color(custom) : dBorder);
+      }
+      if (custom != null) {
+        final (bg, fg, border) = _custom(custom);
+        return LessonStyle(background: bg, foreground: fg, border: border);
+      }
+      return LessonStyle(background: dBg, foreground: dFg, border: dBorder);
+    }
     if (irregular) {
       final custom = settings.irregularColor;
       if (settings.irregularMode == StateColorMode.border) {
@@ -209,6 +254,28 @@ class LessonStyle {
     return LessonStyle(background: bg, foreground: fg);
   }
 }
+
+/// Theme default of break supervisions (background, text, border): an amber
+/// tonal palette in the theme's brightness, next to the theme's own
+/// primary / tertiary / error states.
+(Color, Color, Color) supervisionDefaults(ColorScheme cs) {
+  final s = cs.brightness == Brightness.dark
+      ? _supervisionDark
+      : _supervisionLight;
+  return (s.primaryContainer, s.onPrimaryContainer, s.primary);
+}
+
+/// Theme default of rooms booked without a class (background, text,
+/// border): the theme's secondary container.
+(Color, Color, Color) roomBookingDefaults(ColorScheme cs) =>
+    (cs.secondaryContainer, cs.onSecondaryContainer, cs.secondary);
+
+const _supervisionSeed = Color(0xFFE0A100);
+final _supervisionLight = ColorScheme.fromSeed(seedColor: _supervisionSeed);
+final _supervisionDark = ColorScheme.fromSeed(
+  seedColor: _supervisionSeed,
+  brightness: Brightness.dark,
+);
 
 const _strike = TextStyle(decoration: TextDecoration.lineThrough);
 

@@ -77,6 +77,13 @@ class AppDrawer extends StatelessWidget {
                   subtitle: const Text('Your exams, create new ones'),
                   onTap: () => go('/exams'),
                 ),
+                ListTile(
+                  key: const ValueKey('drawer-book-room'),
+                  leading: const Icon(Icons.meeting_room_outlined),
+                  title: const Text('Book a room'),
+                  subtitle: const Text('A free room without a lesson'),
+                  onTap: () => go('/rooms/book'),
+                ),
               ],
             );
           },

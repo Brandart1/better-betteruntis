@@ -313,6 +313,13 @@ class FakeUntisApi
         longName: 'Physik',
         backColor: 0xFFCE93D8,
       ),
+      // Teacher demo: the on-call "Aufsichtsstunde".
+      MasterElement(
+        type: ElementType.subject,
+        id: 25,
+        name: 'A',
+        longName: 'Aufsichtsstunde',
+      ),
       MasterElement(
         type: ElementType.room,
         id: 31,
@@ -401,6 +408,8 @@ class FakeUntisApi
           if (substituted) _substitutedIds.add(ttId);
         }
         final room = roomChanges[ttId] ?? p.$3;
+        final roomRemoved = removedRooms.contains(ttId);
+        final added = addedRooms[ttId] ?? const <int>[];
         final exam = _examAt(s, s.add(const Duration(minutes: 45)));
         periods.add(
           Period(
@@ -417,12 +426,21 @@ class FakeUntisApi
                 orgId: p.$2,
               ),
               ElementRef(type: ElementType.subject, id: p.$1, orgId: p.$1),
-              ElementRef(type: ElementType.room, id: room, orgId: p.$3),
+              ElementRef(
+                type: ElementType.room,
+                id: roomRemoved ? 0 : room,
+                orgId: p.$3,
+              ),
+              for (final r in added)
+                ElementRef(type: ElementType.room, id: r, orgId: 0),
             ],
             flags: {
               if (day.weekday == 5 && unit == 4)
                 PeriodFlag.cancelled
-              else if (substituted || room != p.$3)
+              else if (substituted ||
+                  room != p.$3 ||
+                  roomRemoved ||
+                  added.isNotEmpty)
                 PeriodFlag.irregular
               else
                 PeriodFlag.regular,
@@ -441,8 +459,119 @@ class FakeUntisApi
           ),
         );
       }
+      periods.addAll(_demoExtras(day, target));
+    }
+    // Room bookings without a lesson: in the booking teacher's and the
+    // room's timetable, as a period without class.
+    for (final b in roomBookings) {
+      if (b.start.isBefore(start) ||
+          !b.start.isBefore(DateTime(end.year, end.month, end.day + 1))) {
+        continue;
+      }
+      final mine =
+          (target.type == ElementType.teacher && target.id == b.teacherId) ||
+          (target.type == ElementType.room && target.id == b.roomId);
+      if (!mine) continue;
+      periods.add(
+        Period(
+          id: b.id,
+          lessonId: 0,
+          start: b.start,
+          end: b.end,
+          elements: [
+            if (b.teacherId != null)
+              ElementRef(
+                type: ElementType.teacher,
+                id: b.teacherId!,
+                orgId: b.teacherId!,
+              ),
+            ElementRef(type: ElementType.room, id: b.roomId, orgId: b.roomId),
+          ],
+          flags: const {PeriodFlag.regular},
+          lessonText: b.text.isEmpty ? 'Room booking' : b.text,
+        ),
+      );
     }
     return TimetableResponse(periods, null);
+  }
+
+  /// Subject of the demo "Aufsichtsstunde" (on-call lesson, short "A").
+  static const demoOnCallSubjectId = 25;
+
+  /// Teacher demo extras on [day] that [target] sees: a colleague's
+  /// maths lesson in class 9b on Thursdays (WEB teaches it; the demo
+  /// teacher MUE is assigned to 9b maths, so it shows faded in her
+  /// timetable), a Gangaufsicht 07:40–07:50 before the first lesson on
+  /// Mondays and Thursdays, a room booking without class (EDV1) on Tuesdays
+  /// and an Aufsichtsstunde (no class, no room, a substitution) on Fridays.
+  List<Period> _demoExtras(DateTime day, TimetableTarget target) {
+    DateTime at(int h, int m) => DateTime(day.year, day.month, day.day, h, m);
+    ElementRef el(ElementType t, int id, [int? orgId]) =>
+        ElementRef(type: t, id: id, orgId: orgId ?? id);
+    final extras = <Period>[
+      if (day.weekday == DateTime.thursday)
+        Period(
+          id: demoPeriodId(day, 5),
+          lessonId: 21,
+          start: at(12, 10),
+          end: at(12, 55),
+          elements: [
+            el(ElementType.klasse, 1),
+            el(ElementType.teacher, 13),
+            el(ElementType.subject, 21),
+            el(ElementType.room, 31),
+          ],
+          flags: const {PeriodFlag.regular},
+          lessonText: 'Förderunterricht',
+        ),
+      if (day.weekday == DateTime.monday || day.weekday == DateTime.thursday)
+        Period(
+          id: demoPeriodId(day, 7),
+          lessonId: 0,
+          start: at(7, 40),
+          end: at(7, 50),
+          elements: [el(ElementType.teacher, demoTeacherId)],
+          flags: const {PeriodFlag.breakSupervision},
+          lessonText: 'Gangaufsicht',
+        ),
+      if (day.weekday == DateTime.tuesday)
+        Period(
+          id: demoPeriodId(day, 6),
+          lessonId: 0,
+          start: at(12, 10),
+          end: at(12, 55),
+          elements: [
+            el(ElementType.teacher, demoTeacherId),
+            el(ElementType.room, 34),
+          ],
+          flags: const {PeriodFlag.regular},
+          lessonText: 'Raumreservierung',
+        ),
+      if (day.weekday == DateTime.friday)
+        Period(
+          id: demoPeriodId(day, 8),
+          lessonId: 0,
+          start: at(8, 0),
+          end: at(8, 45),
+          elements: [
+            el(ElementType.teacher, demoTeacherId, 0),
+            el(ElementType.subject, demoOnCallSubjectId),
+          ],
+          flags: const {PeriodFlag.irregular},
+          substitutionText: 'Aufsichtsstunde',
+        ),
+    ];
+    bool has(Period p, ElementType t, int id) =>
+        p.elements.any((e) => e.type == t && (e.id == id || e.orgId == id));
+    return [
+      for (final p in extras)
+        if (switch (target.type) {
+          ElementType.teacher => has(p, ElementType.teacher, target.id),
+          ElementType.room => has(p, ElementType.room, target.id),
+          _ => p.hasClass,
+        })
+          p,
+    ];
   }
 
   @override
@@ -1098,6 +1227,26 @@ class FakeUntisApi
   /// Room changes made in the demo: new room by timetable id.
   final roomChanges = <int, int>{};
 
+  /// Rooms added to a lesson in the demo (orgRoomId 0), by timetable id.
+  final addedRooms = <int, List<int>>{};
+
+  /// Timetable ids whose planned (or changed) room was removed (roomId 0).
+  final removedRooms = <int>{};
+
+  /// Room bookings without a lesson made in the demo.
+  final roomBookings =
+      <
+        ({
+          int id,
+          int roomId,
+          DateTime start,
+          DateTime end,
+          int? teacherId,
+          String text,
+        })
+      >[];
+  var _nextBookingId = 1000000;
+
   /// Lesson info ("Info zur Stunde") set with submitPeriodInfo, by period.
   final periodInfos = <int, String>{};
 
@@ -1109,6 +1258,7 @@ class FakeUntisApi
   final roomChangeCalls =
       <({List<int> periodIds, int orgRoomId, int roomId})>[];
   final createExamCalls = <NewExam>[];
+  final roomBookingCalls = <RoomBookingRequest>[];
 
   ExamItem? _examAt(DateTime start, DateTime end) {
     for (final e in createdExams) {
@@ -1138,8 +1288,14 @@ class FakeUntisApi
         final id = demoPeriodId(day, unit);
         if (except.contains(id)) continue;
         if (day.weekday == 5 && unit == 4) continue; // cancelled
-        busy.add(roomChanges[id] ?? demoPlan[(unit + day.weekday) % 6].$3);
+        if (!removedRooms.contains(id)) {
+          busy.add(roomChanges[id] ?? demoPlan[(unit + day.weekday) % 6].$3);
+        }
+        busy.addAll(addedRooms[id] ?? const []);
       }
+    }
+    for (final b in roomBookings) {
+      if (b.start.isBefore(end) && b.end.isAfter(start)) busy.add(b.roomId);
     }
     // The gym is booked on Mondays.
     if (start.weekday == DateTime.monday) busy.add(36);
@@ -1164,10 +1320,7 @@ class FakeUntisApi
     final start = starts.first;
     final end = starts.last.add(const Duration(minutes: 45));
     // The lesson's own room counts as busy (it is in use by this lesson).
-    final own = {
-      for (final id in periodIds)
-        roomChanges[id] ?? demoPlan[(id % 10 + _demoStart(id).weekday) % 6].$3,
-    };
+    final own = {for (final id in periodIds) ..._currentRooms(id)};
     final busy = {..._busyRooms(start, end, except: periodIds.toSet()), ...own};
     return FreeRooms(
       roomIds: [
@@ -1227,19 +1380,46 @@ class FakeUntisApi
       orgRoomId: orgRoomId,
       roomId: roomId,
     ));
-    if (!demoRoomIds.contains(roomId)) {
+    // Like the real server (as far as known): orgRoomId is a room the
+    // lesson has now (0: add roomId), roomId 0 removes orgRoomId.
+    if (roomId != 0 && !demoRoomIds.contains(roomId)) {
       return const RoomChangeResult(
         errors: [TeacherToolError(code: 'ROOM_UNKNOWN', title: 'Unknown room')],
       );
     }
+    if (orgRoomId == 0 && roomId == 0) {
+      return const RoomChangeResult(
+        errors: [TeacherToolError(code: 'NO_ROOM', title: 'No room given')],
+      );
+    }
     for (final id in periodIds) {
-      final planned = demoPlan[(id % 10 + _demoStart(id).weekday) % 6].$3;
+      if (orgRoomId != 0 && !_currentRooms(id).contains(orgRoomId)) {
+        return const RoomChangeResult(
+          errors: [
+            TeacherToolError(
+              code: 'ROOM_NOT_IN_PERIOD',
+              title: 'The room to replace is not in this lesson',
+            ),
+          ],
+        );
+      }
+      if (roomId == 0) continue;
+      if (orgRoomId != roomId && _currentRooms(id).contains(roomId)) {
+        return const RoomChangeResult(
+          errors: [
+            TeacherToolError(
+              code: 'ROOM_ALREADY_IN_PERIOD',
+              title: 'The lesson already has this room',
+            ),
+          ],
+        );
+      }
       final busy = _busyRooms(
         _demoStart(id),
         _demoStart(id).add(const Duration(minutes: 45)),
         except: {id},
       );
-      if (roomId != planned && busy.contains(roomId)) {
+      if (roomId != orgRoomId && busy.contains(roomId)) {
         return const RoomChangeResult(
           errors: [
             TeacherToolError(
@@ -1253,13 +1433,97 @@ class FakeUntisApi
     }
     for (final id in periodIds) {
       final planned = demoPlan[(id % 10 + _demoStart(id).weekday) % 6].$3;
-      if (roomId == planned) {
-        roomChanges.remove(id);
+      final main = removedRooms.contains(id) ? 0 : (roomChanges[id] ?? planned);
+      final added = addedRooms[id] ?? <int>[];
+      void setMain(int r) {
+        if (r == 0) {
+          removedRooms.add(id);
+          roomChanges.remove(id);
+          return;
+        }
+        removedRooms.remove(id);
+        if (r == planned) {
+          roomChanges.remove(id);
+        } else {
+          roomChanges[id] = r;
+        }
+      }
+
+      if (orgRoomId == 0) {
+        // Adding the removed planned room back puts it in its slot.
+        if (main == 0) {
+          setMain(roomId);
+        } else {
+          added.add(roomId);
+        }
+      } else if (orgRoomId == main) {
+        // The main room goes: an added room moves into its place.
+        if (roomId == 0 && added.isNotEmpty) {
+          setMain(added.removeAt(0));
+        } else {
+          setMain(roomId);
+        }
       } else {
-        roomChanges[id] = roomId;
+        final k = added.indexOf(orgRoomId);
+        if (roomId == 0) {
+          added.removeAt(k);
+        } else {
+          added[k] = roomId;
+        }
+      }
+      if (added.isEmpty) {
+        addedRooms.remove(id);
+      } else {
+        addedRooms[id] = added;
       }
     }
     return RoomChangeResult(periodCount: periodIds.length);
+  }
+
+  /// The rooms period [ttId] has now (changes applied).
+  List<int> _currentRooms(int ttId) {
+    final planned = demoPlan[(ttId % 10 + _demoStart(ttId).weekday) % 6].$3;
+    return [
+      if (!removedRooms.contains(ttId)) roomChanges[ttId] ?? planned,
+      ...?addedRooms[ttId],
+    ];
+  }
+
+  @override
+  Future<RoomBookingResult> createRoomBooking({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required RoomBookingRequest booking,
+  }) async {
+    await _delay();
+    roomBookingCalls.add(booking);
+    if (!demoRoomIds.contains(booking.roomId)) {
+      return const RoomBookingResult(
+        errors: [TeacherToolError(code: 'ROOM_UNKNOWN', title: 'Unknown room')],
+      );
+    }
+    if (_busyRooms(booking.start, booking.end).contains(booking.roomId)) {
+      return const RoomBookingResult(
+        errors: [
+          TeacherToolError(
+            code: 'ROOM_OCCUPIED',
+            title: 'Room is occupied',
+            details: 'The room is in use at that time.',
+          ),
+        ],
+      );
+    }
+    final id = _nextBookingId++;
+    roomBookings.add((
+      id: id,
+      roomId: booking.roomId,
+      start: booking.start,
+      end: booking.end,
+      teacherId: booking.teacherId,
+      text: booking.text,
+    ));
+    return RoomBookingResult(id: id);
   }
 
   static const demoExamTypes = [

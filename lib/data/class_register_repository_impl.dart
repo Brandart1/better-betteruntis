@@ -377,10 +377,14 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
     });
   }
 
+  /// Lessons with a class register: not cancelled, no supervision / office
+  /// hour, and a class (room bookings and on-call "Aufsichtsstunden"
+  /// without a class have none).
   static bool _isLesson(Period p) =>
       !p.isCancelled &&
       !p.flags.contains(PeriodFlag.breakSupervision) &&
-      !p.flags.contains(PeriodFlag.officeHour);
+      !p.flags.contains(PeriodFlag.officeHour) &&
+      p.hasClass;
 
   static DateTime _mondayOf(DateTime d) =>
       DateTime(d.year, d.month, d.day - (d.weekday - 1));
