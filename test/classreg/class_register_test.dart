@@ -155,6 +155,9 @@ void main() {
     );
 
     testWidgets('class register: mark absent, enter topic, save', (t) async {
+      t.view.physicalSize = const Size(800, 2000);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
       final p = lesson(11, DateTime(2026, 11, 10, 8));
       await t.pumpWidget(
         app(

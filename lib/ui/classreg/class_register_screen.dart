@@ -382,8 +382,39 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
               ref.watch(nameResolverProvider).value,
             ),
           ),
+        // The topic is the main thing besides the absences: own heading,
+        // tinted field and larger text.
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              Text('Lesson topic', style: theme.textTheme.titleMedium),
+              Chip(
+                key: const ValueKey('classreg-topic-state'),
+                avatar: isLargeText(context)
+                    ? null
+                    : Icon(
+                        _topicBefore.trim().isNotEmpty
+                            ? Icons.check_circle
+                            : Icons.pending_outlined,
+                        size: 18,
+                      ),
+                label: Text(
+                  _topicBefore.trim().isNotEmpty
+                      ? 'Entered'
+                      : 'Not entered yet',
+                ),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: TextField(
             key: const ValueKey('classreg-topic'),
             controller: _topic,
@@ -392,10 +423,18 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
             maxLines: 6,
             textCapitalization: TextCapitalization.sentences,
             onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              labelText: 'Lesson topic',
+            style: theme.textTheme.titleMedium,
+            decoration: InputDecoration(
               hintText: 'What was covered in this lesson',
-              border: OutlineInputBorder(),
+              prefixIcon: const Icon(Icons.menu_book_outlined),
+              filled: true,
+              fillColor: theme.colorScheme.primaryContainer.withValues(
+                alpha: 0.35,
+              ),
+              border: const OutlineInputBorder(),
+              enabledBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: theme.colorScheme.primary),
+              ),
             ),
           ),
         ),

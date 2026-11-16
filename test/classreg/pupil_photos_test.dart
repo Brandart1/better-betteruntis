@@ -395,6 +395,9 @@ void main() {
 
   group('screen (demo teacher)', () {
     testWidgets('photos, initials, large photo, toggle', (t) async {
+      t.view.physicalSize = const Size(800, 2000);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
       final api = FakeUntisApi(latency: Duration.zero);
       final accounts = InMemoryAccountRepository(initial: [teacherAccount()]);
       accounts.secrets['teacher'] = 'S';
