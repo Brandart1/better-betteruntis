@@ -28,7 +28,9 @@ import 'week_grid.dart';
 /// Tapping a day header zooms into that day (the column expands to full
 /// width); in day mode the app bar shows the date, swiping moves between
 /// days, and tapping the date (app bar or day header) or pressing back zooms
-/// out to the week containing the current day.
+/// out to the week containing the current day. The app bar keeps the
+/// drawer button in day mode (home and browsed timetables both get the
+/// drawer); without a drawer the back arrow leaves day mode first.
 ///
 /// Hardware keyboard (any platform): ← / → previous / next week (or day in
 /// day mode), Home or T jumps to today, Escape leaves day mode. Ignored while
@@ -104,6 +106,10 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
   /// Page a keyboard step is heading to while its animation runs, so quick
   /// repeated presses keep stepping instead of retargeting the same page.
   int? _keyTarget;
+
+  /// Whether the navigation drawer is open: system back then closes it
+  /// (the drawer's local history entry) instead of leaving day mode.
+  bool _drawerOpen = false;
 
   @override
   void dispose() {
@@ -403,13 +409,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Flexible(
-                  child: Text(
-                    dateFormat(context, 'EEE, d MMM').format(day),
-                    key: const ValueKey('day-label'),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
+                Flexible(child: _DayLabel(day: day)),
                 const SizedBox(width: 4),
                 Icon(
                   Icons.unfold_less,
@@ -548,7 +548,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     return ViewingTarget(
       target: widget.target,
       child: PopScope(
-        canPop: day == null,
+        canPop: day == null || _drawerOpen,
         onPopInvokedWithResult: (didPop, _) {
           if (!didPop) _exitDay();
         },
@@ -559,6 +559,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
           child: Scaffold(
             drawer: widget.drawer,
             onDrawerChanged: (open) {
+              setState(() => _drawerOpen = open);
               if (!open) _refocus();
             },
             appBar: AppBar(
@@ -739,6 +740,46 @@ class _SpeakButton extends ConsumerWidget {
         onPressed: onSpeak,
         icon: Icon(speaking ? Icons.stop_circle_outlined : Icons.volume_up),
       ),
+    );
+  }
+}
+
+/// The day mode's app bar date: the longest of "Tue, 17 Nov", "17 Nov",
+/// "Tue 17" and "17" that fits (the burger and the action buttons leave
+/// little room on phones; the full date is in the day header below).
+class _DayLabel extends StatelessWidget {
+  const _DayLabel({required this.day});
+
+  final DateTime day;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = DefaultTextStyle.of(context).style;
+    final scaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const patterns = ['EEE, d MMM', 'd MMM', 'EEE d', 'd'];
+        var text = '';
+        for (final p in patterns) {
+          text = dateFormat(context, p).format(day);
+          final painter = TextPainter(
+            text: TextSpan(text: text, style: style),
+            textDirection: direction,
+            textScaler: scaler,
+            maxLines: 1,
+          )..layout();
+          final fits = painter.width <= constraints.maxWidth;
+          painter.dispose();
+          if (fits) break;
+        }
+        return Text(
+          text,
+          key: const ValueKey('day-label'),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      },
     );
   }
 }

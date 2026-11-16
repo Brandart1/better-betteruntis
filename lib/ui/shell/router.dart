@@ -69,6 +69,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/timetable/:type/:id',
         builder: (_, s) => TimetableScreen(
+          drawer: const AppDrawer(onHome: false),
           target: TimetableTarget(
             ElementType.parse(s.pathParameters['type']),
             int.tryParse(s.pathParameters['id'] ?? '') ?? 0,

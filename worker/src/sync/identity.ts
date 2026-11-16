@@ -62,6 +62,24 @@ export function parseAppDataIdentity(body: unknown): AppDataIdentity | null {
   return { userId, tenantName: name.trim(), tenantId: scalarId(tenant["id"]) };
 }
 
+/** User name WebUntis uses for anonymous (public timetable) access. */
+export const ANONYMOUS_USER_NAME = "#anonymous#";
+
+/**
+ * Whether a decoded `app/data` body is for anonymous (public timetable)
+ * access, recognised by `user.name` being the anonymous login name. Such
+ * access has no personal WebUntis user, so it can't be a sync identity.
+ * (Not observed from WebUntis: the app never sends such tokens; this guards
+ * against other clients.)
+ */
+export function isAnonymousAppData(body: unknown): boolean {
+  if (!isPlainObject(body)) return false;
+  const user = body["user"];
+  if (!isPlainObject(user)) return false;
+  const name = user["name"];
+  return typeof name === "string" && name.trim().toLowerCase() === ANONYMOUS_USER_NAME;
+}
+
 /** A non-negative integer, or a short string without whitespace or `|`. */
 function scalarId(v: unknown): string | null {
   if (typeof v === "number") return Number.isSafeInteger(v) && v >= 0 ? String(v) : null;
@@ -94,6 +112,12 @@ export function decodeJwtPayload(token: string): Record<string, unknown> | null 
 const unexpected = () => new HttpError(502, "unexpected_response", "WebUntis sent an unexpected answer.");
 const unreachable = () => new HttpError(502, "upstream_unreachable", "WebUntis could not be reached.");
 const invalidToken = (msg: string) => new HttpError(401, "invalid_token", msg);
+const anonymousRejected = () =>
+  new HttpError(
+    403,
+    "anonymous_not_allowed",
+    "Public timetable (anonymous) logins can't sync: sync needs a personal WebUntis login.",
+  );
 const schoolMismatch = () => new HttpError(401, "school_mismatch", "The token does not belong to this school.");
 
 /** Verifies the token; throws [HttpError] on any failure. */
@@ -115,6 +139,7 @@ export async function verifyUntisIdentity(opts: VerifyOptions): Promise<SyncIden
   }
 
   const body = await fetchAppData(opts.fetch ?? ((i, init) => fetch(i, init)), host, token);
+  if (isAnonymousAppData(body)) throw anonymousRejected();
   const found = parseAppDataIdentity(body);
   if (found === null) throw unexpected();
   if (found.tenantName.toLowerCase() !== opts.school.trim().toLowerCase()) throw schoolMismatch();

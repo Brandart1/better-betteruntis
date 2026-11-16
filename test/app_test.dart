@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:better_betteruntis/app/routing_api.dart';
 import 'package:better_betteruntis/core/providers.dart';
 import 'package:better_betteruntis/data/data_providers.dart';
@@ -5,16 +7,20 @@ import 'package:better_betteruntis/data/db/database.dart';
 import 'package:better_betteruntis/data/secret_store.dart';
 import 'package:better_betteruntis/dev/fake_accounts.dart';
 import 'package:better_betteruntis/ui/shell/app.dart';
+import 'package:better_betteruntis/ui/timetable/timetable_screen.dart';
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
-  testWidgets('fresh install → demo login → timetable shows teachers', (tester) async {
+  testWidgets('fresh install → demo login → timetable shows teachers', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1080, 2340);
     tester.view.devicePixelRatio = 2.75;
     addTearDown(tester.view.reset);
@@ -41,9 +47,16 @@ void main() {
     await tester.tap(find.text('Try the demo'));
     // Real DB / stream work needs real async time.
     for (var i = 0; i < 30; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
       await tester.pump(const Duration(milliseconds: 100));
-      if (find.textContaining('MUE', findRichText: true).evaluate().isNotEmpty) break;
+      if (find
+          .textContaining('MUE', findRichText: true)
+          .evaluate()
+          .isNotEmpty) {
+        break;
+      }
     }
     if (find.textContaining('MUE', findRichText: true).evaluate().isEmpty) {
       debugDumpApp();
@@ -53,6 +66,36 @@ void main() {
     expect(find.byKey(const ValueKey('week-label')), findsOneWidget);
     expect(find.textContaining('MUE', findRichText: true), findsWidgets);
 
+    // Browsed timetable: burger menu too; "My timetable" returns home.
+    final router = GoRouter.of(
+      tester.element(find.byKey(const ValueKey('week-label'))),
+    );
+    unawaited(router.push('/timetable/teacher/1'));
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    final browsed = find.byWidgetPredicate(
+      (w) => w is TimetableScreen && w.target != null,
+    );
+    expect(browsed, findsOneWidget);
+    expect(find.byType(BackButton), findsNothing);
+    await tester.tap(find.byTooltip('Open navigation menu').last);
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.tap(find.text('My timetable').last);
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(browsed, findsNothing);
+    expect(find.byKey(const ValueKey('week-label')), findsOneWidget);
+
     // Drawer → Info center, served by the real repository over the demo API.
     await tester.tap(find.byTooltip('Open navigation menu'));
     for (var i = 0; i < 10; i++) {
@@ -60,13 +103,17 @@ void main() {
     }
     await tester.tap(find.text('Info center'));
     for (var i = 0; i < 20; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
       await tester.pump(const Duration(milliseconds: 100));
     }
     expect(find.text('Homework'), findsWidgets);
     await tester.tap(find.text('Homework').last);
     for (var i = 0; i < 20; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
       await tester.pump(const Duration(milliseconds: 100));
     }
     expect(tester.takeException(), isNull);
@@ -76,7 +123,9 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 200));
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
     }
     await tester.runAsync(db.close);
     await tester.pump(const Duration(seconds: 1));

@@ -4,6 +4,7 @@ import { HttpError } from "../../src/sync/http";
 import {
   APP_DATA_PATH,
   decodeJwtPayload,
+  isAnonymousAppData,
   parseAppDataIdentity,
   verifyUntisIdentity,
   type FetchFn,
@@ -179,6 +180,19 @@ describe("verifyUntisIdentity", () => {
       const e = await fails(verifyUntisIdentity({ ...base, host: "x.webuntis.com", untisToken: "t", fetch: u.fetch }));
       expect([e.status, e.code]).toEqual([502, "unexpected_response"]);
     }
+  });
+
+  it("anonymous (public timetable) access -> 403 anonymous_not_allowed", async () => {
+    for (const name of ["#anonymous#", " #ANONYMOUS# "]) {
+      const body = appData();
+      body.user.name = name;
+      const u = upstream(() => ok(body));
+      const e = await fails(verifyUntisIdentity({ ...base, host: "x.webuntis.com", untisToken: "t", fetch: u.fetch }));
+      expect([e.status, e.code]).toEqual([403, "anonymous_not_allowed"]);
+    }
+    expect(isAnonymousAppData(appData())).toBe(false);
+    expect(isAnonymousAppData({ user: { name: 5 } })).toBe(false);
+    expect(isAnonymousAppData(null)).toBe(false);
   });
 
   it("school mismatch -> 401", async () => {

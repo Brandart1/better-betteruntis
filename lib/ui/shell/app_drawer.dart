@@ -12,7 +12,11 @@ import '../../sync/sync_controller.dart' show kLatestReleaseUrl;
 import '../infocenter/info_providers.dart' show urlOpenerProvider;
 
 class AppDrawer extends StatelessWidget {
-  const AppDrawer({super.key});
+  const AppDrawer({super.key, this.onHome = true});
+
+  /// False on browsed (class/teacher/room) timetables: "My timetable" then
+  /// goes back to the home timetable instead of just closing the drawer.
+  final bool onHome;
 
   @override
   Widget build(BuildContext context) {
@@ -39,8 +43,11 @@ class AppDrawer extends StatelessWidget {
               leading: const Icon(Icons.person_outline),
               title: const Text('My timetable'),
               subtitle: child == null ? null : Text(child.displayName),
-              selected: true,
-              onTap: () => Navigator.of(context).pop(),
+              selected: onHome,
+              onTap: () {
+                Navigator.of(context).pop();
+                if (!onHome) context.go('/');
+              },
             );
           },
         ),

@@ -342,6 +342,9 @@ class SyncClient {
           'Signed out of sync (the session expired or sync was turned off '
           'on another device).',
         );
+      case (403, 'anonymous_not_allowed') when login:
+        // WebUntis answered for anonymous (public timetable) access.
+        return e(SyncErrorKind.untisRejected, kAnonymousSyncMessage);
       case (403, 'host_not_allowed'):
         return e(
           SyncErrorKind.hostNotAllowed,

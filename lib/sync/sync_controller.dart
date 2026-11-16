@@ -155,6 +155,12 @@ const kWebSingleAccountMessage =
     'To sync more accounts, use the Android or iOS app '
     '($kLatestReleaseUrl).';
 
+/// Shown for anonymous (public timetable) accounts: they have no WebUntis
+/// user the sync server could tell apart, so they never sync.
+const kAnonymousSyncMessage =
+    "Public timetable logins can't sync: sync needs a personal WebUntis "
+    'login.';
+
 /// Thrown by [SyncController] methods with a user-facing [message].
 class SyncException implements Exception {
   const SyncException(this.message, {this.wrongSecret = false});

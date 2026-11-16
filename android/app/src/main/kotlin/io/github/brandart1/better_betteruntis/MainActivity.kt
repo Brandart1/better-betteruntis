@@ -28,6 +28,8 @@ class MainActivity : FlutterActivity() {
                     result.error("failed", e.toString(), null)
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "better_betteruntis/updater")
+            .setMethodCallHandler(AppUpdater(this))
     }
 
     /** Accounts (not the local one) that have calendars on this device. */
