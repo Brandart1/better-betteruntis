@@ -47,7 +47,6 @@ class ExamEditorScreen extends ConsumerStatefulWidget {
 class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
   final _name = TextEditingController();
   final _text = TextEditingController();
-  final _typeText = TextEditingController();
 
   late DateTime _date;
   int? _subjectId;
@@ -69,6 +68,7 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
   List<Period>? _dayLessons;
 
   List<ExamType> _types = const [];
+  bool _typesLoaded = false;
   int? _typeId;
 
   List<ClassRegStudent>? _students;
@@ -115,7 +115,12 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
     _loadDay(applyDefaults: true);
     unawaited(
       _repo.examTypes(widget.account).then((t) {
-        if (mounted) setState(() => _types = t);
+        if (mounted) {
+          setState(() {
+            _types = t;
+            _typesLoaded = true;
+          });
+        }
       }),
     );
   }
@@ -124,7 +129,6 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
   void dispose() {
     _name.dispose();
     _text.dispose();
-    _typeText.dispose();
     super.dispose();
   }
 
@@ -267,16 +271,12 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
     return (start: at(units[from].start), end: at(units[to].end));
   }
 
-  String get _typeName {
-    if (_typeId != null) {
-      return _types
-              .where((t) => t.id == _typeId)
-              .map((t) => t.displayName)
-              .firstOrNull ??
-          '';
-    }
-    return _typeText.text.trim();
-  }
+  String get _typeName =>
+      _types
+          .where((t) => t.id == _typeId)
+          .map((t) => t.displayName)
+          .firstOrNull ??
+      '';
 
   bool _canSend(List<TimeUnit> units) =>
       !_sending &&
@@ -337,32 +337,6 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
       _studentIds = {};
       _applyDefaultUnits(names);
     });
-  }
-
-  Future<void> _pickType() async {
-    // -1 = type it in.
-    final picked = await showDialog<int>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('Exam type'),
-        children: [
-          for (final t in _types)
-            SimpleDialogOption(
-              key: ValueKey('exam-type-${t.id}'),
-              onPressed: () => Navigator.of(ctx).pop(t.id),
-              child: Text(t.displayName),
-            ),
-          SimpleDialogOption(
-            key: const ValueKey('exam-type--1'),
-            onPressed: () => Navigator.of(ctx).pop(-1),
-            child: const Text('Other (type it in)'),
-          ),
-        ],
-      ),
-    );
-    if (picked != null && mounted) {
-      setState(() => _typeId = picked == -1 ? null : picked);
-    }
   }
 
   Future<void> _pickRoom(List<TimeUnit> units) async {
@@ -444,7 +418,8 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
       await _repo.createExam(
         widget.account,
         NewExam(
-          examTypeId: _typeId,
+          // Negative ids: names taken from existing exams, no server id.
+          examTypeId: (_typeId ?? 0) > 0 ? _typeId : null,
           examType: _typeName,
           name: _name.text.trim(),
           text: _text.text.trim(),
@@ -499,31 +474,35 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
-          ListTile(
-            key: const ValueKey('exam-type'),
-            leading: icon(Icons.category_outlined),
-            title: const Text('Exam type'),
-            subtitle: Text(
-              _types.isEmpty
-                  ? 'Type it in below'
-                  : (_typeId == null ? 'Other (type it in)' : _typeName),
-            ),
-            onTap: _sending || _types.isEmpty ? null : _pickType,
-          ),
-          if (_typeId == null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: TextField(
-                key: const ValueKey('exam-type-text'),
-                controller: _typeText,
-                enabled: !_sending,
-                onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Type (e.g. Schularbeit, Test)',
-                  border: OutlineInputBorder(),
-                ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: DropdownButtonFormField<int>(
+              key: const ValueKey('exam-type'),
+              initialValue: _typeId,
+              isExpanded: true,
+              items: [
+                for (final t in _types)
+                  DropdownMenuItem(
+                    key: ValueKey('exam-type-${t.id}'),
+                    value: t.id,
+                    child: Text(t.displayName, overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: _sending || _types.isEmpty
+                  ? null
+                  : (v) => setState(() => _typeId = v),
+              decoration: InputDecoration(
+                labelText: 'Exam type',
+                prefixIcon: const Icon(Icons.category_outlined),
+                border: const OutlineInputBorder(),
+                helperText: !_typesLoaded
+                    ? 'Loading exam types…'
+                    : (_types.isEmpty
+                          ? 'The server sent no exam types.'
+                          : null),
               ),
             ),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: TextField(

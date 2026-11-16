@@ -175,6 +175,36 @@ void tall(WidgetTester t) {
   addTearDown(t.view.reset);
 }
 
+/// No exam types in the master data; the school's exams have some.
+class NoExamTypesApi extends FakeUntisApi {
+  NoExamTypesApi() : super(latency: Duration.zero);
+
+  @override
+  Future<List<ExamType>> examTypes({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async => const [];
+
+  @override
+  Future<List<ExamItem>> exams({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required TimetableTarget target,
+    required DateTime start,
+    required DateTime end,
+  }) async => [
+    for (final (i, type) in ['Test', 'Schularbeit', '', 'Test'].indexed)
+      ExamItem(
+        id: i,
+        start: DateTime(2026, 11, 2 + i, 8),
+        end: DateTime(2026, 11, 2 + i, 9),
+        examType: type,
+      ),
+  ];
+}
+
 void main() {
   group('parsers', () {
     test('free rooms: tolerant shapes', () {
@@ -599,6 +629,13 @@ void main() {
       );
       expect(await repo.examTypes(demoAccount()), isEmpty);
     });
+
+    test('exam types: from the school\'s exams without master data', () async {
+      final r = build(NoExamTypesApi());
+      final types = await r.examTypes(teacherAccount());
+      expect([for (final t in types) t.name], ['Schularbeit', 'Test']);
+      expect(types.every((t) => t.id < 0), isTrue);
+    });
   });
 
   group('screens', () {
@@ -813,7 +850,7 @@ void main() {
 
       await t.tap(find.byKey(const ValueKey('exam-type')));
       await t.pumpAndSettle();
-      await t.tap(find.byKey(const ValueKey('exam-type-1')));
+      await t.tap(find.byKey(const ValueKey('exam-type-1')).last);
       await t.pumpAndSettle();
       await t.enterText(find.byKey(const ValueKey('exam-name')), 'Fractions');
       // Extend to the next period.
@@ -878,8 +915,10 @@ void main() {
       );
       // Tuesday's maths lesson is unit 3 (index 2).
       expect(find.text('09:40 – 10:25'), findsOneWidget);
-      await t.enterText(find.byKey(const ValueKey('exam-type-text')), 'Test');
-      await t.pump();
+      await t.tap(find.byKey(const ValueKey('exam-type')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const ValueKey('exam-type-2')).last);
+      await t.pumpAndSettle();
       final send = find.byKey(const ValueKey('exam-send'));
       await t.ensureVisible(send);
       await t.tap(send);

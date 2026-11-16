@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:better_betteruntis/api/class_register_parsers.dart';
 import 'package:better_betteruntis/api/untis_api_impl.dart';
+import 'package:better_betteruntis/app/routing_api.dart';
 import 'package:better_betteruntis/core/class_register.dart';
 import 'package:better_betteruntis/core/interfaces.dart';
 import 'package:better_betteruntis/core/models.dart';
@@ -281,6 +282,16 @@ void main() {
     });
     const lena = ClassRegStudent(id: 501, firstName: 'Lena', lastName: 'B');
     const ben = ClassRegStudent(id: 506, firstName: 'Ben', lastName: 'W');
+
+    test('through the app\'s routing API (as in the real app)', () async {
+      final accounts = InMemoryAccountRepository(initial: [teacherAccount()]);
+      accounts.secrets['teacher'] = 'S';
+      final routed = PupilPhotoRepositoryImpl(
+        api: RoutingUntisApi(real: api, demo: api),
+        accounts: accounts,
+      );
+      expect(await routed.photo(teacherAccount(), lena), isNotNull);
+    });
 
     test('demo photos, cached per session, "no photo" too', () async {
       final a = teacherAccount();

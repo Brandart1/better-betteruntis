@@ -1,15 +1,19 @@
+import 'dart:typed_data';
+
 import '../core/absence_details.dart';
 import '../core/absence_summary.dart';
 import '../core/class_register.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
+
 import '../core/models.dart';
+import '../core/pupil_photos.dart';
 import '../core/teacher_tools.dart';
 
 /// Sends demo accounts (host `*.invalid`) to [demo] and everything else to
 /// [real], so demo profiles live alongside real ones in the same database.
 class RoutingUntisApi
-    implements FullUntisApi, TeacherToolsApi, ClassAbsencesApi {
+    implements FullUntisApi, TeacherToolsApi, ClassAbsencesApi, PupilPhotoApi {
   RoutingUntisApi({required this.real, required this.demo});
 
   final FullUntisApi real;
@@ -430,6 +434,25 @@ class RoutingUntisApi
       klasseId: klasseId,
       start: start,
       end: end,
+    );
+  }
+
+  @override
+  Future<Uint8List?> pupilPhoto({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int studentId,
+    String? imageUrl,
+  }) async {
+    final Object a = _for(host);
+    if (a is! PupilPhotoApi) return null;
+    return a.pupilPhoto(
+      host: host,
+      school: school,
+      auth: auth,
+      studentId: studentId,
+      imageUrl: imageUrl,
     );
   }
 }

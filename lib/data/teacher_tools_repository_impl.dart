@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../core/class_register.dart';
+import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
 import '../core/teacher_tools.dart';
@@ -124,14 +125,49 @@ class TeacherToolsRepositoryImpl implements TeacherToolsRepository {
     try {
       _check(account);
       final auth = await accounts.credentials(account.id);
-      return _examTypes[account.id] = await _api.examTypes(
-        host: account.host,
-        school: account.school.loginName,
-        auth: auth,
-      );
+      var types = const <ExamType>[];
+      try {
+        types = await _api.examTypes(
+          host: account.host,
+          school: account.school.loginName,
+          auth: auth,
+        );
+      } catch (_) {}
+      if (types.isEmpty) types = await _typesFromExams(account, auth);
+      if (types.isEmpty) return const [];
+      return _examTypes[account.id] = types;
     } catch (_) {
       return const [];
     }
+  }
+
+  /// Fallback when the master data has no exam types: the type names of the
+  /// school's exams the teacher can see (half a year back, three months
+  /// ahead). They get negative ids, so only the name is sent.
+  Future<List<ExamType>> _typesFromExams(
+    Account account,
+    UntisCredentials auth,
+  ) async {
+    final Object a = api;
+    final target = account.personalTarget;
+    if (a is! InfoCenterApi || target == null) return const [];
+    final today = clock();
+    final exams = await a.exams(
+      host: account.host,
+      school: account.school.loginName,
+      auth: auth,
+      target: target,
+      start: today.subtract(const Duration(days: 183)),
+      end: today.add(const Duration(days: 92)),
+    );
+    final names = <String>{
+      for (final e in exams)
+        if (e.examType.trim().isNotEmpty) e.examType.trim(),
+    }.toList()..sort((x, y) => x.toLowerCase().compareTo(y.toLowerCase()));
+    return [
+      for (var i = 0; i < names.length; i++)
+        ExamType(id: -(i + 1), name: names[i]),
+    ];
   }
 
   @override
