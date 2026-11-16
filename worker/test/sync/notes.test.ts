@@ -47,7 +47,7 @@ const counters = async (id: number) =>
 const actual = async (id: number) =>
   (await env.DB.prepare(
     "SELECT coalesce(sum(deleted = 0), 0) AS note_count, coalesce(sum(length(CAST(key AS BLOB)) + coalesce(length(CAST(text AS BLOB)), 0) + " +
-      "coalesce(length(CAST(blob AS BLOB)), 0)), 0) AS bytes FROM notes WHERE identity_id = ?",
+      "length(CAST(homework AS BLOB)) + coalesce(length(CAST(blob AS BLOB)), 0)), 0) AS bytes FROM notes WHERE identity_id = ?",
   ).bind(id).first<{ note_count: number; bytes: number }>())!;
 
 describe("auth", () => {
@@ -79,10 +79,10 @@ describe("GET /api/sync/notes", () => {
     await putOk(s.token, [note("c", 12, "C", { deleted: true })]);
     const all = await get(s.token);
     expect(all.notes).toEqual([
-      { key: "a", exam: true, text: "A", updatedAt: 10, deleted: false, seq: 1 },
-      { key: "b", exam: false, text: "B", updatedAt: 11, deleted: false, seq: 2 },
+      { key: "a", exam: true, text: "A", homework: "", updatedAt: 10, deleted: false, seq: 1 },
+      { key: "b", exam: false, text: "B", homework: "", updatedAt: 11, deleted: false, seq: 2 },
       // Plaintext tombstones are stored and returned blanked.
-      { key: "c", exam: false, text: "", updatedAt: 12, deleted: true, seq: 3 },
+      { key: "c", exam: false, text: "", homework: "", updatedAt: 12, deleted: true, seq: 3 },
     ]);
     expect(all.latestSeq).toBe(3);
     expect((await get(s.token, 2)).notes.map((n) => n.key)).toEqual(["c"]);
@@ -121,8 +121,8 @@ describe("PUT /api/sync/notes", () => {
     const s = await login(freshUser());
     const out = await putOk(s.token, [note("a", 1, "x"), note("b", 2, "y")]);
     expect(out.notes).toEqual([
-      { key: "a", exam: false, text: "x", updatedAt: 1, deleted: false, seq: 1 },
-      { key: "b", exam: false, text: "y", updatedAt: 2, deleted: false, seq: 2 },
+      { key: "a", exam: false, text: "x", homework: "", updatedAt: 1, deleted: false, seq: 1 },
+      { key: "b", exam: false, text: "y", homework: "", updatedAt: 2, deleted: false, seq: 2 },
     ]);
     expect(out.latestSeq).toBe(2);
     expect(out.e2e).toBe(false);
@@ -154,13 +154,55 @@ describe("PUT /api/sync/notes", () => {
     const s = await login(freshUser());
     await putOk(s.token, [note("a", 1, "secret", { exam: true })]);
     const out = await putOk(s.token, [note("a", 2, "still secret", { exam: true, deleted: true })]);
-    expect(out.notes[0]).toEqual({ key: "a", exam: false, text: "", updatedAt: 2, deleted: true, seq: 2 });
+    expect(out.notes[0]).toEqual({ key: "a", exam: false, text: "", homework: "", updatedAt: 2, deleted: true, seq: 2 });
     const row = await env.DB.prepare("SELECT exam, text FROM notes WHERE identity_id = ? AND key = 'a'")
       .bind(await identityId(s.body.identity.userId))
       .first();
     expect(row).toEqual({ exam: 0, text: "" });
     const id = await identityId(s.body.identity.userId);
     expect(await counters(id)).toEqual({ note_count: 0, bytes: 1 });
+  });
+
+  it("homework: optional (missing = ''), stored, returned and counted in bytes", async () => {
+    const s = await login(freshUser());
+    const id = await identityId(s.body.identity.userId);
+    // An app version before homework sends no field at all.
+    const old = { key: "a", exam: false, text: "x", updatedAt: 1, deleted: false };
+    let out = await putOk(s.token, [old, note("b", 2, "y", { homework: "S. 12 Nr. 3 äö" })]);
+    expect(out.notes).toEqual([
+      { key: "a", exam: false, text: "x", homework: "", updatedAt: 1, deleted: false, seq: 1 },
+      { key: "b", exam: false, text: "y", homework: "S. 12 Nr. 3 äö", updatedAt: 2, deleted: false, seq: 2 },
+    ]);
+    expect((await get(s.token)).notes[1]).toMatchObject({ key: "b", homework: "S. 12 Nr. 3 äö" });
+    // key + text + homework (UTF-8: ä and ö are 2 bytes each).
+    expect(await counters(id)).toEqual({ note_count: 2, bytes: 1 + 1 + 1 + 1 + 16 });
+    expect(await counters(id)).toEqual(await actual(id));
+    // Homework only (no text, no exam) is a note of its own.
+    out = await putOk(s.token, [note("c", 3, "", { homework: "Essay" })]);
+    expect(out.notes[0]).toMatchObject({ key: "c", text: "", homework: "Essay" });
+    // A newer version without the field clears it.
+    out = await putOk(s.token, [{ ...old, key: "b", updatedAt: 3 }]);
+    expect(out.notes[0]).toMatchObject({ key: "b", homework: "" });
+    expect(await counters(id)).toEqual(await actual(id));
+  });
+
+  it("homework of plaintext tombstones is stored blanked", async () => {
+    const s = await login(freshUser());
+    await putOk(s.token, [note("a", 1, "", { homework: "secret" })]);
+    const out = await putOk(s.token, [note("a", 2, "", { homework: "still secret", deleted: true })]);
+    expect(out.notes[0]).toEqual({ key: "a", exam: false, text: "", homework: "", updatedAt: 2, deleted: true, seq: 2 });
+    const row = await env.DB.prepare("SELECT homework FROM notes WHERE identity_id = ? AND key = 'a'")
+      .bind(await identityId(s.body.identity.userId))
+      .first();
+    expect(row).toEqual({ homework: "" });
+  });
+
+  it("maximum homework length and unicode round-trip", async () => {
+    const s = await login(freshUser());
+    const homework = "Übung 😀\n" + "x".repeat(LIMITS.maxHomeworkLength - 9);
+    expect(homework.length).toBe(LIMITS.maxHomeworkLength);
+    const out = await putOk(s.token, [note("k", 1, "", { homework })]);
+    expect(out.notes[0]!.homework).toBe(homework);
   });
 
   it("tombstones are stored, returned and can be revived", async () => {
@@ -231,6 +273,10 @@ describe("PUT /api/sync/notes", () => {
     ["NUL in key", note("a\u0000b", 1)],
     ["lone surrogate in text", note("k", 1, "x\ud800y")],
     ["blob and text", { ...note("k", 1), blob: "AAAA" }],
+    ["homework too long", note("k", 1, "", { homework: "x".repeat(LIMITS.maxHomeworkLength + 1) })],
+    ["homework not a string", { ...note("k", 1), homework: 1 }],
+    ["homework null", { ...note("k", 1), homework: null }],
+    ["lone surrogate in homework", note("k", 1, "", { homework: "x\ud800y" })],
   ];
   for (const [name, bad] of badNotes) {
     it(`${name} -> 400, nothing stored`, async () => {
@@ -398,7 +444,7 @@ describe("counters and byte quota", () => {
     const s = await login(freshUser());
     await putOk(s.token, [note("a", 100, "stored", { exam: true })]);
     const out = await putOk(s.token, [note("a", 100, "other", { exam: false })]);
-    expect(out.notes).toEqual([{ key: "a", exam: true, text: "stored", updatedAt: 100, deleted: false, seq: 1 }]);
+    expect(out.notes).toEqual([{ key: "a", exam: true, text: "stored", homework: "", updatedAt: 100, deleted: false, seq: 1 }]);
     expect(out.latestSeq).toBe(1);
   });
 
@@ -483,7 +529,7 @@ describe("isolation and injection", () => {
     await putOk(b.token, [note("2026-11-16|lesson-42", 200, "B was here")]);
     await putOk(b.token, [note("2026-11-16|lesson-42", 300, "", { deleted: true })]);
     const pageA = await get(a.token);
-    expect(pageA.notes).toEqual([{ key: "2026-11-16|lesson-42", exam: true, text: "A's secret", updatedAt: 100, deleted: false, seq: 1 }]);
+    expect(pageA.notes).toEqual([{ key: "2026-11-16|lesson-42", exam: true, text: "A's secret", homework: "", updatedAt: 100, deleted: false, seq: 1 }]);
     expect(pageA.latestSeq).toBe(1);
     // B deletes its account: A's data stays.
     expect((await call(req("DELETE", "/api/sync/account", { token: b.token }))).status).toBe(204);
@@ -518,7 +564,7 @@ describe("isolation and injection", () => {
     const page = await get(a.token);
     expect(page.notes.map((n) => [n.key, n.text])).toEqual(evil.map((k) => [k, `${k} || (SELECT text FROM notes)`]));
     // Tables and other users untouched.
-    expect((await get(victim.token)).notes).toEqual([{ key: "v", exam: false, text: "victim", updatedAt: 1, deleted: false, seq: 1 }]);
+    expect((await get(victim.token)).notes).toEqual([{ key: "v", exam: false, text: "victim", homework: "", updatedAt: 1, deleted: false, seq: 1 }]);
     const tables = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('notes','identities','sessions','e2e_headers')").all();
     expect(tables.results).toHaveLength(4);
   });

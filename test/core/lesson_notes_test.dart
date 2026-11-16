@@ -276,6 +276,154 @@ void main() {
     n.set(['k'], const LessonNote(text: 'z'));
     expect(await n.saved, isTrue);
   });
+
+  group('homework', () {
+    test('json round trip; old notes without it load; isEmpty', () {
+      const n = LessonNote(text: 'x', homework: 'S. 12');
+      expect(n.toJson(), {'text': 'x', 'homework': 'S. 12'});
+      expect(LessonNote.fromJson(n.toJson()), n);
+      expect(LessonNote.fromJson({'exam': true}).homework, '');
+      expect(
+        const LessonNote(text: 'x').toJson().containsKey('homework'),
+        isFalse,
+      );
+      expect(n, isNot(const LessonNote(text: 'x')));
+      expect(
+        n.hashCode,
+        const LessonNote(text: 'x', homework: 'S. 12').hashCode,
+      );
+      expect(const LessonNote(homework: 'Essay').isEmpty, isFalse);
+      expect(const LessonNote(homework: '  ').isEmpty, isTrue);
+      expect(n.copyWith(text: '').homework, 'S. 12');
+      expect(n.copyWith(homework: '').isEmpty, isFalse);
+      expect(
+        const LessonNote(homework: 'h').copyWith(homework: '').isEmpty,
+        isTrue,
+      );
+    });
+
+    test('stored, applied and kept by set', () async {
+      final store = MemorySettingsStore({
+        LessonNotesNotifier.storeKey: {
+          'a|old': {'text': 'x'},
+          'a|hw': {'homework': 'Essay'},
+        },
+      });
+      final c = ProviderContainer(
+        overrides: [settingsStoreProvider.overrideWithValue(store)],
+      );
+      addTearDown(c.dispose);
+      expect(
+        c.read(lessonNotesProvider)['a|hw'],
+        const LessonNote(homework: 'Essay'),
+      );
+      c.read(lessonNotesProvider.notifier).set([
+        'a|new',
+      ], const LessonNote(homework: ' p. 12 '));
+      expect(c.read(lessonNotesProvider)['a|new']!.homework, 'p. 12');
+
+      final p = _p();
+      final out = applyLessonNotes(
+        [p, _p(hour: 9)],
+        'acc',
+        {lessonNoteKey('acc', p): const LessonNote(homework: ' Arbeitsblatt ')},
+      );
+      expect(out[0].userHomework, 'Arbeitsblatt');
+      expect(out[0].isExam, isFalse);
+      expect(
+        out[0].copyWithElements(out[0].elements).userHomework,
+        'Arbeitsblatt',
+      );
+      expect(out[1].userHomework, '');
+    });
+  });
+
+  group('custom Info center items', () {
+    test('parseLessonNoteKey', () {
+      final k = parseLessonNoteKey('acc', 'acc|2026-11-16|0835|7|3,5')!;
+      expect(k.start, DateTime(2026, 11, 16, 8, 35));
+      expect(k.lessonId, 7);
+      expect(k.subjectIds, [3, 5]);
+      expect(k.title, '');
+      final t = parseLessonNoteKey('acc', 'acc|2026-11-16|0800|0|E|Theater')!;
+      expect(t.subjectIds, isEmpty);
+      expect(t.title, 'E|Theater');
+      expect(parseLessonNoteKey('other', 'acc|2026-11-16|0800|7|3'), isNull);
+      expect(parseLessonNoteKey('acc', 'acc|settings|x'), isNull);
+      expect(
+        parseLessonNoteKey('acc', lessonNoteKey('acc', _p()))!.subjectIds,
+        [3],
+      );
+    });
+
+    final notes = {
+      'acc|2026-11-16|0745|7|3': const LessonNote(
+        exam: true,
+        text: 'T',
+        homework: 'H',
+      ),
+      'acc|2026-11-16|0835|7|3': const LessonNote(
+        exam: true,
+        text: 'T',
+        homework: 'H',
+      ),
+      'acc|2026-11-16|1030|8|0': const LessonNote(text: 'details only'),
+      'acc|2026-11-17|0745|9|Projekttag': const LessonNote(homework: 'Plakat'),
+      'acc|2026-11-18|0745|7|3': const LessonNote.tombstone(5),
+      'acc|2026-11-25|0745|7|3': const LessonNote(exam: true),
+      'other|2026-11-16|0745|7|3': const LessonNote(exam: true, homework: 'X'),
+    };
+
+    test('customHomework: merged lessons once, range, own account only', () {
+      final h = customHomework(
+        notes,
+        'acc',
+        DateTime(2026, 11, 16),
+        DateTime(2026, 11, 17),
+      );
+      expect([for (final i in h) i.text], ['H', 'Plakat']);
+      expect(h[0].dueOn, DateTime(2026, 11, 16, 7, 45));
+      expect(h[0].subjectId, 3);
+      expect(h[0].custom!.noteKeys, [
+        'acc|2026-11-16|0745|7|3',
+        'acc|2026-11-16|0835|7|3',
+      ]);
+      expect(h[1].subjectId, isNull);
+      expect(h[1].custom!.title, 'Projekttag');
+      expect(
+        customHomework(
+          notes,
+          'acc',
+          DateTime(2026, 11, 18),
+          DateTime(2026, 11, 30),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('customExams: end from the time grid, else 45 minutes', () {
+      const grid = TimeGrid({
+        1: [
+          TimeUnit(label: '1', start: 7 * 60 + 45, end: 8 * 60 + 30),
+          TimeUnit(label: '2', start: 8 * 60 + 35, end: 9 * 60 + 20),
+        ],
+      });
+      final e = customExams(
+        notes,
+        'acc',
+        DateTime(2026, 11, 1),
+        DateTime(2026, 11, 30),
+        grid: grid,
+      );
+      expect(e, hasLength(2));
+      expect(e[0].start, DateTime(2026, 11, 16, 7, 45));
+      expect(e[0].end, DateTime(2026, 11, 16, 9, 20));
+      expect(e[0].text, 'T');
+      expect(e[0].custom!.noteKeys, hasLength(2));
+      // 25 Nov is a Wednesday: not in this grid.
+      expect(e[1].end, DateTime(2026, 11, 25, 8, 30));
+    });
+  });
 }
 
 class _FailingStore extends MemorySettingsStore {

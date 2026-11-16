@@ -22,11 +22,12 @@ export interface SessionInfo {
   expiresAt: number;
 }
 
-/** A note as stored. Plaintext: exam/text set, blob null. E2E: blob set. */
+/** A note as stored. Plaintext: exam/text/homework set, blob null. E2E: blob set (homework ''). */
 export interface NoteRow {
   key: string;
   exam: number | null;
   text: string | null;
+  homework: string;
   blob: string | null;
   updated_at: number;
   deleted: number;
@@ -38,6 +39,8 @@ export interface NoteInput {
   key: string;
   exam: boolean | null;
   text: string | null;
+  /** Plaintext only (migration 0003); missing/undefined = ''. */
+  homework?: string;
   blob: string | null;
   updatedAt: number;
   deleted: boolean;
@@ -146,7 +149,7 @@ export async function deleteIdentity(db: D1Database, identityId: number): Promis
 
 // --- notes ------------------------------------------------------------------
 
-const NOTE_COLUMNS = "key, exam, text, blob, updated_at, deleted, seq";
+const NOTE_COLUMNS = "key, exam, text, homework, blob, updated_at, deleted, seq";
 
 /** Milliseconds per UTC day (budget days are `floor(ms / DAY_MS)`). */
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -230,7 +233,7 @@ export type PutOutcome =
 export interface WriteLimits {
   /** Live (non-deleted) notes. */
   maxNotes: number;
-  /** Sum of UTF-8 bytes of key + text/blob over all stored notes incl. tombstones. */
+  /** Sum of UTF-8 bytes of key + text/homework/blob over all stored notes incl. tombstones. */
   maxBytes: number;
   /** Accepted note writes (inserts and overwrites, tombstones included) per UTC day. */
   dailyWrites: number;
@@ -244,6 +247,7 @@ function encodeNotes(notes: NoteInput[]): { notesJson: string } {
         k: n.key,
         e: n.exam === null ? null : n.exam ? 1 : 0,
         t: n.text,
+        h: n.homework ?? "",
         b: n.blob,
         u: n.updatedAt,
         d: n.deleted ? 1 : 0,
@@ -252,10 +256,10 @@ function encodeNotes(notes: NoteInput[]): { notesJson: string } {
   };
 }
 
-/** Stored size of a note row (alias [a]): UTF-8 bytes of key + text + blob. */
+/** Stored size of a note row (alias [a]): UTF-8 bytes of key + text + homework + blob. */
 const size = (a: string) =>
   `(length(CAST(${a}.key AS BLOB)) + coalesce(length(CAST(${a}.text AS BLOB)), 0) + ` +
-  `coalesce(length(CAST(${a}.blob AS BLOB)), 0))`;
+  `coalesce(length(CAST(${a}.homework AS BLOB)), 0) + coalesce(length(CAST(${a}.blob AS BLOB)), 0))`;
 
 /**
  * CTE over the request (?2 = notes JSON): `c` = the given notes, `idx` =
@@ -264,7 +268,8 @@ const size = (a: string) =>
 const GIVEN =
   "WITH c AS (SELECT CAST(j.key AS INTEGER) AS idx, " +
   "json_extract(j.value, '$.k') AS key, json_extract(j.value, '$.e') AS exam, " +
-  "json_extract(j.value, '$.t') AS text, json_extract(j.value, '$.b') AS blob, " +
+  "json_extract(j.value, '$.t') AS text, json_extract(j.value, '$.h') AS homework, " +
+  "json_extract(j.value, '$.b') AS blob, " +
   "json_extract(j.value, '$.u') AS updated_at, json_extract(j.value, '$.d') AS deleted " +
   "FROM json_each(?2) AS j) ";
 
@@ -291,7 +296,7 @@ const USED_TODAY = "(CASE WHEN budget_day = ?7 THEN budget_used ELSE 0 END)";
 
 /** The stored rows of the keys in JSON array ?2 (identity ?1): one lookup per key. */
 const READ_BACK =
-  "SELECT n.key, n.exam, n.text, n.blob, n.updated_at, n.deleted, n.seq " +
+  "SELECT n.key, n.exam, n.text, n.homework, n.blob, n.updated_at, n.deleted, n.seq " +
   "FROM json_each(?2) AS j CROSS JOIN notes AS n ON n.identity_id = ?1 AND n.key = j.value";
 
 /** Random marker of one write (16 bytes, hex). */
@@ -374,13 +379,14 @@ export async function writeNotes(
       db
         .prepare(
           GIVEN +
-            "INSERT INTO notes (identity_id, key, exam, text, blob, updated_at, deleted, seq, stored_at) " +
-            "SELECT ?1, c.key, c.exam, c.text, c.blob, c.updated_at, c.deleted, g.base + c.idx + 1, ?3 " +
+            "INSERT INTO notes (identity_id, key, exam, text, homework, blob, updated_at, deleted, seq, stored_at) " +
+            "SELECT ?1, c.key, c.exam, c.text, c.homework, c.blob, c.updated_at, c.deleted, g.base + c.idx + 1, ?3 " +
             // g: one row only if step 2 set this write's nonce (else nothing is inserted).
             "FROM (SELECT write_base AS base FROM identities WHERE id = ?1 AND write_nonce = ?4) AS g " +
             "CROSS JOIN c LEFT JOIN notes AS n ON n.identity_id = ?1 AND n.key = c.key " +
             "WHERE (n.key IS NULL OR n.updated_at < c.updated_at) " +
             "ON CONFLICT (identity_id, key) DO UPDATE SET exam = excluded.exam, text = excluded.text, " +
+            "homework = excluded.homework, " +
             "blob = excluded.blob, updated_at = excluded.updated_at, deleted = excluded.deleted, " +
             "seq = excluded.seq, stored_at = excluded.stored_at WHERE excluded.updated_at > notes.updated_at " +
             `RETURNING ${NOTE_COLUMNS}`,

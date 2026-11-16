@@ -169,6 +169,7 @@ class Period {
     this.onlineLink,
     this.userExam = false,
     this.userNote = '',
+    this.userHomework = '',
     this.noteKey,
   });
 
@@ -194,15 +195,19 @@ class Period {
   /// Lesson details the user entered (stored on the device only).
   final String userNote;
 
+  /// The user's own homework for this lesson (see lib/core/lesson_notes.dart).
+  final String userHomework;
+
   /// Key of this lesson in the user's lesson notes; set once notes were
   /// applied (see lib/core/lesson_notes.dart).
   final String? noteKey;
 
-  /// Copy with the user's exam mark and details.
+  /// Copy with the user's exam mark, details and homework.
   Period withUserNote({
     required String noteKey,
     bool userExam = false,
     String userNote = '',
+    String userHomework = '',
   }) => Period(
     id: id,
     lessonId: lessonId,
@@ -221,6 +226,7 @@ class Period {
     onlineLink: onlineLink,
     userExam: userExam,
     userNote: userNote,
+    userHomework: userHomework,
     noteKey: noteKey,
   );
 
@@ -243,6 +249,7 @@ class Period {
     onlineLink: onlineLink,
     userExam: userExam,
     userNote: userNote,
+    userHomework: userHomework,
     noteKey: noteKey,
   );
 

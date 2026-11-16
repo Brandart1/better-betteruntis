@@ -10,7 +10,7 @@ before the teacher release (now 0.6.0; numbers swapped 2026-11-15).
   maintainer to run, update or back up.
 - The same Worker is the **WebUntis relay** for the web version (WebUntis
   sends no CORS headers) and hosts the **optional sync** of the user's own
-  lesson notes (custom exams, lesson details) and customisation settings
+  lesson notes (custom exams, lesson details, own homework) and customisation settings
   (colours, text, accessibility; see "Synced settings") in Cloudflare D1
   (SQLite).
 - Sync is **opt-in** with a disclaimer that the data is stored on a server.
@@ -19,8 +19,7 @@ before the teacher release (now 0.6.0; numbers swapped 2026-11-15).
 - **Optional end-to-end encryption** (sync passphrase): the server then only
   stores encrypted notes it can't read.
 - No self-hosting (dropped 2026-11-15). The old `server/` folder and Docker
-  files were removed in 0.5.0 (recoverable from tag `v0.4.8-alpha.7`; see
-  docs/DECISIONS-PENDING.md D4).
+  files were removed in 0.5.0 (recoverable from tag `v0.4.8-alpha.7`).
 
 ## Architecture
 
@@ -59,14 +58,18 @@ All JSON, `cache-control: no-store`, errors `{"error": "<code>", "message"}`.
 
 Wire details (implemented in `worker/src/sync/`, summary in `worker/README.md`):
 
-- **Note, plaintext account:** `{key, exam, text, updatedAt, deleted}` (key
-  1–256 chars, text ≤ 4 000 chars, no NUL/unpaired surrogates). **E2E
+- **Note, plaintext account:** `{key, exam, text, homework?, updatedAt,
+  deleted}` (key 1–256 chars, text and homework ≤ 4 000 chars each, no
+  NUL/unpaired surrogates). `homework` (the user's own homework of the
+  lesson, migration 0003) is optional on writes: app versions before it
+  don't send it and get `""` stored; answers always carry it. **E2E
   account:** `{key, blob, updatedAt, deleted}` with `key` = 43-char base64url
-  HMAC and `blob` = base64url ciphertext (≤ 16 KiB decoded); `exam`/`text`
-  must be absent. One request is either all plaintext or all encrypted.
-  Responses add `seq`. `updatedAt` > now + 5 min → 400 `clock_skew`.
-  Plaintext tombstones are stored and returned blanked (`text: ""`,
-  `exam: false`); E2E tombstones stay opaque blobs.
+  HMAC and `blob` = base64url ciphertext (≤ 16 KiB decoded); `exam`/`text`/
+  `homework` must be absent. One request is either all plaintext or all
+  encrypted. Responses add `seq`. `updatedAt` > now + 5 min → 400
+  `clock_skew`. Plaintext tombstones are stored and returned blanked
+  (`text: ""`, `homework: ""`, `exam: false`); E2E tombstones stay opaque
+  blobs.
 - `identity` (POST /session, GET/PUT /notes) is
   `{host, school, userId, epoch}`; `epoch` = 16 random bytes (22-char
   base64url) set when the identity row is created and never changed, so a
@@ -92,11 +95,12 @@ Wire details (implemented in `worker/src/sync/`, summary in `worker/README.md`):
   without a recovery code is still `DELETE /account`.
 - Limits: 500 notes and 1 MiB per request (413 `batch_too_large` /
   `body_too_large`), per identity 5 000 live notes (tombstones don't count;
-  413 `too_many_notes`) and 5 MiB of key + text/blob bytes incl. tombstones
+  413 `too_many_notes`) and 5 MiB of key + text/homework/blob bytes incl. tombstones
   (413 `storage_quota`; writes that don't grow the count/size always pass),
   **5 000 accepted note writes per identity and UTC day** (inserts and
   overwrites, tombstones included; 429 `daily_limit`, `retry-after` until
-  the next UTC midnight; see DECISIONS-PENDING R6), at most 30 sessions per
+  the next UTC midnight; it keeps one account from using up the app-wide
+  D1 allowance of 100 000 rows written per day), at most 30 sessions per
   identity (oldest dropped on login). Rate limits → 429 `rate_limited` +
   `retry-after` (bindings in worker/README.md).
 - Tombstones not written on the server for 400 days are purged by the
@@ -216,7 +220,8 @@ different keys at the same time.
   (`info = "bbu-note-key-v1"`). The server can't see dates, times or lessons;
   the same note always maps to the same server key, so last-write-wins still
   works.
-- **Content:** `exam`, `text` and the real note key are encrypted together
+- **Content:** `exam`, `text`, the own homework and the real note key are
+  encrypted together
   with **XChaCha20-Poly1305** (random 192-bit nonce; package `cryptography`,
   same algorithm on all platforms), with `K_enc` from HKDF
   (`info = "bbu-note-enc-v1"`). Blob format v2:
@@ -225,6 +230,14 @@ different keys at the same time.
   moved to another note, and the server can't change a note's timestamp or
   mark it deleted (both checked when decrypting; tampered notes are skipped
   and counted).
+- **Plaintext layout** (lib/sync/e2e_crypto.dart): `0x01 | flags | u16 key
+  length | key | u32 text length | text [| u32 homework length | homework]
+  | zero padding`; flag bit 0 = exam, bit 1 = the homework part follows.
+  Notes without homework are written without it (bit 1 clear), byte for
+  byte as before homework existed, so older app versions still read them;
+  they refuse notes with homework as unreadable (unknown flag) and never
+  overwrite them. The client skips (counts as too long) a note whose blob
+  would exceed the server's 16 KiB limit (text and homework together).
 - **Padding:** plaintext padded to multiples of 256 bytes to hide the text
   length.
 - **Server still sees:** the identity, number of notes, `updatedAt`, `seq`,
@@ -274,8 +287,7 @@ Added 2026-11-16 (maintainer: "make sync also sync settings (text,
 colours)"; accessibility added the same day). No server change: settings
 are ordinary records of the notes API in a reserved key namespace.
 Code: `lib/sync/synced_settings.dart` (list, encoding, stamps) and the
-settings part of `lib/sync/sync_engine.dart`. Open choices:
-DECISIONS-PENDING R9.
+settings part of `lib/sync/sync_engine.dart`.
 
 **Synced** (app-wide today, applied app-wide):
 
@@ -287,8 +299,8 @@ DECISIONS-PENDING R9.
 | Lessons: show cancelled lessons (`timetable`) | `timetable.showCancelled` |
 | Accessibility, everything on the screen (`accessibility`): contrast, day view by default, large day headers, read-aloud button, read-aloud language, text size, voice speed | `accessibility.contrast`, `.dayViewByDefault`, `.largeDayHeaders`, `.speakButton`, `.speechLanguage`, `.textScale`, `.speechRate` |
 
-Custom exams and lesson details ("own lesson titles/texts") were already
-synced as lesson notes. Accessibility values are the user's explicit
+Custom exams, lesson details ("own lesson titles/texts") and the user's own
+homework are synced as lesson notes. Accessibility values are the user's explicit
 choices: "contrast off" (theme follows the system) and "read-aloud
 language: system" are synced as those choices; what they resolve to on a
 device (system theme, device language, the system text size the factor

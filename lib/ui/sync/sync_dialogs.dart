@@ -350,7 +350,8 @@ class SyncDisclaimerDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Your custom exams and lesson details, and your settings '
+              'Your custom exams, homework and lesson details, and your '
+              'settings '
               '(lesson and subject colours, text, accessibility), are then '
               'stored on the BetterBetterUntis server (hosted by Cloudflare), '
               'under your WebUntis school and user id. That is how your other '

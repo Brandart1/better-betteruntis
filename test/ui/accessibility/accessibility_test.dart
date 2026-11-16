@@ -202,6 +202,37 @@ void main() {
         'Sonntag, 15. November. Frei: Herbstferien.',
       );
     });
+
+    test('the user\'s own homework and exam are mentioned', () {
+      final own = [
+        periods[0].withUserNote(noteKey: 'k1', userHomework: 'S. 12'),
+        periods[2].withUserNote(noteKey: 'k3', userExam: true),
+      ];
+      final text = daySpeech(
+        date: monday,
+        periods: own,
+        names: names,
+        language: SpeechLanguage.en,
+      );
+      expect(
+        text,
+        contains(
+          'First lesson: Mathematik with Anna Müller in room R101, '
+          'homework.',
+        ),
+      );
+      expect(text, contains('substitution'));
+      expect(text, contains('R101, exam, substitution.'));
+      expect(
+        daySpeech(
+          date: monday,
+          periods: own,
+          names: names,
+          language: SpeechLanguage.de,
+        ),
+        contains('in Raum R101, Hausaufgabe.'),
+      );
+    });
   });
 
   group('lesson numbers', () {

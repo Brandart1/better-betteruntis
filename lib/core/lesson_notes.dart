@@ -1,6 +1,7 @@
-/// The user's own additions to lessons, kept on the device only: marking a
-/// lesson as an exam and entering lesson details (e.g. "mündliche
-/// Wiederholung", exam topics). They are applied to the periods wherever the
+/// The user's own additions to lessons, kept on the device (and optionally
+/// synced, lib/sync/): marking a lesson as an exam, entering lesson details
+/// (e.g. "mündliche Wiederholung", exam topics) and their own homework. They
+/// are applied to the periods wherever the
 /// timetable is shown or exported.
 library;
 
@@ -8,6 +9,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'info.dart';
 import 'models.dart';
 import 'settings.dart';
 
@@ -15,12 +17,13 @@ import 'settings.dart';
 ///
 /// For the optional sync (lib/sync/) every note carries [updatedAt] and
 /// deletions are kept as tombstones ([deleted]) so they reach other devices.
-/// Equality compares the content ([exam], [text], [deleted]) only, not the
-/// sync metadata.
+/// Equality compares the content ([exam], [text], [homework], [deleted])
+/// only, not the sync metadata.
 class LessonNote {
   const LessonNote({
     this.exam = false,
     this.text = '',
+    this.homework = '',
     this.updatedAt = 0,
     this.deleted = false,
     this.dirty = false,
@@ -31,6 +34,7 @@ class LessonNote {
   const LessonNote.tombstone(this.updatedAt, {this.dirty = false, this.base})
     : exam = false,
       text = '',
+      homework = '',
       deleted = true;
 
   /// Marked as an exam by the user.
@@ -38,6 +42,9 @@ class LessonNote {
 
   /// Lesson details entered by the user.
   final String text;
+
+  /// The user's own homework for this lesson; empty = none.
+  final String homework;
 
   /// Last change, in milliseconds since the epoch (UTC). 0 for notes stored
   /// before sync existed (older than anything synced).
@@ -54,19 +61,23 @@ class LessonNote {
   /// always stamped above it, also when its stamp is clamped later.
   final int? base;
 
-  bool get isEmpty => deleted || (!exam && text.trim().isEmpty);
+  bool get isEmpty =>
+      deleted || (!exam && text.trim().isEmpty && homework.trim().isEmpty);
 
-  LessonNote copyWith({bool? exam, String? text}) => LessonNote(
-    exam: exam ?? this.exam,
-    text: text ?? this.text,
-    updatedAt: updatedAt,
-    dirty: dirty,
-    base: base,
-  );
+  LessonNote copyWith({bool? exam, String? text, String? homework}) =>
+      LessonNote(
+        exam: exam ?? this.exam,
+        text: text ?? this.text,
+        homework: homework ?? this.homework,
+        updatedAt: updatedAt,
+        dirty: dirty,
+        base: base,
+      );
 
   Map<String, Object?> toJson() => {
     if (exam) 'exam': true,
     if (text.isNotEmpty) 'text': text,
+    if (homework.isNotEmpty) 'homework': homework,
     if (updatedAt != 0) 'updatedAt': updatedAt,
     if (deleted) 'deleted': true,
     if (dirty) 'dirty': true,
@@ -80,6 +91,8 @@ class LessonNote {
     return LessonNote(
       exam: j['exam'] == true,
       text: '${j['text'] ?? ''}',
+      // Notes stored before homework existed have none.
+      homework: '${j['homework'] ?? ''}',
       updatedAt: at is num ? at.toInt() : 0,
       deleted: j['deleted'] == true,
       dirty: dirty,
@@ -92,14 +105,16 @@ class LessonNote {
       other is LessonNote &&
       other.exam == exam &&
       other.text == text &&
+      other.homework == homework &&
       other.deleted == deleted;
 
   @override
-  int get hashCode => Object.hash(exam, text, deleted);
+  int get hashCode => Object.hash(exam, text, homework, deleted);
 
   @override
   String toString() =>
-      'LessonNote(exam: $exam, text: $text, updatedAt: $updatedAt'
+      'LessonNote(exam: $exam, text: $text, homework: $homework, '
+      'updatedAt: $updatedAt'
       '${deleted ? ', deleted' : ''}${dirty ? ', dirty' : ''})';
 }
 
@@ -141,8 +156,160 @@ List<Period> applyLessonNotes(
         noteKey: key,
         userExam: n?.exam ?? false,
         userNote: n?.text.trim() ?? '',
+        userHomework: n?.homework.trim() ?? '',
       );
     }(),
+];
+
+/// The lesson occurrence a [lessonNoteKey] of [accountId] stands for, or
+/// null if [key] isn't one of its keys. [subjectIds] are the subject ids of
+/// the key (empty for lessons without a subject; their [title] is the
+/// lesson title instead).
+({DateTime start, int lessonId, List<int> subjectIds, String title})?
+parseLessonNoteKey(String accountId, String key) {
+  final prefix = '$accountId|';
+  if (!key.startsWith(prefix)) return null;
+  // The title (last part) may itself contain '|'.
+  final parts = key.substring(prefix.length).split('|');
+  if (parts.length < 4) return null;
+  final date = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(parts[0]);
+  final time = RegExp(r'^(\d{2})(\d{2})$').firstMatch(parts[1]);
+  final lessonId = int.tryParse(parts[2]);
+  if (date == null || time == null || lessonId == null) return null;
+  final what = parts.sublist(3).join('|');
+  final ids = RegExp(r'^-?\d+(,-?\d+)*$').hasMatch(what)
+      ? [for (final s in what.split(',')) int.parse(s)]
+      : const <int>[];
+  return (
+    start: DateTime(
+      int.parse(date[1]!),
+      int.parse(date[2]!),
+      int.parse(date[3]!),
+      int.parse(time[1]!),
+      int.parse(time[2]!),
+    ),
+    lessonId: lessonId,
+    subjectIds: ids,
+    title: ids.isEmpty ? what : '',
+  );
+}
+
+/// One lesson with a note, see [_customLessons].
+class _CustomLesson {
+  _CustomLesson(this.note, this.at) : lastStart = at.start;
+
+  final List<String> keys = [];
+  final LessonNote note;
+  final ({DateTime start, int lessonId, List<int> subjectIds, String title}) at;
+
+  /// Start of the last period of a merged lesson.
+  DateTime lastStart;
+}
+
+/// The user's notes of [accountId] on lessons from [from] to [to] (whole
+/// days, inclusive) that [include] picks, one entry per lesson: the
+/// periods of a merged lesson (same day, lesson and subjects, same
+/// content) are one entry with all their keys, ordered by start.
+/// Tombstones and empty notes are skipped.
+List<_CustomLesson> _customLessons(
+  Map<String, LessonNote> notes,
+  String accountId,
+  DateTime from,
+  DateTime to,
+  bool Function(LessonNote n) include,
+) {
+  final first = DateTime(from.year, from.month, from.day);
+  final end = DateTime(to.year, to.month, to.day + 1);
+  final groups = <String, _CustomLesson>{};
+  // Sorted keys of one account are sorted by date and start time.
+  for (final k in notes.keys.toList()..sort()) {
+    final n = notes[k]!;
+    if (n.isEmpty || !include(n)) continue;
+    final at = parseLessonNoteKey(accountId, k);
+    if (at == null || at.start.isBefore(first) || !at.start.isBefore(end)) {
+      continue;
+    }
+    final s = at.start;
+    final id = [
+      '${s.year}-${s.month}-${s.day}',
+      at.lessonId,
+      at.subjectIds.join(','),
+      at.title,
+      n.exam,
+      n.text.trim(),
+      n.homework.trim(),
+    ].join('\u0000');
+    final g = groups.putIfAbsent(id, () => _CustomLesson(n, at));
+    g.keys.add(k);
+    g.lastStart = s;
+  }
+  return groups.values.toList()
+    ..sort((a, b) => a.at.start.compareTo(b.at.start));
+}
+
+/// End of the period starting at [start] by the school's [grid] (the note
+/// key only has the start), else 45 minutes later.
+DateTime _periodEnd(DateTime start, TimeGrid? grid) {
+  final minute = start.hour * 60 + start.minute;
+  for (final u in grid?.days[start.weekday] ?? const <TimeUnit>[]) {
+    if (u.start == minute && u.end > minute) {
+      return DateTime(
+        start.year,
+        start.month,
+        start.day,
+      ).add(Duration(minutes: u.end));
+    }
+  }
+  return start.add(const Duration(minutes: 45));
+}
+
+/// The user's own homework of [accountId] on lessons from [from] to [to]
+/// (whole days) as Info center items: due on the lesson's day, the subject
+/// from the note key.
+List<HomeworkItem> customHomework(
+  Map<String, LessonNote> notes,
+  String accountId,
+  DateTime from,
+  DateTime to,
+) => [
+  for (final l in _customLessons(
+    notes,
+    accountId,
+    from,
+    to,
+    (n) => n.homework.trim().isNotEmpty,
+  ))
+    HomeworkItem(
+      id: 0,
+      lessonId: l.at.lessonId,
+      assignedOn: l.at.start,
+      dueOn: l.at.start,
+      text: l.note.homework.trim(),
+      subjectId: l.at.subjectIds.firstOrNull,
+      custom: CustomSource(noteKeys: l.keys, title: l.at.title),
+    ),
+];
+
+/// The lessons of [accountId] from [from] to [to] (whole days) the user
+/// marked as exams, as Info center items with their details as text. The
+/// end comes from the school's time [grid] where it has the period.
+List<ExamItem> customExams(
+  Map<String, LessonNote> notes,
+  String accountId,
+  DateTime from,
+  DateTime to, {
+  TimeGrid? grid,
+}) => [
+  for (final l in _customLessons(notes, accountId, from, to, (n) => n.exam))
+    ExamItem(
+      id: 0,
+      start: l.at.start,
+      end: _periodEnd(l.lastStart, grid),
+      name: l.at.title,
+      text: l.note.text.trim(),
+      subjectId: l.at.subjectIds.firstOrNull,
+      custom: CustomSource(noteKeys: l.keys, title: l.at.title),
+    ),
 ];
 
 /// Clock for [LessonNote.updatedAt] (overridden in tests).
@@ -260,6 +427,7 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
         next[k] = LessonNote(
           exam: note.exam,
           text: note.text.trim(),
+          homework: note.homework.trim(),
           updatedAt: at,
           dirty: true,
           base: base,
@@ -304,7 +472,12 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
       final local = next[e.key];
       final n = r.isEmpty
           ? LessonNote.tombstone(r.updatedAt)
-          : LessonNote(exam: r.exam, text: r.text, updatedAt: r.updatedAt);
+          : LessonNote(
+              exam: r.exam,
+              text: r.text,
+              homework: r.homework,
+              updatedAt: r.updatedAt,
+            );
       if (local == null) {
         next[e.key] = n;
         touched = true;
@@ -376,6 +549,7 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
         : LessonNote(
             exam: n.exam,
             text: n.text,
+            homework: n.homework,
             updatedAt: at,
             dirty: d,
             base: base,
@@ -384,7 +558,12 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
 
   static LessonNote _clean(LessonNote n) => n.deleted
       ? LessonNote.tombstone(n.updatedAt)
-      : LessonNote(exam: n.exam, text: n.text, updatedAt: n.updatedAt);
+      : LessonNote(
+          exam: n.exam,
+          text: n.text,
+          homework: n.homework,
+          updatedAt: n.updatedAt,
+        );
 
   /// Removes the entries whose full key matches [test] (no tombstones:
   /// used for records that never were lesson notes). Returns how many.

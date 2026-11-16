@@ -26,6 +26,7 @@ class _Words {
     required this.cancelled,
     required this.substitution,
     required this.exam,
+    required this.homework,
     required this.noLessons,
     required this.holiday,
     required this.date,
@@ -44,6 +45,7 @@ class _Words {
   final String cancelled;
   final String substitution;
   final String exam;
+  final String homework;
   final String noLessons;
   final String holiday;
   final String Function(String weekday, int day, String month) date;
@@ -98,6 +100,7 @@ final _en = _Words(
   cancelled: 'cancelled',
   substitution: 'substitution',
   exam: 'exam',
+  homework: 'homework',
   noLessons: 'No lessons.',
   holiday: 'Holiday',
   date: (w, d, m) => '$w, $d $m.',
@@ -152,6 +155,7 @@ final _de = _Words(
   cancelled: 'entfällt',
   substitution: 'Vertretung',
   exam: 'Prüfung',
+  homework: 'Hausaufgabe',
   noLessons: 'Keine Stunden.',
   holiday: 'Frei',
   date: (w, d, m) => '$w, $d. $m.',
@@ -225,7 +229,8 @@ String _when(_Words w, List<int> nums) {
 }
 
 /// The text read aloud for [date]: the date, then one sentence per lesson
-/// (subjects, teachers, rooms; cancelled / substitution / exam), or
+/// (subjects, teachers, rooms; cancelled / substitution / exam / the
+/// user's own homework), or
 /// "No lessons" / the holiday.
 String daySpeech({
   required DateTime date,
@@ -281,6 +286,7 @@ String daySpeech({
         if (b.isExam) w.exam,
         if (b.isIrregular) w.substitution,
       ],
+      if (b.periods.any((q) => q.userHomework.isNotEmpty)) w.homework,
     ];
     final sentence = [if (what.isNotEmpty) what, ...notes].join(', ');
     final nums = lessonNumbersOf(names.timeGrid, b, dayPeriods);

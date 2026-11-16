@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/info.dart';
 import '../../core/interfaces.dart';
+import '../../core/lesson_notes.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../timetable/timetable_utils.dart';
+import 'custom_items.dart';
 import 'info_common.dart';
 import 'info_providers.dart';
 
@@ -21,6 +23,11 @@ class ExamsTab extends ConsumerStatefulWidget {
 
 class _ExamsTabState extends ConsumerState<ExamsTab> {
   bool _showPast = false;
+
+  /// Custom exams: edit their details.
+  VoidCallback? _editor(ExamItem e) => e.custom == null
+      ? null
+      : () => editCustomExam(context, ref, e.custom!);
 
   @override
   Widget build(BuildContext context) {
@@ -39,12 +46,24 @@ class _ExamsTabState extends ConsumerState<ExamsTab> {
       forceRefresh(ref, #exams, pastP, pastQ),
     ]);
 
+    // Lessons the user marked as exams join the school's, over both ranges.
+    final custom = customExams(
+      ref.watch(lessonNotesProvider),
+      widget.account.id,
+      addDays(today, -56),
+      addDays(today, 56),
+      grid: names?.timeGrid,
+    );
     final upcoming = [
       for (final e in up.value?.data ?? const <ExamItem>[])
+        if (!e.end.isBefore(now)) e,
+      for (final e in custom)
         if (!e.end.isBefore(now)) e,
     ]..sort((a, b) => a.start.compareTo(b.start));
     final pastItems = [
       for (final e in past.value?.data ?? const <ExamItem>[])
+        if (e.end.isBefore(now)) e,
+      for (final e in custom)
         if (e.end.isBefore(now)) e,
     ]..sort((a, b) => b.start.compareTo(a.start));
     final pastStatus = InfoStatus.of(past);
@@ -70,7 +89,13 @@ class _ExamsTabState extends ConsumerState<ExamsTab> {
           const SliverToBoxAdapter(child: InfoSectionHeader('Upcoming')),
           SliverList.list(
             children: [
-              for (final e in upcoming) ExamCard(exam: e, names: names, now: now),
+              for (final e in upcoming)
+                ExamCard(
+                  exam: e,
+                  names: names,
+                  now: now,
+                  onTap: _editor(e),
+                ),
             ],
           ),
         ],
@@ -116,7 +141,13 @@ class _ExamsTabState extends ConsumerState<ExamsTab> {
             SliverList.list(
               children: [
                 for (final e in pastItems)
-                  ExamCard(exam: e, names: names, now: now, past: true),
+                  ExamCard(
+                    exam: e,
+                    names: names,
+                    now: now,
+                    past: true,
+                    onTap: _editor(e),
+                  ),
               ],
             ),
       ],
@@ -140,12 +171,16 @@ class ExamCard extends StatelessWidget {
     required this.names,
     required this.now,
     this.past = false,
+    this.onTap,
   });
 
   final ExamItem exam;
   final NameResolver? names;
   final DateTime now;
   final bool past;
+
+  /// Custom exams: edit their details.
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -184,55 +219,67 @@ class ExamCard extends StatelessWidget {
               '${formatDay(context, e.end, now)} ${dateFormat(context, 'HH:mm').format(e.end)}';
 
     return Card.outlined(
-      key: ValueKey('exam-${e.id}'),
+      key: ValueKey(
+        e.custom == null
+            ? 'exam-${e.id}'
+            : 'exam-custom-${e.custom!.noteKeys.first}',
+      ),
+      clipBehavior: Clip.antiAlias,
       margin: const EdgeInsets.symmetric(vertical: 4),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _DateBadge(date: e.start, past: past),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title.isEmpty ? 'Exam' : title.join(' · '),
-                          style: theme.textTheme.titleSmall?.copyWith(color: muted),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _DateBadge(date: e.start, past: past),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title.isEmpty ? 'Exam' : title.join(' · '),
+                            style: theme.textTheme.titleSmall?.copyWith(color: muted),
+                          ),
                         ),
+                        if (e.custom != null) ...[
+                          const CustomChip(),
+                          if (!past) const SizedBox(width: 4),
+                        ],
+                        if (!past)
+                          InfoChip(
+                            examCountdown(e.start, now),
+                            icon: Icons.schedule,
+                            background: soon ? cs.tertiaryContainer : null,
+                            foreground: soon ? cs.onTertiaryContainer : null,
+                          ),
+                      ],
+                    ),
+                    if (e.examType.trim().isNotEmpty)
+                      Text(
+                        e.examType.trim(),
+                        style: theme.textTheme.bodySmall?.copyWith(color: cs.primary),
                       ),
-                      if (!past)
-                        InfoChip(
-                          examCountdown(e.start, now),
-                          icon: Icons.schedule,
-                          background: soon ? cs.tertiaryContainer : null,
-                          foreground: soon ? cs.onTertiaryContainer : null,
-                        ),
-                    ],
-                  ),
-                  if (e.examType.trim().isNotEmpty)
-                    Text(
-                      e.examType.trim(),
-                      style: theme.textTheme.bodySmall?.copyWith(color: cs.primary),
-                    ),
-                  line(Icons.access_time, when),
-                  if (rooms.isNotEmpty) line(Icons.room_outlined, rooms.join(', ')),
-                  if (teachers.isNotEmpty) line(Icons.person_outline, teachers.join(', ')),
-                  if (classes.isNotEmpty) line(Icons.groups_outlined, classes.join(', ')),
-                  if (e.text.trim().isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(e.text.trim(), style: theme.textTheme.bodyMedium),
-                    ),
-                ],
+                    line(Icons.access_time, when),
+                    if (rooms.isNotEmpty) line(Icons.room_outlined, rooms.join(', ')),
+                    if (teachers.isNotEmpty) line(Icons.person_outline, teachers.join(', ')),
+                    if (classes.isNotEmpty) line(Icons.groups_outlined, classes.join(', ')),
+                    if (e.text.trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(e.text.trim(), style: theme.textTheme.bodyMedium),
+                      ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

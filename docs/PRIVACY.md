@@ -25,8 +25,8 @@ school.
 - The web version sends your WebUntis requests through our relay. They are
   **passed through, not stored**, and their contents are not logged.
 - **Sync is optional and off by default.** Only if you turn it on do we store
-  your own lesson notes, custom exams and app settings (colours, text,
-  accessibility) so they show up on your other devices. With **end-to-end
+  your own lesson notes (custom exams, homework, lesson details) and app
+  settings (colours, text, accessibility) so they show up on your other devices. With **end-to-end
   encryption** turned on, we only store encrypted data we can't read.
 - Turning sync off deletes everything we stored about you.
 - No ads, no tracking, no analytics, no selling of data.
@@ -64,7 +64,7 @@ If you turn on sync in the app, we store:
 | Data | Why |
 |------|-----|
 | WebUntis server (host), your school's login name and your numeric WebUntis user id | to know which notes belong to you; confirmed with WebUntis when a device signs in to sync |
-| Your lesson notes and custom exams (text, the lesson they belong to, whether it is an exam) and your app settings (lesson and subject colours, text size and style, accessibility choices), **or** with end-to-end encryption only encrypted blobs and pseudonymous keys | the content that is synced |
+| Your lesson notes, custom exams and homework (text, homework text, the lesson they belong to, whether it is an exam) and your app settings (lesson and subject colours, text size and style, accessibility choices), **or** with end-to-end encryption only encrypted blobs and pseudonymous keys | the content that is synced |
 | With end-to-end encryption: the encryption header (salt, key-derivation settings, your data key encrypted with your passphrase and, if set up, your recovery code) | so your other devices can unlock the data with your passphrase |
 | Hashes (SHA-256) of your sync session tokens, not the tokens themselves | to recognize your signed-in devices |
 | Timestamps (when notes were changed, when the account and sessions were created and expire) and change counters | to merge changes from several devices |
@@ -170,7 +170,7 @@ https://github.com/Brandart1/better-betteruntis/blob/main/docs/PRIVACY.md; its h
 
 ## Suggested in-app text for the sync opt-in dialog
 
-> **Sync your notes?** Your custom exams and lesson details will be stored on
+> **Sync your notes?** Your custom exams, homework and lesson details will be stored on
 > the BetterBetterUntis sync server (run privately by the developer on
 > Cloudflare), together with your school and WebUntis user id, so they show
 > up on your other devices. Your password is never sent to sync; turn on

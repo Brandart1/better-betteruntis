@@ -53,6 +53,20 @@ class InboxMessageDetail {
   final List<({String name, String url})> attachments;
 }
 
+/// Where an Info center item the user added themselves comes from: their
+/// lesson notes (see `customHomework` / `customExams` in
+/// lib/core/lesson_notes.dart), not the school.
+class CustomSource {
+  const CustomSource({required this.noteKeys, this.title = ''});
+
+  /// Full keys of the notes (all periods of a merged lesson); editing the
+  /// item sets all of them.
+  final List<String> noteKeys;
+
+  /// Lesson title for lessons without a subject (else '').
+  final String title;
+}
+
 /// Homework from getHomeWork2017, with its lesson resolved where possible.
 class HomeworkItem {
   const HomeworkItem({
@@ -67,6 +81,7 @@ class HomeworkItem {
     this.teacherIds = const [],
     this.klassenIds = const [],
     this.attachments = const [],
+    this.custom,
   });
 
   final int id;
@@ -83,6 +98,9 @@ class HomeworkItem {
   final List<int> teacherIds;
   final List<int> klassenIds;
   final List<({String name, String url})> attachments;
+
+  /// Set for the user's own homework (no completion state).
+  final CustomSource? custom;
 }
 
 /// Exam from getExams2017.
@@ -98,6 +116,7 @@ class ExamItem {
     this.klassenIds = const [],
     this.roomIds = const [],
     this.teacherIds = const [],
+    this.custom,
   });
 
   final int id;
@@ -110,6 +129,9 @@ class ExamItem {
   final List<int> klassenIds;
   final List<int> roomIds;
   final List<int> teacherIds;
+
+  /// Set for an exam the user marked themselves.
+  final CustomSource? custom;
 }
 
 /// Absence from getStudentAbsences2017.

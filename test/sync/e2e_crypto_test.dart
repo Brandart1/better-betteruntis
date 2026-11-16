@@ -514,7 +514,7 @@ void main() {
 
       for (final bad in [
         mod((p) => p[0] = 2), // version
-        mod((p) => p[1] = 3), // flags
+        mod((p) => p[1] = 5), // flags (unknown bit 2)
         mod((p) => p[3] = 250), // key length past end
         mod((p) => p[8] = 255), // text length past end
         mod((p) => p[255] = 1), // padding not zero
@@ -524,6 +524,83 @@ void main() {
       ]) {
         expect(() => decodeNotePlaintext(bad), throwsA(isA<E2eCorrupt>()));
       }
+    });
+  });
+
+  group('homework', () {
+    test('round trip; without homework the layout is unchanged', () {
+      final plain = encodeNotePlaintext(
+        noteKey: 'acc|2026-11-16|0800|1|2',
+        exam: true,
+        text: 'Kapitel 3',
+        homework: 'S. 12 Nr. 3 – äö 🧮',
+      );
+      expect(plain[1], 3);
+      final n = decodeNotePlaintext(plain);
+      expect(n.noteKey, 'acc|2026-11-16|0800|1|2');
+      expect(n.exam, isTrue);
+      expect(n.text, 'Kapitel 3');
+      expect(n.homework, 'S. 12 Nr. 3 – äö 🧮');
+
+      // Empty homework: exactly the bytes older app versions write/read.
+      final without = encodeNotePlaintext(noteKey: 'k', exam: false, text: 'x');
+      expect(without[1], 0);
+      expect(
+        encodeNotePlaintext(noteKey: 'k', exam: false, text: 'x', homework: ''),
+        without,
+      );
+      expect(decodeNotePlaintext(without).homework, '');
+
+      final only = decodeNotePlaintext(
+        encodeNotePlaintext(noteKey: 'k', exam: false, text: '', homework: 'h'),
+      );
+      expect((only.text, only.homework, only.exam), ('', 'h', false));
+    });
+
+    test('layout validation', () {
+      final good = encodeNotePlaintext(
+        noteKey: 'k',
+        exam: false,
+        text: 'x',
+        homework: 'hw',
+      );
+      expect(decodeNotePlaintext(good).homework, 'hw');
+      Uint8List mod(void Function(Uint8List) f) {
+        final c = Uint8List.fromList(good);
+        f(c);
+        return c;
+      }
+
+      for (final bad in [
+        mod((p) => p[10] = 255), // homework length past end
+        mod((p) => p[13] = 1), // homework shorter: padding not zero
+        mod((p) => p[14] = 0xff), // invalid UTF-8 in homework
+        mod((p) => p[1] = 6), // unknown flag bit 2
+      ]) {
+        expect(() => decodeNotePlaintext(bad), throwsA(isA<E2eCorrupt>()));
+      }
+    });
+
+    test('encrypt/decrypt carries homework', () async {
+      final keys = await E2eKeys.fromDek(List.filled(32, 3));
+      final blob = await encryptNote(
+        keys,
+        noteKey: 'acc|2026-11-16|0800|1|2',
+        exam: false,
+        text: '',
+        homework: 'Essay',
+        updatedAt: 42,
+        deleted: false,
+      );
+      final n = await decryptNote(
+        keys,
+        await serverKey(keys, 'acc|2026-11-16|0800|1|2'),
+        blob,
+        updatedAt: 42,
+        deleted: false,
+      );
+      expect(n.homework, 'Essay');
+      expect(n.text, '');
     });
   });
 

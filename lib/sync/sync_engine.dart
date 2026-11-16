@@ -75,6 +75,10 @@ final syncClockProvider = Provider<DateTime Function()>((ref) => DateTime.now);
 const int _maxKeyLength = 256;
 const int _maxTextLength = 4000;
 
+/// Server limit for E2E blobs (base64url of at most 16 KiB): text and
+/// homework together can exceed it (each up to 4 000 characters).
+const int _maxBlobChars = (16 * 1024 * 4 + 2) ~/ 3;
+
 /// `since` that returns no notes, only the identity's state (the server
 /// accepts up to 15 digits).
 const int _noNotesSince = 999999999999999;
@@ -1449,6 +1453,7 @@ class SyncEngine extends SyncController {
       if (!full && !n.dirty) continue;
       final remoteKey = e.key.substring(prefix.length);
       if (n.text.length > _maxTextLength ||
+          n.homework.length > _maxTextLength ||
           (keys == null && remoteKey.length > _maxKeyLength)) {
         tooLong++;
         continue;
@@ -1482,6 +1487,7 @@ class SyncEngine extends SyncController {
             noteKey: remoteKey,
             exam: n.deleted ? false : n.exam,
             text: n.deleted ? '' : n.text,
+            homework: n.deleted ? '' : n.homework,
             updatedAt: n.updatedAt,
             deleted: n.deleted,
           ),
@@ -1493,9 +1499,14 @@ class SyncEngine extends SyncController {
           key: remoteKey,
           exam: n.deleted ? false : n.exam,
           text: n.deleted ? '' : n.text,
+          homework: n.deleted ? '' : n.homework,
           updatedAt: n.updatedAt,
           deleted: n.deleted,
         );
+      }
+      if ((r.blob?.length ?? 0) > _maxBlobChars) {
+        tooLong++;
+        continue;
       }
       out.add(r);
       sent[r.key] = (e.key, n, r);
@@ -1594,7 +1605,9 @@ class SyncEngine extends SyncController {
     if (sent.encrypted) return sent.blob == stored.blob;
     return sent.deleted == stored.deleted &&
         (sent.deleted ||
-            (sent.exam == stored.exam && sent.text == stored.text));
+            (sent.exam == stored.exam &&
+                sent.text == stored.text &&
+                sent.homework == stored.homework));
   }
 
   /// Server notes as local notes by full local key, the count of notes
@@ -1615,6 +1628,7 @@ class SyncEngine extends SyncController {
       String key;
       bool exam;
       String text;
+      String homework;
       if (r.encrypted) {
         if (keys == null) {
           unreadable.add(r.key);
@@ -1631,6 +1645,7 @@ class SyncEngine extends SyncController {
           key = n.noteKey;
           exam = n.exam;
           text = n.text;
+          homework = n.homework;
         } on e2e.E2eException {
           unreadable.add(r.key);
           continue;
@@ -1643,6 +1658,7 @@ class SyncEngine extends SyncController {
         key = r.key;
         exam = r.exam;
         text = r.text;
+        homework = r.homework;
       }
       if (key.isEmpty) {
         unreadable.add(r.key);
@@ -1660,7 +1676,12 @@ class SyncEngine extends SyncController {
       }
       out['$accountId|$key'] = r.deleted
           ? LessonNote.tombstone(r.updatedAt)
-          : LessonNote(exam: exam, text: text, updatedAt: r.updatedAt);
+          : LessonNote(
+              exam: exam,
+              text: text,
+              homework: homework,
+              updatedAt: r.updatedAt,
+            );
     }
     return (
       notes: out,

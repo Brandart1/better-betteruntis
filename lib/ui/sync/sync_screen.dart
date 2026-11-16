@@ -31,7 +31,7 @@ class SyncScreen extends ConsumerWidget {
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
               child: Text(
-                'Keep your custom exams, lesson details and settings '
+                'Keep your custom exams, homework, lesson details and settings '
                 '(colours, text, accessibility) the same on all your devices '
                 '(also the web version).',
               ),

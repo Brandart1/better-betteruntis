@@ -269,6 +269,86 @@ void main() {
     );
   });
 
+  group('homework', () {
+    Future<void> roundTrip(FakeSyncServer server, {String? passphrase}) async {
+      final a = Device(server);
+      final b = Device(server);
+      addTearDown(a.dispose);
+      addTearDown(b.dispose);
+      a.notes.set([
+        a.key('1'),
+      ], const LessonNote(text: 'Topics', homework: 'S. 12 Nr. 3'));
+      // Homework only: a note of its own.
+      a.notes.set([a.key('2')], const LessonNote(homework: 'Essay'));
+      await a.enable(passphrase);
+      if (passphrase == null) {
+        expect(
+          _ident(server)!.notes['2026-11-16|0800|1|3']!['homework'],
+          'S. 12 Nr. 3',
+        );
+      } else {
+        expect(
+          _ident(server)!.notes.values
+              .every((n) => n['blob'] is String && !n.containsKey('homework')),
+          isTrue,
+        );
+      }
+      expect(a.notes.hasDirty('acc1'), isFalse);
+
+      await b.enable();
+      if (passphrase != null) await b.engine.unlock('acc1', passphrase);
+      expect(
+        b.all[b.key('1')],
+        const LessonNote(text: 'Topics', homework: 'S. 12 Nr. 3'),
+      );
+      expect(b.all[b.key('2')], const LessonNote(homework: 'Essay'));
+
+      // Changing only the homework syncs; removing it keeps the rest.
+      tick();
+      b.notes.set([
+        b.key('1'),
+      ], const LessonNote(text: 'Topics', homework: 'Nr. 4'));
+      b.notes.set([b.key('2')], const LessonNote());
+      await b.sync();
+      await a.sync();
+      expect(
+        a.all[a.key('1')],
+        const LessonNote(text: 'Topics', homework: 'Nr. 4'),
+      );
+      expect(a.all[a.key('2')]!.deleted, isTrue);
+      tick();
+      a.notes.set([a.key('1')], const LessonNote(text: 'Topics'));
+      await a.sync();
+      await b.sync();
+      expect(b.all[b.key('1')], const LessonNote(text: 'Topics'));
+      expect(a.notes.hasDirty('acc1'), isFalse);
+      expect(b.notes.hasDirty('acc1'), isFalse);
+    }
+
+    test('plaintext round trip', () => roundTrip(server));
+
+    test(
+      'E2E round trip',
+      () => roundTrip(server, passphrase: 'correct horse battery'),
+    );
+
+    test('a tie with other homework on the server adopts the server '
+        'version', () async {
+      final a = Device(server);
+      final b = Device(server);
+      addTearDown(a.dispose);
+      addTearDown(b.dispose);
+      await a.enable();
+      await b.enable();
+      a.notes.set([a.key('1')], const LessonNote(homework: 'from a'));
+      b.notes.set([b.key('1')], const LessonNote(homework: 'from b'));
+      await a.sync();
+      await b.sync();
+      expect(b.all[b.key('1')]!.homework, 'from a');
+      expect(b.notes.hasDirty('acc1'), isFalse);
+    });
+  });
+
   test('E2E: device B is locked until it unlocks, then converges', () async {
     final a = Device(server);
     final b = Device(server);

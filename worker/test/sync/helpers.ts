@@ -87,6 +87,7 @@ export interface WireNote {
   key: string;
   exam?: boolean;
   text?: string;
+  homework?: string;
   blob?: string;
   updatedAt: number;
   deleted: boolean;

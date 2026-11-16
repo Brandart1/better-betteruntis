@@ -3,6 +3,7 @@ import 'package:better_betteruntis/core/lesson_notes.dart';
 import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/core/settings.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
+import 'package:better_betteruntis/ui/timetable/lesson_card.dart';
 import 'package:better_betteruntis/ui/timetable/lesson_details_sheet.dart';
 import 'package:better_betteruntis/ui/timetable/lesson_layout.dart';
 import 'package:flutter/material.dart';
@@ -131,5 +132,116 @@ void main() {
     // Only a tombstone (for sync) is left.
     expect(c.read(lessonNotesProvider).values.every((n) => n.isEmpty), isTrue);
     expect(c.read(lessonNotesProvider)[period.noteKey]!.deleted, isTrue);
+  });
+
+  testWidgets('add, edit and remove homework; details and exam stay', (
+    tester,
+  ) async {
+    final c = await pump(tester);
+    expect(find.byKey(const ValueKey('lesson-user-homework')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('lesson-homework-edit')));
+    await tester.pumpAndSettle();
+    expect(find.text('Add homework'), findsWidgets);
+    await tester.enterText(
+      find.byKey(const ValueKey('lesson-details-field')),
+      'p. 12, exercises 3-5',
+    );
+    await tester.tap(find.byKey(const ValueKey('lesson-details-save')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('lesson-user-homework')), findsOneWidget);
+    expect(find.text('p. 12, exercises 3-5'), findsOneWidget);
+    expect(find.text('Your homework'), findsOneWidget);
+    expect(find.text('Edit homework'), findsOneWidget);
+    expect(
+      c.read(lessonNotesProvider)[period.noteKey],
+      const LessonNote(homework: 'p. 12, exercises 3-5'),
+    );
+
+    // Marking the exam keeps the homework.
+    await tester.tap(find.byKey(const ValueKey('lesson-exam-add')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('lesson-details-dismiss')));
+    await tester.pumpAndSettle();
+    expect(
+      c.read(lessonNotesProvider)[period.noteKey],
+      const LessonNote(exam: true, homework: 'p. 12, exercises 3-5'),
+    );
+
+    // Tapping the card edits it.
+    await tester.tap(find.text('p. 12, exercises 3-5'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit homework'), findsWidgets);
+    await tester.enterText(
+      find.byKey(const ValueKey('lesson-details-field')),
+      'exercises 6-8',
+    );
+    await tester.tap(find.byKey(const ValueKey('lesson-details-save')));
+    await tester.pumpAndSettle();
+    expect(find.text('exercises 6-8'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('lesson-homework-remove')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('lesson-user-homework')), findsNothing);
+    expect(find.text('Add homework'), findsOneWidget);
+    expect(
+      c.read(lessonNotesProvider)[period.noteKey],
+      const LessonNote(exam: true),
+    );
+  });
+
+  testWidgets('saving empty homework text removes it', (tester) async {
+    final c = await pump(tester);
+    await tester.tap(find.byKey(const ValueKey('lesson-homework-edit')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('lesson-details-field')),
+      'Essay',
+    );
+    await tester.tap(find.byKey(const ValueKey('lesson-details-save')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('lesson-homework-edit')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('lesson-details-field')),
+      '  ',
+    );
+    await tester.tap(find.byKey(const ValueKey('lesson-details-save')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('lesson-user-homework')), findsNothing);
+    expect(c.read(lessonNotesProvider)[period.noteKey]!.deleted, isTrue);
+  });
+
+  testWidgets('a lesson with the user\'s homework shows a homework icon', (
+    tester,
+  ) async {
+    Future<void> card(Period p) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsStoreProvider.overrideWithValue(MemorySettingsStore()),
+          ],
+          child: MaterialApp(
+            home: SizedBox(
+              width: 200,
+              height: 120,
+              child: LessonCard(
+                block: LessonBlock([p]),
+                names: FakeNameResolver(),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    await card(period);
+    expect(find.byKey(const ValueKey('lesson-homework-icon')), findsNothing);
+    await card(
+      period.withUserNote(noteKey: period.noteKey!, userHomework: 'Essay'),
+    );
+    expect(find.byKey(const ValueKey('lesson-homework-icon')), findsOneWidget);
+    // The exam mark is unchanged by it.
+    expect(find.byIcon(Icons.assignment_outlined), findsNothing);
   });
 }
