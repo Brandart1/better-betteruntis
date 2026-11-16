@@ -5,6 +5,7 @@ import 'package:better_betteruntis/dev/fake_timetable.dart';
 import 'package:better_betteruntis/ui/timetable/lesson_card.dart';
 import 'package:better_betteruntis/ui/timetable/timetable_screen.dart';
 import 'package:better_betteruntis/ui/timetable/timetable_utils.dart';
+import 'package:better_betteruntis/ui/shell/app_drawer.dart' show isWebProvider;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,7 +22,7 @@ void main() {
     opened = [];
   });
 
-  Future<void> pumpScreen(WidgetTester tester) async {
+  Future<void> pumpScreen(WidgetTester tester, {bool web = false}) async {
     tester.view.physicalSize = const Size(1000, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -32,6 +33,7 @@ void main() {
           activeAccountProvider.overrideWith(
             (ref) => Stream.value(demoAccount()),
           ),
+          isWebProvider.overrideWithValue(web),
         ],
         child: MaterialApp(
           home: TimetableScreen(onOpenElement: (_, t) => opened.add(t)),
@@ -335,6 +337,37 @@ void main() {
       await tester.sendKeyEvent(key);
       await tester.pumpAndSettle();
     }
+
+    testWidgets('web: prev / next buttons with tooltips; apps: none', (
+      tester,
+    ) async {
+      await pumpScreen(tester, web: true);
+      final prev = find.byKey(const ValueKey('timetable-prev'));
+      final next = find.byKey(const ValueKey('timetable-next'));
+      expect(find.byTooltip('Previous week (←)'), findsOneWidget);
+      expect(find.byTooltip('Next week (→)'), findsOneWidget);
+      await tester.tap(next);
+      await tester.pumpAndSettle();
+      expect(
+        find.text(weekText(tester, addDays(weekStart, 7))),
+        findsOneWidget,
+      );
+      await tester.tap(prev);
+      await tester.pumpAndSettle();
+      expect(find.text(weekText(tester, weekStart)), findsOneWidget);
+      // Keys still work after clicking a button.
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      expect(
+        find.text(weekText(tester, addDays(weekStart, 7))),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('apps: no prev / next buttons', (tester) async {
+      await pumpScreen(tester);
+      expect(find.byKey(const ValueKey('timetable-prev')), findsNothing);
+      expect(find.byKey(const ValueKey('timetable-next')), findsNothing);
+    });
 
     testWidgets('left / right switch weeks right after load, T jumps back', (
       tester,

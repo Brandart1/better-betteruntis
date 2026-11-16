@@ -10,6 +10,7 @@ import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/settings.dart';
 import '../export/export_sheet.dart';
+import '../shell/app_drawer.dart' show isWebProvider;
 import 'day_speech.dart';
 import 'day_timeline.dart';
 import 'lesson_details_sheet.dart';
@@ -580,11 +581,35 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                   accessibilityProvider.select((a) => a.speakButton),
                 ))
                   _SpeakButton(onSpeak: () => _speakDay(account, target, ws)),
+                // Web version: visible previous/next buttons (the apps
+                // swipe; arrow keys work everywhere).
+                if (ref.watch(isWebProvider))
+                  IconButton(
+                    key: const ValueKey('timetable-prev'),
+                    tooltip: day != null
+                        ? 'Previous day (←)'
+                        : 'Previous week (←)',
+                    onPressed: () {
+                      _step(-1);
+                      _refocus();
+                    },
+                    icon: const Icon(Icons.chevron_left),
+                  ),
                 IconButton(
                   tooltip: 'Today (T)',
                   onPressed: atToday ? null : () => _goToDate(DateTime.now()),
                   icon: const Icon(Icons.today),
                 ),
+                if (ref.watch(isWebProvider))
+                  IconButton(
+                    key: const ValueKey('timetable-next'),
+                    tooltip: day != null ? 'Next day (→)' : 'Next week (→)',
+                    onPressed: () {
+                      _step(1);
+                      _refocus();
+                    },
+                    icon: const Icon(Icons.chevron_right),
+                  ),
                 IconButton(
                   tooltip: 'Jump to date',
                   onPressed: _pickDate,

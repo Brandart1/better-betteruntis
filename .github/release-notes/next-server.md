@@ -5,7 +5,7 @@
 - **Sync (optional):** sync your custom exams and lesson details between your phone, tablet and the web version (*Menu → Sync*). Sync is off until you turn it on; turning it off deletes everything stored on the server, while your devices keep their notes.
 - **End-to-end encryption for sync (optional):** protect synced notes with a sync passphrase (and an optional recovery code). The server then only stores encrypted data it can't read.
 - **What's new:** after an update, the app shows what changed since the version you used last (also when you skipped several releases). You can reread the notes anytime under *Menu → What's new*. They are built into the app, so this also works offline.
-- **Keyboard:** with a hardware keyboard (web on a computer, tablets, desktop), ← / → switch weeks (or days in the day view), Home or T jumps to today, and Escape goes back from the day view to the week. Keys work right after the page opens, without clicking first.
+- **Keyboard:** with a hardware keyboard (web on a computer, tablets, desktop), ← / → switch weeks (or days in the day view), Home or T jumps to today, and Escape goes back from the day view to the week. Keys work right after the page opens, without clicking first. In the web version, ‹ and › buttons next to *Today* do the same.
 
 - **Get the app:** the web version's menu links to the Android and iOS apps.
 
