@@ -6,6 +6,7 @@ import '../../core/models.dart';
 import '../../core/providers.dart';
 import 'login_flow.dart';
 import 'qr_parser.dart';
+import '../common/large_text.dart';
 
 /// Credentials form. With a [school] (from the search) the school is shown
 /// as a card; without one the user enters the school name/ID manually and,
@@ -140,6 +141,7 @@ class _LoginFormScreenState extends ConsumerState<LoginFormScreen> {
                           autocorrect: false,
                           decoration: const InputDecoration(
                             labelText: 'School name or ID',
+                            helperMaxLines: 4,
                             helperText:
                                 'As shown on your WebUntis login page, '
                                 'e.g. "gym-musterstadt"',
@@ -172,7 +174,7 @@ class _LoginFormScreenState extends ConsumerState<LoginFormScreen> {
                       ),
                       Card.outlined(
                         margin: EdgeInsets.zero,
-                        child: SwitchListTile(
+                        child: AdaptiveSwitchTile(
                           key: const ValueKey('anonymousSwitch'),
                           value: _anonymous,
                           onChanged: _busy
@@ -198,6 +200,7 @@ class _LoginFormScreenState extends ConsumerState<LoginFormScreen> {
                         textCapitalization: TextCapitalization.sentences,
                         decoration: const InputDecoration(
                           labelText: 'Profile name (optional)',
+                          helperMaxLines: 4,
                           helperText:
                               'Shown in the account switcher, e.g. "Me" or '
                               '"Little sister"',
@@ -228,6 +231,7 @@ class _LoginFormScreenState extends ConsumerState<LoginFormScreen> {
                                 labelText: 'Server',
                                 hintText:
                                     widget.school?.host ?? 'mese.webuntis.com',
+                                helperMaxLines: 4,
                                 helperText: _manual
                                     ? 'Optional. Skips the school lookup.'
                                     : 'Only change this if your school uses '

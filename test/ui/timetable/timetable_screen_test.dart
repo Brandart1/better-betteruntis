@@ -22,7 +22,11 @@ void main() {
     opened = [];
   });
 
-  Future<void> pumpScreen(WidgetTester tester, {bool web = false}) async {
+  Future<void> pumpScreen(
+    WidgetTester tester, {
+    bool web = false,
+    Widget? drawer,
+  }) async {
     tester.view.physicalSize = const Size(1000, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -36,7 +40,10 @@ void main() {
           isWebProvider.overrideWithValue(web),
         ],
         child: MaterialApp(
-          home: TimetableScreen(onOpenElement: (_, t) => opened.add(t)),
+          home: TimetableScreen(
+            drawer: drawer,
+            onOpenElement: (_, t) => opened.add(t),
+          ),
         ),
       ),
     );
@@ -159,6 +166,89 @@ void main() {
       dateFormat(ctx, 'EEE, d MMM').format(addDays(weekStart, 1)),
     );
     expect(rich('Maria Becker'), findsWidgets);
+  });
+
+  testWidgets('day mode keeps the drawer button of the week view', (
+    tester,
+  ) async {
+    await pumpScreen(
+      tester,
+      drawer: const Drawer(child: Text('drawer-content')),
+    );
+    expect(find.byType(DrawerButton), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('day-header-2')));
+    await tester.pumpAndSettle();
+    expect(dayLabel(), findsOneWidget);
+    expect(find.byType(DrawerButton), findsOneWidget);
+    expect(find.byType(BackButton), findsNothing);
+
+    // The burger opens the drawer; the day view stays open behind it.
+    await tester.tap(find.byType(DrawerButton));
+    await tester.pumpAndSettle();
+    expect(find.text('drawer-content'), findsOneWidget);
+    expect(dayLabel(), findsOneWidget);
+
+    // System back closes the drawer first, then leaves day mode.
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('drawer-content'), findsNothing);
+    expect(dayLabel(), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(weekLabel(), findsOneWidget);
+
+    // Escape leaves day mode too.
+    await tester.tap(find.byKey(const ValueKey('day-header-3')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(weekLabel(), findsOneWidget);
+    expect(find.byType(DrawerButton), findsOneWidget);
+  });
+
+  testWidgets('pushed element timetable: back arrow leaves day mode first', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          timetableRepositoryProvider.overrideWithValue(repo),
+          activeAccountProvider.overrideWith(
+            (ref) => Stream.value(demoAccount()),
+          ),
+        ],
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      TimetableScreen(onOpenElement: (_, t) => opened.add(t)),
+                ),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('day-header-2')));
+    await tester.pumpAndSettle();
+    expect(find.byType(BackButton), findsOneWidget);
+    expect(find.byType(DrawerButton), findsNothing);
+
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    expect(weekLabel(), findsOneWidget, reason: 'day mode left, route kept');
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    expect(find.byType(TimetableScreen), findsNothing);
   });
 
   testWidgets('tapping the date title returns to the week overview', (

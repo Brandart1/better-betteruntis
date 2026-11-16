@@ -31,7 +31,9 @@ import 'week_grid.dart';
 /// Tapping a day header zooms into that day (the column expands to full
 /// width); in day mode the app bar shows the date, swiping moves between
 /// days, and tapping the date (app bar or day header) or pressing back zooms
-/// out to the week containing the current day.
+/// out to the week containing the current day. The app bar keeps the
+/// drawer button in day mode (home and browsed timetables both get the
+/// drawer); without a drawer the back arrow leaves day mode first.
 ///
 /// Hardware keyboard (any platform): ← / → previous / next week (or day in
 /// day mode), Home or T jumps to today, Escape leaves day mode. Ignored while
@@ -107,6 +109,10 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
   /// Page a keyboard step is heading to while its animation runs, so quick
   /// repeated presses keep stepping instead of retargeting the same page.
   int? _keyTarget;
+
+  /// Whether the navigation drawer is open: system back then closes it
+  /// (the drawer's local history entry) instead of leaving day mode.
+  bool _drawerOpen = false;
 
   @override
   void dispose() {
@@ -436,10 +442,17 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 Flexible(
-                  child: Text(
-                    dateFormat(context, 'EEE, d MMM').format(day),
-                    key: const ValueKey('day-label'),
-                    overflow: TextOverflow.ellipsis,
+                  child: _FittingLabel(
+                    textKey: const ValueKey('day-label'),
+                    candidates: [
+                      for (final p in const [
+                        'EEE, d MMM',
+                        'd MMM',
+                        'EEE d',
+                        'd',
+                      ])
+                        dateFormat(context, p).format(day),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 4),
@@ -455,13 +468,14 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
       );
     } else {
       atToday = _page == kPagerOrigin;
-      title = Text(
-        formatWeekRange(
-          context,
-          addDays(ws, weekdays.first - 1),
-          addDays(ws, weekdays.last - 1),
-        ),
-        key: const ValueKey('week-label'),
+      final first = addDays(ws, weekdays.first - 1);
+      final last = addDays(ws, weekdays.last - 1);
+      title = _FittingLabel(
+        textKey: const ValueKey('week-label'),
+        candidates: [
+          formatWeekRange(context, first, last),
+          '${first.day}–${last.day}',
+        ],
       );
     }
 
@@ -580,7 +594,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     return ViewingTarget(
       target: widget.target,
       child: PopScope(
-        canPop: day == null,
+        canPop: day == null || _drawerOpen,
         onPopInvokedWithResult: (didPop, _) {
           if (!didPop) _exitDay();
         },
@@ -591,6 +605,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
           child: Scaffold(
             drawer: widget.drawer,
             onDrawerChanged: (open) {
+              setState(() => _drawerOpen = open);
               if (!open) _refocus();
             },
             appBar: AppBar(
@@ -771,6 +786,48 @@ class _SpeakButton extends ConsumerWidget {
         onPressed: onSpeak,
         icon: Icon(speaking ? Icons.stop_circle_outlined : Icons.volume_up),
       ),
+    );
+  }
+}
+
+/// The first of [candidates] (longest first) that fits on one line; app bar
+/// titles on phones with large text (the burger and the action buttons leave
+/// little room; the full date is in the day header below).
+class _FittingLabel extends StatelessWidget {
+  const _FittingLabel({required this.textKey, required this.candidates});
+
+  final Key textKey;
+  final List<String> candidates;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = DefaultTextStyle.of(context).style;
+    final scaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        var text = candidates.last;
+        for (final c in candidates) {
+          final painter = TextPainter(
+            text: TextSpan(text: c, style: style),
+            textDirection: direction,
+            textScaler: scaler,
+            maxLines: 1,
+          )..layout();
+          final fits = painter.width <= constraints.maxWidth;
+          painter.dispose();
+          if (fits) {
+            text = c;
+            break;
+          }
+        }
+        return Text(
+          text,
+          key: textKey,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      },
     );
   }
 }

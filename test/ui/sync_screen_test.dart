@@ -643,6 +643,66 @@ void main() {
     expect(find.byKey(const ValueKey('sync-turn-on')), findsNothing);
   });
 
+  group('anonymous (public timetable) accounts', () {
+    final anon = Account(
+      id: 'anon',
+      school: account.school,
+      username: '#anonymous#',
+      anonymous: true,
+      displayName: 'Public timetable',
+    );
+
+    testWidgets('no opt-in, a short explanation instead', (tester) async {
+      final sync = await pump(tester, accounts: [anon]);
+      expect(key('sync-anonymous'), findsOneWidget);
+      expect(
+        find.textContaining("Public timetable logins can't sync"),
+        findsOneWidget,
+      );
+      expect(key('sync-turn-on'), findsNothing);
+      expect(sync.calls, isEmpty);
+    });
+
+    testWidgets('old sync state of it shows no actions', (tester) async {
+      FakeSync.initial = {
+        anon.id: SyncAccountState(
+          accountId: anon.id,
+          phase: SyncPhase.on,
+          identity: _identity,
+        ),
+      };
+      await pump(tester, accounts: [anon]);
+      expect(key('sync-anonymous'), findsOneWidget);
+      expect(key('sync-now'), findsNothing);
+      expect(key('sync-turn-off'), findsNothing);
+    });
+
+    testWidgets('next to a personal account, only that one can sync', (
+      tester,
+    ) async {
+      await pump(tester, accounts: [account, anon]);
+      expect(key('sync-anonymous'), findsOneWidget);
+      expect(key('sync-turn-on'), findsOneWidget);
+    });
+
+    testWidgets('web: its old state does not block the personal account', (
+      tester,
+    ) async {
+      FakeSync.singleAccount = true;
+      FakeSync.initial = {
+        anon.id: SyncAccountState(
+          accountId: anon.id,
+          phase: SyncPhase.on,
+          identity: _identity,
+        ),
+      };
+      await pump(tester, accounts: [account, anon]);
+      expect(key('sync-web-single-account'), findsNothing);
+      expect(key('sync-turn-on'), findsOneWidget);
+      expect(key('sync-anonymous'), findsOneWidget);
+    });
+  });
+
   group('web key retention', () {
     const e2eOn = SyncAccountState(
       accountId: 'demo',

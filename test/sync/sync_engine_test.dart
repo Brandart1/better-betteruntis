@@ -46,12 +46,12 @@ const _school = School(
   host: 'demo.webuntis.com',
 );
 
-Account _account(String id, String user) => Account(
+Account _account(String id, String user, {bool anonymous = false}) => Account(
   id: id,
   school: _school,
-  username: user,
-  anonymous: false,
-  displayName: user,
+  username: anonymous ? '#anonymous#' : user,
+  anonymous: anonymous,
+  displayName: anonymous ? 'Public timetable' : user,
 );
 
 /// One app installation.
@@ -65,11 +65,16 @@ class Device {
     MemorySettingsStore? store,
     MemorySecretStore? secrets,
     this.syncUrl = 'https://sync.test',
+    bool anonymous = false,
+    List<Account> more = const [],
   }) : store = store ?? MemorySettingsStore(),
        secrets = secrets ?? MemorySecretStore(),
        adapter = server.device(browser: web) {
-    final repo = InMemoryAccountRepository(
-      initial: [_account(accountId, user)],
+    repo = InMemoryAccountRepository(
+      initial: [
+        _account(accountId, user, anonymous: anonymous),
+        ...more,
+      ],
     );
     repo.secrets[accountId] = 'secret';
     c = ProviderContainer(
@@ -103,6 +108,7 @@ class Device {
   }
 
   final FakeSyncServer server;
+  late final InMemoryAccountRepository repo;
   final String accountId;
   final String syncUrl;
   final api = _Api();
@@ -835,6 +841,11 @@ void main() {
       SyncClient.errorFor(401, {'error': 'invalid_token'}, login: true).kind,
       SyncErrorKind.untisRejected,
     );
+    final anon = SyncClient.errorFor(403, {
+      'error': 'anonymous_not_allowed',
+    }, login: true);
+    expect(anon.kind, SyncErrorKind.untisRejected);
+    expect(anon.message, kAnonymousSyncMessage);
     expect(SyncClient.errorFor(429, null).kind, SyncErrorKind.rateLimited);
     expect(
       SyncClient.errorFor(400, {'error': 'clock_skew'}).kind,
@@ -1935,6 +1946,129 @@ void main() {
       expect(tt(a), const TimetableSettings());
       expect(isSettingsKey('2026-11-16|0800|1|3'), isFalse);
       expect(isSettingsKey(settingsRemoteKey('timetable.examColor')), isTrue);
+    });
+  });
+
+  group('anonymous (public timetable) accounts never sync', () {
+    Map<String, Object?> storedState(Device d) => {
+      ...?(d.store.values[SyncEngine.storeKey] as Map?)?.map(
+        (k, v) => MapEntry('$k', v),
+      ),
+    };
+
+    test('turning sync on is refused without asking the server', () async {
+      final a = Device(server, anonymous: true);
+      addTearDown(a.dispose);
+      a.write('1', 'note');
+      await expectLater(
+        a.engine.enable('acc1', const SyncEnableOptions()),
+        throwsA(
+          isA<SyncException>().having(
+            (e) => e.message,
+            'message',
+            kAnonymousSyncMessage,
+          ),
+        ),
+      );
+      await a.idle();
+      expect(a.state.phase, SyncPhase.off);
+      expect(server.log, isEmpty);
+      expect(storedState(a), isEmpty);
+      expect(a.secrets.values.keys.where((k) => k.startsWith('sync-')), []);
+      expect(a.live, {'1': 'note'});
+    });
+
+    test(
+      'state left from before is dropped at start, nothing is sent',
+      () async {
+        // Sync on for acc1 (as a personal account) ...
+        final store = MemorySettingsStore();
+        final secrets = MemorySecretStore();
+        final a = Device(server, store: store, secrets: secrets);
+        a.write('1', 'note');
+        await a.enable('passphrase 123');
+        expect(a.state.phase, SyncPhase.on);
+        a.dispose();
+        expect(storedState(a), contains('acc1'));
+        expect(
+          secrets.values.keys.where((k) => k.startsWith('sync-')),
+          isNotEmpty,
+        );
+
+        // ... and now it is anonymous.
+        final requests = server.log.length;
+        final b = Device(
+          server,
+          store: store,
+          secrets: secrets,
+          anonymous: true,
+        );
+        addTearDown(b.dispose);
+        await b.engine.syncAll(force: true);
+        await b.idle();
+        b.write('2', 'later');
+        expect((await b.sync()).phase, SyncPhase.off);
+        await b.idle();
+        expect(b.state.phase, SyncPhase.off);
+        expect(b.engine.state, isEmpty);
+        expect(storedState(b), isEmpty);
+        expect(secrets.values.keys.where((k) => k.startsWith('sync-')), []);
+        expect(server.log.length, requests);
+        expect(b.live, {'1': 'note', '2': 'later'});
+      },
+    );
+
+    test('an account that becomes anonymous stops syncing', () async {
+      final a = Device(server);
+      addTearDown(a.dispose);
+      await a.enable();
+      expect(a.state.phase, SyncPhase.on);
+      final requests = server.log.length;
+      await a.repo.update(_account('acc1', 'max', anonymous: true));
+      // The next sync (here: a note change) drops it instead.
+      a.write('1', 'note');
+      expect((await a.sync()).phase, SyncPhase.off);
+      await a.idle();
+      expect(a.state.phase, SyncPhase.off);
+      expect(storedState(a), isEmpty);
+      expect(a.secrets.values.keys.where((k) => k.startsWith('sync-')), []);
+      await a.engine.syncAll(force: true);
+      expect(server.log.length, requests);
+    });
+
+    test('web: its old state does not block the personal account', () async {
+      final store = MemorySettingsStore({
+        SyncEngine.storeKey: {
+          'anon': {
+            'phase': 'on',
+            'identity': {
+              'host': 'demo.webuntis.com',
+              'school': 'demo-school',
+              'userId': 'someone',
+            },
+            'e2e': false,
+            'lastSeq': 0,
+          },
+        },
+      });
+      final a = Device(
+        server,
+        web: true,
+        store: store,
+        more: [_account('anon', '', anonymous: true)],
+      );
+      addTearDown(a.dispose);
+      a.write('1', 'note');
+      final r = await a.enable();
+      expect(r.state.phase, SyncPhase.on);
+      await a.engine.whenIdle('anon');
+      expect(a.engine.stateOf('anon').phase, SyncPhase.off);
+      expect(storedState(a).keys, ['acc1']);
+      await expectLater(
+        a.engine.enable('anon', const SyncEnableOptions()),
+        throwsA(isA<SyncException>()),
+      );
+      expect(a.engine.stateOf('acc1').phase, SyncPhase.on);
     });
   });
 }

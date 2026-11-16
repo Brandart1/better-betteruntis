@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:better_betteruntis/ui/common/large_text.dart';
 
 class _CountingRepo extends FakeTimetableRepository {
   _CountingRepo({super.watchError});
@@ -230,7 +231,7 @@ void main() {
       await tester.pumpAndSettle();
       final toggle = find.byKey(const ValueKey('export-text'));
       expect(toggle, findsOneWidget);
-      expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+      expect(tester.widget<AdaptiveSwitchTile>(toggle).value, isTrue);
       await export(tester);
       final xml = grid(shared.single.bytes);
       expect(xml, contains('t="inlineStr"'));

@@ -48,46 +48,60 @@ class DayHeader extends ConsumerWidget {
       );
     } else {
       final weekday = dateFormat(context, 'E').format(date);
-      final circle = large ? 38.0 : 28.0;
+      // Week columns are narrow: very large text is capped and then scaled
+      // down to fit instead of being clipped ("1" for 16).
+      final scaler = MediaQuery.textScalerOf(context)
+          .clamp(maxScaleFactor: 1.6);
+      final circle = scaler.scale(large ? 38.0 : 28.0);
       content = Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              weekday,
-              maxLines: 1,
-              overflow: TextOverflow.clip,
-              style:
-                  (large
-                          ? theme.textTheme.titleSmall
-                          : theme.textTheme.labelSmall)
-                      ?.copyWith(
-                        color: isToday ? cs.primary : cs.onSurfaceVariant,
-                        fontWeight: isToday || large ? FontWeight.bold : null,
-                      ),
+        child: MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: scaler),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  weekday,
+                  maxLines: 1,
+                  overflow: TextOverflow.clip,
+                  style:
+                      (large
+                              ? theme.textTheme.titleSmall
+                              : theme.textTheme.labelSmall)
+                          ?.copyWith(
+                            color: isToday ? cs.primary : cs.onSurfaceVariant,
+                            fontWeight: isToday || large
+                                ? FontWeight.bold
+                                : null,
+                          ),
+                ),
+                const SizedBox(height: 2),
+                Container(
+                  width: circle,
+                  height: circle,
+                  alignment: Alignment.center,
+                  decoration: isToday
+                      ? BoxDecoration(color: cs.primary, shape: BoxShape.circle)
+                      : null,
+                  child: Text(
+                    '${date.day}',
+                    style:
+                        (large
+                                ? theme.textTheme.titleLarge
+                                : theme.textTheme.titleSmall)
+                            ?.copyWith(
+                              color: isToday ? cs.onPrimary : cs.onSurface,
+                              fontWeight: isToday || large
+                                  ? FontWeight.bold
+                                  : null,
+                            ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 2),
-            Container(
-              width: circle,
-              height: circle,
-              alignment: Alignment.center,
-              decoration: isToday
-                  ? BoxDecoration(color: cs.primary, shape: BoxShape.circle)
-                  : null,
-              child: Text(
-                '${date.day}',
-                style:
-                    (large
-                            ? theme.textTheme.titleLarge
-                            : theme.textTheme.titleSmall)
-                        ?.copyWith(
-                          color: isToday ? cs.onPrimary : cs.onSurface,
-                          fontWeight: isToday || large ? FontWeight.bold : null,
-                        ),
-              ),
-            ),
-          ],
+          ),
         ),
       );
     }

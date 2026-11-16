@@ -277,6 +277,7 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: switch (s.phase) {
+                  _ when a.anonymous => _anonymous(),
                   SyncPhase.off when !_sync.available => _unavailable(),
                   SyncPhase.off when _otherAccountSyncs() =>
                     _webSecondAccount(),
@@ -343,13 +344,35 @@ class _SyncAccountSectionState extends ConsumerState<SyncAccountSection> {
     ),
   ];
 
+  /// Anonymous (public timetable) accounts never sync.
+  List<Widget> _anonymous() => [
+    _status(Icons.cloud_off, "Sync isn't available"),
+    const SizedBox(height: 8),
+    const Text(
+      "Public timetable logins can't sync: sync needs a personal WebUntis "
+      'login. Your notes for this account are only stored on this device.',
+      key: ValueKey('sync-anonymous'),
+    ),
+  ];
+
   /// Web version: another account already syncs (one browser cookie).
-  bool _otherAccountSyncs() =>
-      _sync.singleAccountOnly &&
-      ref
-          .watch(syncControllerProvider)
-          .values
-          .any((o) => o.accountId != _id && o.enabled);
+  /// Leftover state of an anonymous account doesn't count (it never syncs).
+  bool _otherAccountSyncs() {
+    if (!_sync.singleAccountOnly) return false;
+    final anonymous = {
+      for (final a in ref.watch(accountsProvider).value ?? const <Account>[])
+        if (a.anonymous) a.id,
+    };
+    return ref
+        .watch(syncControllerProvider)
+        .values
+        .any(
+          (o) =>
+              o.accountId != _id &&
+              o.enabled &&
+              !anonymous.contains(o.accountId),
+        );
+  }
 
   List<Widget> _webSecondAccount() => [
     _status(Icons.cloud_off, 'Sync is off'),

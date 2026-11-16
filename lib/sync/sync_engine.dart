@@ -612,6 +612,29 @@ class SyncEngine extends SyncController {
     _fresh.remove(accountId);
     _unverified.remove(accountId);
     await _reload(accountId);
+    await _dropIfAnonymous(accountId);
+  }
+
+  /// Whether [accountId] is an anonymous (public timetable) account, which
+  /// never syncs. False if the account can't be read (gone: the operation
+  /// reports that itself).
+  Future<bool> _isAnonymous(String accountId) async {
+    try {
+      return (await _account(accountId)).anonymous;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Sync state left for an anonymous account (turned on by an older
+  /// version, or restored from a backup) is dropped on this device: the
+  /// stored session and key are deleted and the account counts as off.
+  /// The server is not contacted (an old session expires by itself); the
+  /// account's notes stay.
+  Future<void> _dropIfAnonymous(String accountId) async {
+    final has = state.containsKey(accountId) || _meta.containsKey(accountId);
+    if (!has || !await _isAnonymous(accountId)) return;
+    await _clearLocal(accountId);
   }
 
   /// A user operation: marks itself as waiting (so a sync waiting for the
@@ -832,10 +855,20 @@ class SyncEngine extends SyncController {
       _pruned = true;
       _notes.pruneTombstones((id) => stateOf(id).enabled);
     }
+    // Leftover state of anonymous accounts (any phase) is dropped.
+    final anonymous = <String>{};
+    for (final id in [...state.keys]) {
+      if (await _isAnonymous(id)) anonymous.add(id);
+    }
+    if (!ref.mounted) return;
+    for (final id in anonymous) {
+      _followUp(id);
+    }
     final now = _now();
     await Future.wait([
       for (final s in state.values)
-        if ((s.phase == SyncPhase.on || s.phase == SyncPhase.locked) &&
+        if (!anonymous.contains(s.accountId) &&
+            (s.phase == SyncPhase.on || s.phase == SyncPhase.locked) &&
             (force ||
                 s.lastSync == null ||
                 now.difference(s.lastSync!) >= resumeInterval))
@@ -1655,10 +1688,7 @@ class SyncEngine extends SyncController {
   Future<SyncSession> _login(String accountId) async {
     final account = await _account(accountId);
     if (account.anonymous) {
-      throw const _LoginFailed(
-        'Sync needs a personal WebUntis login (not anonymous access).',
-        definite: true,
-      );
+      throw const _LoginFailed(kAnonymousSyncMessage, definite: true);
     }
     final String untisToken;
     try {
@@ -1713,6 +1743,14 @@ class SyncEngine extends SyncController {
       ids.addAll(_decode(await _store.read(storeKey), meta: false).keys);
     } catch (_) {}
     ids.remove(accountId);
+    // Leftover state of an anonymous account never syncs: not in the way
+    // (and dropped in the background).
+    for (final id in [...ids]) {
+      if (await _isAnonymous(id)) {
+        ids.remove(id);
+        _followUp(id);
+      }
+    }
     if (ids.isNotEmpty) {
       throw const SyncException(kWebSingleAccountMessage);
     }
@@ -1930,6 +1968,9 @@ class SyncEngine extends SyncController {
   ) async {
     if (!_client.available) throw const SyncException(_unavailableMessage);
     return _userOp(accountId, () async {
+      if (await _isAnonymous(accountId)) {
+        throw const SyncException(kAnonymousSyncMessage);
+      }
       if (web) await _webGuard(accountId);
       final passphrase = options.passphrase;
       try {

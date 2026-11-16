@@ -171,39 +171,57 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         child: Stack(
           children: [
             CenteredContent(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (_demoBusy) const LinearProgressIndicator(),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    alignment: Alignment.topCenter,
-                    child: searching
-                        ? const SizedBox(width: double.infinity, height: 16)
-                        : _WelcomeHeader(addingAccount: widget.addingAccount),
-                  ),
-                  _SearchField(
-                    controller: _controller,
-                    focusNode: _focus,
-                    onChanged: _onChanged,
-                    onClear: _clear,
-                    onSubmitted: (q) {
-                      _debounce?.cancel();
-                      if (q.trim().length >= 2) _search(q.trim());
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 180),
-                      child: KeyedSubtree(
-                        key: ValueKey(_status),
-                        child: _buildBody(context),
+              child: LayoutBuilder(
+                builder: (context, box) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (_demoBusy) const LinearProgressIndicator(),
+                    // Very large text on a small phone: the header takes at
+                    // most 40 % of the height and scrolls on its own.
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: box.hasBoundedHeight
+                            ? box.maxHeight * 0.4
+                            : double.infinity,
+                      ),
+                      child: SingleChildScrollView(
+                        child: AnimatedSize(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOutCubic,
+                          alignment: Alignment.topCenter,
+                          child: searching
+                              ? const SizedBox(
+                                  width: double.infinity,
+                                  height: 16,
+                                )
+                              : _WelcomeHeader(
+                                  addingAccount: widget.addingAccount,
+                                ),
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                    _SearchField(
+                      controller: _controller,
+                      focusNode: _focus,
+                      onChanged: _onChanged,
+                      onClear: _clear,
+                      onSubmitted: (q) {
+                        _debounce?.cancel();
+                        if (q.trim().length >= 2) _search(q.trim());
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        child: KeyedSubtree(
+                          key: ValueKey(_status),
+                          child: _buildBody(context),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             // Top-right, taking no space, so small screens still fit

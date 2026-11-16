@@ -6,6 +6,8 @@
 
 **A fast, friendly WebUntis timetable app for Android, iOS, iPadOS and the web.**
 
+### 🌐 [Open the web version: better-betteruntis.eu](https://better-betteruntis.eu)
+
 [![CI](https://github.com/Brandart1/better-betteruntis/actions/workflows/ci.yml/badge.svg)](https://github.com/Brandart1/better-betteruntis/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Brandart1/better-betteruntis?include_prereleases&label=release)](https://github.com/Brandart1/better-betteruntis/releases)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)

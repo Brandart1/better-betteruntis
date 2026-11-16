@@ -11,6 +11,7 @@ import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../timetable/timetable_utils.dart';
 import 'info_common.dart';
+import '../common/large_text.dart';
 
 /// Whether [a] may plausibly report absences: a signed-in parent account with
 /// at least one child. (Whether the school allows it is only known after
@@ -395,7 +396,7 @@ class _AbsenceReportScreenState extends ConsumerState<AbsenceReportScreen> {
           title: Text(children.single.displayName),
           subtitle: const Text('Child'),
         ),
-      SwitchListTile(
+      AdaptiveSwitchTile(
         key: const ValueKey('absence-report-whole-day'),
         contentPadding: EdgeInsets.zero,
         title: const Text('Whole school day'),

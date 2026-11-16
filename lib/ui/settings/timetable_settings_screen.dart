@@ -5,6 +5,7 @@ import '../../core/settings.dart';
 import 'color_picker_sheet.dart';
 import 'lesson_preview.dart';
 import 'subject_colors_screen.dart';
+import '../common/large_text.dart';
 
 /// Lesson states with a configurable color.
 enum LessonColorKind { regular, irregular, cancelled, exam }
@@ -152,7 +153,7 @@ class TimetableSettingsScreen extends ConsumerWidget {
                     ),
                   ),
                 ),
-                SwitchListTile(
+                AdaptiveSwitchTile(
                   key: const ValueKey('school-colors'),
                   title: const Text('School colors'),
                   subtitle: const Text(
@@ -181,14 +182,14 @@ class TimetableSettingsScreen extends ConsumerWidget {
                   onChanged: (v) =>
                       notifier.update((c) => c.copyWith(detailFontSize: v)),
                 ),
-                SwitchListTile(
+                AdaptiveSwitchTile(
                   key: const ValueKey('bold-subject'),
                   title: const Text('Bold subject'),
                   value: s.boldSubject,
                   onChanged: (v) =>
                       notifier.update((c) => c.copyWith(boldSubject: v)),
                 ),
-                SwitchListTile(
+                AdaptiveSwitchTile(
                   key: const ValueKey('center-text'),
                   title: const Text('Center text'),
                   subtitle: const Text(
@@ -199,7 +200,7 @@ class TimetableSettingsScreen extends ConsumerWidget {
                       notifier.update((c) => c.copyWith(centerText: v)),
                 ),
                 const _Section('Lessons'),
-                SwitchListTile(
+                AdaptiveSwitchTile(
                   key: const ValueKey('show-cancelled'),
                   title: const Text('Show cancelled lessons'),
                   value: s.showCancelled,

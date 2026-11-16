@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/accessibility.dart';
 import '../timetable/day_speech.dart';
+import '../common/large_text.dart';
 
 /// Accessibility options. Reachable from the login screen and the drawer, so
 /// they can be set before the first login.
@@ -60,7 +61,7 @@ class AccessibilityScreen extends ConsumerWidget {
             onChanged: (v) => notifier.update((s) => s.copyWith(textScale: v)),
           ),
           section('Timetable'),
-          SwitchListTile(
+          AdaptiveSwitchTile(
             key: const ValueKey('a11y-day-view'),
             title: const Text('Open on the day view'),
             subtitle: const Text(
@@ -70,7 +71,7 @@ class AccessibilityScreen extends ConsumerWidget {
             onChanged: (v) =>
                 notifier.update((s) => s.copyWith(dayViewByDefault: v)),
           ),
-          SwitchListTile(
+          AdaptiveSwitchTile(
             key: const ValueKey('a11y-large-headers'),
             title: const Text('Larger day headers'),
             subtitle: const Text(
@@ -81,7 +82,7 @@ class AccessibilityScreen extends ConsumerWidget {
                 notifier.update((s) => s.copyWith(largeDayHeaders: v)),
           ),
           section('Read aloud'),
-          SwitchListTile(
+          AdaptiveSwitchTile(
             key: const ValueKey('a11y-speak'),
             secondary: const Icon(Icons.volume_up),
             title: const Text('Loudspeaker button'),
@@ -92,32 +93,11 @@ class AccessibilityScreen extends ConsumerWidget {
             onChanged: (v) =>
                 notifier.update((s) => s.copyWith(speakButton: v)),
           ),
-          ListTile(
-            key: const ValueKey('a11y-speech-language'),
+          _SpeechLanguageTile(
             enabled: a.speakButton,
-            title: const Text('Voice language'),
-            subtitle: const Text('Independent of the app language'),
-            trailing: DropdownButton<SpeechLanguage>(
-              value: a.speechLanguage,
-              onChanged: !a.speakButton
-                  ? null
-                  : (v) =>
-                        notifier.update((s) => s.copyWith(speechLanguage: v)),
-              items: const [
-                DropdownMenuItem(
-                  value: SpeechLanguage.system,
-                  child: Text('Device language'),
-                ),
-                DropdownMenuItem(
-                  value: SpeechLanguage.en,
-                  child: Text('English'),
-                ),
-                DropdownMenuItem(
-                  value: SpeechLanguage.de,
-                  child: Text('Deutsch'),
-                ),
-              ],
-            ),
+            value: a.speechLanguage,
+            onChanged: (v) =>
+                notifier.update((s) => s.copyWith(speechLanguage: v)),
           ),
           _SpeedTile(
             enabled: a.speakButton,
@@ -249,6 +229,56 @@ class _SpeedTile extends StatelessWidget {
           const Icon(Icons.speed, size: 20),
         ],
       ),
+    );
+  }
+}
+
+/// "Voice language" with its dropdown; with large text the dropdown moves
+/// below the label (beside it, it squeezes the label to a letter per line).
+class _SpeechLanguageTile extends StatelessWidget {
+  const _SpeechLanguageTile({
+    required this.enabled,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final bool enabled;
+  final SpeechLanguage value;
+  final ValueChanged<SpeechLanguage> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final stacked = isLargeText(context);
+    final dropdown = DropdownButton<SpeechLanguage>(
+      value: value,
+      // Stacked: as wide as the tile, long names end in "…".
+      isExpanded: stacked,
+      onChanged: !enabled
+          ? null
+          : (v) {
+              if (v != null) onChanged(v);
+            },
+      items: const [
+        DropdownMenuItem(
+          value: SpeechLanguage.system,
+          child: Text('Device language'),
+        ),
+        DropdownMenuItem(value: SpeechLanguage.en, child: Text('English')),
+        DropdownMenuItem(value: SpeechLanguage.de, child: Text('Deutsch')),
+      ],
+    );
+    const subtitle = Text('Independent of the app language');
+    return ListTile(
+      key: const ValueKey('a11y-speech-language'),
+      enabled: enabled,
+      title: const Text('Voice language'),
+      subtitle: stacked
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [subtitle, dropdown],
+            )
+          : subtitle,
+      trailing: stacked ? null : dropdown,
     );
   }
 }

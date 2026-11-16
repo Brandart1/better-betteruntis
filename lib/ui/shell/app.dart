@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../../calendar/calendar_sync_service.dart' show kAppSeedColor;
 import '../calendar/calendar_auto_sync.dart';
 
@@ -121,7 +123,7 @@ class BetterUntisApp extends ConsumerWidget {
         // the widget tree and the open screens.
         return MediaQuery(
           data: mq.copyWith(
-            textScaler: TextScaler.linear(mq.textScaler.scale(1) * textScale),
+            textScaler: AppTextScaler(mq.textScaler, textScale),
           ),
           child: ColorFiltered(
             colorFilter: contrast == ContrastMode.off ? _identity : _grayscale,
@@ -141,4 +143,35 @@ class BetterUntisApp extends ConsumerWidget {
       supportedLocales: const [Locale('en'), Locale('de')],
     );
   }
+}
+
+/// The system's text scaler (non-linear on Android 14+: big text grows less)
+/// times the app's own text size, capped at [maxScale] times the font size:
+/// beyond that, single words no longer fit beside a switch on a phone.
+@immutable
+class AppTextScaler extends TextScaler {
+  const AppTextScaler(this.system, this.factor);
+
+  static const maxScale = 2.5;
+
+  final TextScaler system;
+  final double factor;
+
+  @override
+  double scale(double fontSize) =>
+      math.min(system.scale(fontSize) * factor, fontSize * maxScale);
+
+  @override
+  // ignore: deprecated_member_use
+  double get textScaleFactor =>
+      math.min(system.scale(14) / 14 * factor, maxScale);
+
+  @override
+  bool operator ==(Object other) =>
+      other is AppTextScaler &&
+      other.system == system &&
+      other.factor == factor;
+
+  @override
+  int get hashCode => Object.hash(system, factor);
 }

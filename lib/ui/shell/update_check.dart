@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/apk_update.dart';
 import '../../app/app_update.dart';
 import '../infocenter/info_providers.dart';
 
@@ -31,6 +34,10 @@ class _UpdateCheckerState extends ConsumerState<UpdateChecker> {
   }
 
   Future<void> _check() async {
+    // An APK left over from the last in-app update is no longer needed.
+    if (ref.read(inAppUpdateSupportedProvider)) {
+      await ref.read(apkDownloaderProvider).cleanup();
+    }
     final current = await ref.read(appVersionProvider.future);
     if (current == null) return;
     final latest = await ref.read(latestReleaseFetcherProvider)();
@@ -45,6 +52,7 @@ class _UpdateCheckerState extends ConsumerState<UpdateChecker> {
     if (context == null || !context.mounted) return;
     await showDialog<void>(
       context: context,
+      barrierDismissible: false,
       builder: (_) => UpdateDialog(current: current.version, latest: latest),
     );
   }
@@ -53,48 +61,211 @@ class _UpdateCheckerState extends ConsumerState<UpdateChecker> {
   Widget build(BuildContext context) => widget.child;
 }
 
-class UpdateDialog extends ConsumerWidget {
+enum _Phase { idle, downloading, installing, needsPermission, error }
+
+/// "Update available". On Android with an APK attached it can download and
+/// install the update itself ("Update now"); elsewhere it links to GitHub.
+class UpdateDialog extends ConsumerStatefulWidget {
   const UpdateDialog({super.key, required this.current, required this.latest});
 
   final String current;
   final ReleaseInfo latest;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<UpdateDialog> createState() => _UpdateDialogState();
+}
+
+class _UpdateDialogState extends ConsumerState<UpdateDialog> {
+  var _phase = _Phase.idle;
+  String? _error;
+  double? _progress;
+  CancelToken? _cancel;
+
+  ReleaseAsset? get _apk =>
+      ref.read(inAppUpdateSupportedProvider) ? widget.latest.apk : null;
+
+  @override
+  void dispose() {
+    _cancel?.cancel();
+    super.dispose();
+  }
+
+  void _set(_Phase phase, {String? error}) {
+    if (!mounted) return;
+    setState(() {
+      _phase = phase;
+      _error = error;
+    });
+  }
+
+  Future<void> _update() async {
+    final apk = _apk;
+    if (apk == null) return;
+    final installer = ref.read(apkInstallerProvider);
+    final downloader = ref.read(apkDownloaderProvider);
+    try {
+      if (!await installer.canRequestInstalls()) {
+        _set(_Phase.needsPermission);
+        await installer.openInstallSettings();
+        return;
+      }
+    } catch (_) {
+      _set(_Phase.error, error: 'Could not reach the system installer.');
+      return;
+    }
+    final cancel = _cancel = CancelToken();
+    setState(() {
+      _phase = _Phase.downloading;
+      _progress = null;
+      _error = null;
+    });
+    final File file;
+    try {
+      file = await downloader.download(
+        apk,
+        cancel: cancel,
+        onProgress: (received, total) {
+          if (!mounted || total <= 0) return;
+          setState(() => _progress = (received / total).clamp(0.0, 1.0));
+        },
+      );
+    } on DioException catch (e) {
+      if (CancelToken.isCancel(e)) {
+        _set(_Phase.idle);
+      } else {
+        _set(_Phase.error, error: 'Download failed.');
+      }
+      return;
+    } on ApkUpdateException catch (e) {
+      _set(_Phase.error, error: e.message);
+      return;
+    } catch (_) {
+      _set(_Phase.error, error: 'Download failed.');
+      return;
+    } finally {
+      if (identical(_cancel, cancel)) _cancel = null;
+    }
+    if (!mounted) return;
+    _set(_Phase.installing);
+    final result = await installer.install(file);
+    switch (result.status) {
+      case InstallStatus.success:
+        if (mounted) Navigator.of(context).pop();
+      case InstallStatus.aborted:
+        _set(_Phase.idle);
+      case InstallStatus.notAllowed:
+        _set(_Phase.needsPermission);
+        await installer.openInstallSettings();
+      case InstallStatus.failure:
+        _set(
+          _Phase.error,
+          error:
+              'Installation failed'
+              '${result.message == null ? '' : ': ${result.message}'}.',
+        );
+    }
+  }
+
+  void _openGitHub() {
+    Navigator.of(context).pop();
+    unawaited(ref.read(urlOpenerProvider)(widget.latest.url));
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return AlertDialog(
-      key: const ValueKey('update-dialog'),
-      icon: const Icon(Icons.system_update_outlined),
-      title: const Text('Update available'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Version ${latest.version} is available. You have $current.'),
-          const SizedBox(height: 12),
-          SelectableText(
-            latest.url.toString(),
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.primary,
+    final apk = _apk;
+    final busy = _phase == _Phase.downloading || _phase == _Phase.installing;
+    return PopScope(
+      canPop: _phase != _Phase.downloading,
+      child: AlertDialog(
+        key: const ValueKey('update-dialog'),
+        icon: const Icon(Icons.system_update_outlined),
+        title: const Text('Update available'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Version ${widget.latest.version} is available. '
+              'You have ${widget.current}.',
             ),
-          ),
+            const SizedBox(height: 12),
+            if (apk == null || _phase == _Phase.idle)
+              SelectableText(
+                widget.latest.url.toString(),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            if (_phase == _Phase.downloading) ...[
+              Text(
+                _progress == null
+                    ? 'Downloading…'
+                    : 'Downloading… ${(_progress! * 100).round()} %',
+                key: const ValueKey('update-progress-text'),
+              ),
+              const SizedBox(height: 8),
+              LinearProgressIndicator(
+                key: const ValueKey('update-progress'),
+                value: _progress,
+              ),
+            ],
+            if (_phase == _Phase.installing)
+              const Text(
+                'Installing… Confirm in the system dialog if Android asks.',
+                key: ValueKey('update-installing'),
+              ),
+            if (_phase == _Phase.needsPermission)
+              const Text(
+                'Allow BetterBetterUntis to install apps in the settings '
+                'that just opened ("Install unknown apps"), then come back '
+                'and tap Update now again.',
+                key: ValueKey('update-needs-permission'),
+              ),
+            if (_phase == _Phase.error)
+              Text(
+                '${_error ?? 'Update failed.'} You can also download it from '
+                'GitHub.',
+                key: const ValueKey('update-error'),
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
+          ],
+        ),
+        actions: [
+          if (_phase == _Phase.downloading)
+            TextButton(
+              key: const ValueKey('update-cancel'),
+              onPressed: () => _cancel?.cancel(),
+              child: const Text('Cancel'),
+            )
+          else
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(_phase == _Phase.installing ? 'Close' : 'Later'),
+            ),
+          if (apk == null)
+            FilledButton.icon(
+              key: const ValueKey('update-open'),
+              onPressed: _openGitHub,
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Open GitHub'),
+            )
+          else if (!busy) ...[
+            TextButton(
+              key: const ValueKey('update-open'),
+              onPressed: _openGitHub,
+              child: const Text('Open GitHub'),
+            ),
+            FilledButton.icon(
+              key: const ValueKey('update-now'),
+              onPressed: _update,
+              icon: const Icon(Icons.download),
+              label: Text(_phase == _Phase.idle ? 'Update now' : 'Try again'),
+            ),
+          ],
         ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Later'),
-        ),
-        FilledButton.icon(
-          key: const ValueKey('update-open'),
-          onPressed: () {
-            Navigator.of(context).pop();
-            unawaited(ref.read(urlOpenerProvider)(latest.url));
-          },
-          icon: const Icon(Icons.open_in_new),
-          label: const Text('Open GitHub'),
-        ),
-      ],
     );
   }
 }

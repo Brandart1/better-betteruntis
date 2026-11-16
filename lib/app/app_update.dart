@@ -27,11 +27,34 @@ class AppVersion {
   String toString() => build.isEmpty ? version : '$version ($build)';
 }
 
+/// The Android APK attached to a release.
+class ReleaseAsset {
+  const ReleaseAsset({
+    required this.name,
+    required this.url,
+    required this.size,
+    this.sha256,
+  });
+  final String name;
+
+  /// `browser_download_url` (https on github.com, redirects to the CDN).
+  final Uri url;
+
+  /// Size in bytes as reported by GitHub.
+  final int size;
+
+  /// Lower-case hex SHA-256 from GitHub's `digest` field, when provided.
+  final String? sha256;
+}
+
 /// The newest published release.
 class ReleaseInfo {
-  const ReleaseInfo({required this.tag, required this.url});
+  const ReleaseInfo({required this.tag, required this.url, this.apk});
   final String tag;
   final Uri url;
+
+  /// The APK for the in-app updater on Android; null if none is attached.
+  final ReleaseAsset? apk;
 
   /// `v0.4.5-beta` → `0.4.5`.
   String get version => tag.replaceFirst(RegExp('^v'), '').split('-').first;
@@ -78,12 +101,60 @@ Future<ReleaseInfo?> fetchLatestRelease(Dio dio) async {
       ),
     );
     final data = res.data;
-    final tag = data?['tag_name'];
-    if (tag is! String) return null;
-    return ReleaseInfo(tag: tag, url: latestReleasePage);
+    return data == null ? null : parseRelease(data);
   } catch (_) {
     return null;
   }
+}
+
+/// Turns a GitHub release JSON object into a [ReleaseInfo]. Null for drafts,
+/// pre-releases and alpha tags: `/releases/latest` already skips those, this
+/// is defence in depth so the updater only ever offers betas and stables.
+ReleaseInfo? parseRelease(Map<String, dynamic> data) {
+  final tag = data['tag_name'];
+  if (tag is! String || tag.isEmpty) return null;
+  if (data['draft'] == true || data['prerelease'] == true) return null;
+  if (tag.toLowerCase().contains('-alpha')) return null;
+  return ReleaseInfo(
+    tag: tag,
+    url: latestReleasePage,
+    apk: _parseApk(data['assets'], tag),
+  );
+}
+
+/// The release's APK: `better-betteruntis-<tag>.apk` (see release.yml), else
+/// the only `.apk`. Must be an https download from github.com.
+ReleaseAsset? _parseApk(Object? assets, String tag) {
+  if (assets is! List) return null;
+  final apks = <ReleaseAsset>[];
+  for (final a in assets) {
+    if (a is! Map) continue;
+    final name = a['name'], url = a['browser_download_url'], size = a['size'];
+    if (name is! String || !name.toLowerCase().endsWith('.apk')) continue;
+    if (url is! String || size is! int || size <= 0) continue;
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https' || uri.host != 'github.com') {
+      continue;
+    }
+    apks.add(
+      ReleaseAsset(
+        name: name,
+        url: uri,
+        size: size,
+        sha256: parseSha256Digest(a['digest']),
+      ),
+    );
+  }
+  final exact = apks.where((a) => a.name == 'better-betteruntis-$tag.apk');
+  if (exact.isNotEmpty) return exact.first;
+  return apks.length == 1 ? apks.single : null;
+}
+
+/// `sha256:<64 hex>` → lower-case hex; null for other or missing digests.
+String? parseSha256Digest(Object? digest) {
+  if (digest is! String) return null;
+  final m = RegExp(r'^sha256:([0-9a-fA-F]{64})$').firstMatch(digest.trim());
+  return m?.group(1)!.toLowerCase();
 }
 
 /// Version of the running app; null where it can't be read (tests).

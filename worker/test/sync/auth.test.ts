@@ -70,6 +70,17 @@ describe("POST /api/sync/session", () => {
     expect([res.status, await errorOf(res)]).toEqual([401, "school_mismatch"]);
   });
 
+  it("anonymous (public timetable) access -> 403 anonymous_not_allowed, nothing stored", async () => {
+    const user = freshUser();
+    const res = await call(sessionReq({ host: HOST, school: "demo-school", untisToken: `tok.${user}.demo-school` }), {
+      fetch: async () => Response.json({ user: { id: Number(user), name: "#anonymous#" }, tenant: { id: "7065100", name: "DEMO-SCHOOL" } }),
+    });
+    expect([res.status, await errorOf(res)]).toEqual([403, "anonymous_not_allowed"]);
+    expect(res.headers.get("set-cookie")).toBeNull();
+    const n = await env.DB.prepare("SELECT count(*) AS c FROM identities WHERE user_id = ?").bind(user).first<{ c: number }>();
+    expect(n!.c).toBe(0);
+  });
+
   it("odd JSON from WebUntis -> 502", async () => {
     const res = await call(sessionReq({ host: HOST, school: "x", untisToken: "tok.1.x" }), {
       fetch: async () => Response.json({ hello: 1 }),

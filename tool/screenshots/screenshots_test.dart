@@ -14,6 +14,7 @@ import 'package:better_betteruntis/dev/fake_timetable.dart';
 import 'package:better_betteruntis/ui/infocenter/info_center_screen.dart';
 import 'package:better_betteruntis/ui/settings/timetable_settings_screen.dart';
 import 'package:better_betteruntis/ui/shell/app.dart';
+import 'package:better_betteruntis/ui/shell/app_drawer.dart';
 import 'package:better_betteruntis/ui/timetable/day_speech.dart';
 import 'package:better_betteruntis/ui/timetable/lesson_card.dart';
 import 'package:better_betteruntis/ui/timetable/timetable_screen.dart';
@@ -313,7 +314,7 @@ void main() {
       t,
       'week',
       'Your whole week\nat a glance',
-      const TimetableScreen(),
+      const TimetableScreen(drawer: AppDrawer()),
     ),
   );
 
@@ -323,7 +324,7 @@ void main() {
       t,
       'lesson',
       'Every detail\nof every lesson',
-      const TimetableScreen(),
+      const TimetableScreen(drawer: AppDrawer()),
       before: (t) async {
         // A substitution shows the most (old → new teacher).
         final cards = find.byType(LessonCard);
@@ -343,7 +344,7 @@ void main() {
       t,
       'day',
       'A day view that\nreads itself aloud',
-      const TimetableScreen(),
+      const TimetableScreen(drawer: AppDrawer()),
       a11y: (_) =>
           const AccessibilitySettings(largeDayHeaders: true, speakButton: true),
       // Tuesday of the demo week has an exam, a substitution and a
@@ -382,7 +383,7 @@ void main() {
       t,
       'contrast',
       'High contrast\nfor easier reading',
-      const TimetableScreen(),
+      const TimetableScreen(drawer: AppDrawer()),
       a11y: (b) => AccessibilitySettings(
         contrast: b == Brightness.dark ? ContrastMode.dark : ContrastMode.light,
       ),
