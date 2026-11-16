@@ -32,7 +32,12 @@ int totp(String secret, int timeMillis) {
   final key = base32Decode(secret);
   if (key.isEmpty) return 0;
   final counter = timeMillis ~/ 30000;
-  final msg = ByteData(8)..setInt64(0, counter, Endian.big);
+  // Two u32 halves: ByteData.setInt64 throws on the web (dart2js), which
+  // broke every web login after the password check. The counter (~5.9e7)
+  // fits in 32 bits, the high word stays 0 for millennia.
+  final msg = ByteData(8)
+    ..setUint32(0, counter ~/ 0x100000000, Endian.big)
+    ..setUint32(4, counter % 0x100000000, Endian.big);
   final hash = Hmac(sha1, key).convert(msg.buffer.asUint8List()).bytes;
   final offset = hash[hash.length - 1] & 0x0F;
   final binary =

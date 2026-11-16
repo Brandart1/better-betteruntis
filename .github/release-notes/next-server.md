@@ -6,5 +6,10 @@
 - **End-to-end encryption for sync (optional):** protect synced notes with a sync passphrase (and an optional recovery code). The server then only stores encrypted data it can't read.
 - **What's new:** after an update, the app shows what changed since the version you used last (also when you skipped several releases). You can reread the notes anytime under *Menu → What's new*. They are built into the app, so this also works offline.
 
+- **Get the app:** the web version's menu links to the Android and iOS apps.
+
+### Fixed
+- **Web version: logging in failed** with "Something went wrong" right after the password was accepted (the one-time code and the account id used number operations browsers don't support).
+
 ### Changed
 - The self-hosting server (Docker image and `…-web-linux-x64.tar.gz`) has been removed. If you still want to host the web version yourself, use a 0.4.x release.
