@@ -5,18 +5,24 @@ library;
 
 import 'dart:async';
 
+import 'class_register.dart';
 import 'info.dart';
 import 'interfaces.dart';
 import 'models.dart';
 import 'notifications.dart';
+import 'substitution_planning.dart';
 
 /// The sources every check runs, in the app and in the background. New
-/// kinds (e.g. teachers' substitution requests, once there is an API for
-/// them) are added here together with a switch in [NotificationSettings].
+/// kinds are added here together with a switch in [NotificationSettings].
 List<ChangeSource> defaultChangeSources({
   required TimetableRepository timetables,
   required InfoCenterRepository info,
-}) => [TimetableChangeSource(timetables), MessageChangeSource(info)];
+  SubstitutionPlanningRepository? substitution,
+}) => [
+  TimetableChangeSource(timetables),
+  MessageChangeSource(info),
+  if (substitution != null) SubstitutionRequestChangeSource(substitution),
+];
 
 // ---- Timetable ------------------------------------------------------------------
 
@@ -315,4 +321,87 @@ class MessageChangeSource extends ChangeSource {
   @override
   NotificationTarget target(Account account, List<ChangeItem> fresh) =>
       NotificationTarget.inbox(account.id);
+}
+
+// ---- Substitution requests (teachers) ------------------------------------------
+
+/// Open requests to cover a lesson that hasn't started yet. Answered,
+/// expired or taken ones drop out (and come back as news only if the
+/// server opened them again).
+List<ChangeItem> substitutionRequestChanges(
+  Iterable<SubstitutionRequest> requests, {
+  required DateTime now,
+}) {
+  final open = [
+    for (final r in requests)
+      if (r.isPending && r.start.isAfter(now)) r,
+  ]..sort((a, b) => a.start.compareTo(b.start));
+  return [
+    for (final r in open)
+      ChangeItem(
+        key: '${r.id}',
+        signature: '',
+        text: [
+          [
+            r.subject,
+            if (r.classes.isNotEmpty) r.classes.join(', '),
+          ].where((t) => t.trim().isNotEmpty).join(' '),
+          if (r.absentTeacher.trim().isNotEmpty)
+            'instead of ${r.absentTeacher.trim()}',
+        ].where((t) => t.trim().isNotEmpty).join(' · '),
+        start: r.start,
+        end: r.end,
+      ),
+  ];
+}
+
+/// Teachers: new requests asking them to substitute (substitution
+/// planning service). Schools without it answer 404: the source is then
+/// skipped like any failure.
+class SubstitutionRequestChangeSource extends ChangeSource {
+  const SubstitutionRequestChangeSource(this.repo);
+
+  final SubstitutionPlanningRepository repo;
+
+  static const sourceId = 'substitution-requests';
+
+  @override
+  String get id => sourceId;
+
+  @override
+  bool enabledIn(NotificationSettings s) => s.substitutionRequests;
+
+  @override
+  Future<List<ChangeItem>?> current(
+    Account account,
+    NotificationSettings s,
+    DateTime now,
+  ) async {
+    if (!hasClassRegister(account)) return null;
+    try {
+      final list = await repo
+          .requests(account)
+          .timeout(const Duration(seconds: 45));
+      return substitutionRequestChanges(list, now: now);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  String title(int count) =>
+      count == 1 ? 'Substitution request' : '$count substitution requests';
+
+  @override
+  List<String> lines(List<ChangeItem> fresh) => [
+    for (final i in fresh)
+      i.start == null
+          ? i.text
+          : '${shortDay(i.start!)} ${hhmm(i.start!)}–'
+                '${hhmm(i.end ?? i.start!)}: ${i.text}',
+  ];
+
+  @override
+  NotificationTarget target(Account account, List<ChangeItem> fresh) =>
+      NotificationTarget.substitutionRequests(account.id);
 }

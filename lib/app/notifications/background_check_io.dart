@@ -14,6 +14,7 @@ import 'package:workmanager/workmanager.dart';
 import '../../api/untis_api_impl.dart';
 import '../../core/change_sources.dart';
 import '../../core/notifications.dart';
+import '../../data/substitution_planning_repository_impl.dart';
 import '../../data/account_repository_impl.dart';
 import '../../data/db/database.dart';
 import '../../data/info_center_repository_impl.dart';
@@ -103,7 +104,15 @@ Future<void> runBackgroundCheck() async {
     );
     final info = InfoCenterRepositoryImpl(api: api, db: db, accounts: accounts);
     final checker = ChangeChecker(
-      sources: defaultChangeSources(timetables: timetables, info: info),
+      sources: defaultChangeSources(
+        timetables: timetables,
+        info: info,
+        substitution: SubstitutionPlanningRepositoryImpl(
+          api: api,
+          accounts: accounts,
+          timetables: timetables,
+        ),
+      ),
       stateStore: createNotificationStateStore(),
       notifier: PluginLocalNotifier(),
     );

@@ -28,6 +28,7 @@ class NotificationSettings {
     this.enabled = false,
     this.timetable = true,
     this.messages = true,
+    this.substitutionRequests = true,
     this.daysAhead = defaultDaysAhead,
   });
 
@@ -42,6 +43,9 @@ class NotificationSettings {
   /// New (unread) inbox messages.
   final bool messages;
 
+  /// Teachers: new requests to cover a colleague's lesson.
+  final bool substitutionRequests;
+
   /// School days after today that are checked (today always is).
   /// Saturdays and Sundays don't count.
   final int daysAhead;
@@ -50,11 +54,13 @@ class NotificationSettings {
     bool? enabled,
     bool? timetable,
     bool? messages,
+    bool? substitutionRequests,
     int? daysAhead,
   }) => NotificationSettings(
     enabled: enabled ?? this.enabled,
     timetable: timetable ?? this.timetable,
     messages: messages ?? this.messages,
+    substitutionRequests: substitutionRequests ?? this.substitutionRequests,
     daysAhead: (daysAhead ?? this.daysAhead).clamp(0, maxDaysAhead),
   );
 
@@ -62,6 +68,7 @@ class NotificationSettings {
     'enabled': enabled,
     'timetable': timetable,
     'messages': messages,
+    'substitutionRequests': substitutionRequests,
     'daysAhead': daysAhead,
   };
 
@@ -75,6 +82,7 @@ class NotificationSettings {
       enabled: b('enabled', d.enabled),
       timetable: b('timetable', d.timetable),
       messages: b('messages', d.messages),
+      substitutionRequests: b('substitutionRequests', d.substitutionRequests),
       daysAhead: days is num
           ? days.toInt().clamp(0, maxDaysAhead)
           : d.daysAhead,
@@ -87,10 +95,17 @@ class NotificationSettings {
       other.enabled == enabled &&
       other.timetable == timetable &&
       other.messages == messages &&
+      other.substitutionRequests == substitutionRequests &&
       other.daysAhead == daysAhead;
 
   @override
-  int get hashCode => Object.hash(enabled, timetable, messages, daysAhead);
+  int get hashCode => Object.hash(
+    enabled,
+    timetable,
+    messages,
+    substitutionRequests,
+    daysAhead,
+  );
 }
 
 /// [NotificationSettings] of every account, keyed by account id. Stored on
@@ -387,10 +402,14 @@ class NotificationTarget {
   const NotificationTarget.timetable(this.accountId, DateTime this.day)
     : kind = timetableKind;
   const NotificationTarget.inbox(this.accountId) : kind = inboxKind, day = null;
+  const NotificationTarget.substitutionRequests(this.accountId)
+    : kind = substitutionRequestsKind,
+      day = null;
   const NotificationTarget._(this.accountId, this.kind, this.day);
 
   static const timetableKind = 'timetable';
   static const inboxKind = 'inbox';
+  static const substitutionRequestsKind = 'substitution-requests';
 
   final String accountId;
   final String kind;

@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/class_register.dart';
 import '../../core/notifications.dart';
 import '../../core/providers.dart';
 import '../common/large_text.dart';
@@ -130,6 +131,19 @@ class _NotificationSettingsScreenState
                       prefs.update(account.id, (c) => c.copyWith(messages: v))
                 : null,
           ),
+          if (hasClassRegister(account))
+            AdaptiveSwitchTile(
+              key: const ValueKey('notifications-substitution-requests'),
+              title: const Text('Substitution requests'),
+              subtitle: const Text('Requests to cover a colleague\'s lesson'),
+              value: s.substitutionRequests,
+              onChanged: s.enabled
+                  ? (v) => prefs.update(
+                      account.id,
+                      (c) => c.copyWith(substitutionRequests: v),
+                    )
+                  : null,
+            ),
           ListTile(
             key: const ValueKey('notifications-days'),
             enabled: s.enabled && s.timetable,

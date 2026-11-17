@@ -6,6 +6,7 @@ import 'package:better_betteruntis/core/interfaces.dart';
 import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/core/notifications.dart';
 import 'package:better_betteruntis/core/settings.dart';
+import 'package:better_betteruntis/core/substitution_planning.dart';
 import 'package:better_betteruntis/data/name_resolver_impl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -162,6 +163,87 @@ class FakeSource extends ChangeSource {
 }
 
 void main() {
+  group('substitution requests', () {
+    final now = DateTime(2026, 11, 17, 10);
+    SubstitutionRequest req(
+      int id,
+      DateTime start, {
+      SubstitutionRequestState state = SubstitutionRequestState.pending,
+    }) => SubstitutionRequest(
+      id: id,
+      start: start,
+      end: start.add(const Duration(minutes: 50)),
+      subject: 'M',
+      classes: const ['4b'],
+      absentTeacher: 'Weber',
+      state: state,
+    );
+
+    test('only open requests that haven\'t started, by time', () {
+      final items = substitutionRequestChanges([
+        req(3, DateTime(2026, 11, 19, 8)),
+        req(1, DateTime(2026, 11, 18, 9)),
+        req(2, DateTime(2026, 11, 17, 8)), // already started
+        req(
+          4,
+          DateTime(2026, 11, 18, 10),
+          state: SubstitutionRequestState.declined,
+        ),
+      ], now: now);
+      expect(items.map((i) => i.key), ['1', '3']);
+      expect(items.first.text, 'M 4b · instead of Weber');
+    });
+
+    test('settings: on by default, saved, switch only for it', () {
+      const s = NotificationSettings();
+      expect(s.substitutionRequests, isTrue);
+      final off = s.copyWith(substitutionRequests: false);
+      expect(NotificationSettings.fromJson(off.toJson()), off);
+      expect(off == s, isFalse);
+      expect(
+        NotificationSettings.fromJson({'enabled': true}).substitutionRequests,
+        isTrue,
+      );
+    });
+
+    test('payload opens the requests screen', () {
+      final t = NotificationTarget.parse(
+        const NotificationTarget.substitutionRequests('a1').payload,
+      )!;
+      expect(t.accountId, 'a1');
+      expect(t.kind, NotificationTarget.substitutionRequestsKind);
+    });
+
+    test('source: teachers only, failures skip, lines with time', () async {
+      final repo = _FakeSubstitutionRepo([req(5, DateTime(2026, 11, 18, 8))]);
+      final source = SubstitutionRequestChangeSource(repo);
+      const settings = NotificationSettings(enabled: true);
+      expect(await source.current(_account('p'), settings, now), isNull);
+      final teacher = Account(
+        id: 't',
+        school: _school,
+        username: 't',
+        anonymous: false,
+        displayName: 'T',
+        elementType: ElementType.teacher,
+        elementId: 9,
+      );
+      final items = (await source.current(teacher, settings, now))!;
+      expect(items.single.key, '5');
+      expect(
+        source.lines(items).single,
+        startsWith('Wed 18.11. 08:00–08:50: M'),
+      );
+      expect(source.enabledIn(settings), isTrue);
+      expect(
+        source.enabledIn(settings.copyWith(substitutionRequests: false)),
+        isFalse,
+      );
+      repo.error = const UntisException(-8532, 'no planning');
+      expect(await source.current(teacher, settings, now), isNull);
+    });
+  });
+
   group('NotificationSettings', () {
     test('defaults: off, both kinds, 2 days', () {
       const s = NotificationSettings();
@@ -618,4 +700,19 @@ class _FakeTimetables implements TimetableRepository {
     DateTime weekStart, {
     void Function(int done, int total)? onProgress,
   }) async {}
+}
+
+class _FakeSubstitutionRepo implements SubstitutionPlanningRepository {
+  _FakeSubstitutionRepo(this.list);
+  final List<SubstitutionRequest> list;
+  Object? error;
+
+  @override
+  Future<List<SubstitutionRequest>> requests(Account account) async {
+    if (error case final e?) throw e;
+    return list;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

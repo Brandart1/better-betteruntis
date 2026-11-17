@@ -15,6 +15,7 @@ import '../../core/change_sources.dart';
 import '../../core/info.dart';
 import '../../core/notifications.dart';
 import '../../core/providers.dart';
+import '../../core/substitution_planning.dart';
 import '../infocenter/info_providers.dart';
 import '../timetable/timetable_providers.dart';
 import 'router.dart';
@@ -36,6 +37,7 @@ class NotificationService {
     sources: defaultChangeSources(
       timetables: ref.read(timetableRepositoryProvider),
       info: ref.read(infoCenterRepositoryProvider),
+      substitution: ref.read(substitutionPlanningRepositoryProvider),
     ),
     stateStore: ref.read(notificationStateStoreProvider),
     notifier: ref.read(localNotifierProvider),
@@ -74,7 +76,9 @@ class NotificationService {
     if (active?.id != t.accountId) await repo.setActive(t.accountId);
     final router = ref.read(routerProvider);
     router.go('/');
-    if (t.kind == NotificationTarget.inboxKind) {
+    if (t.kind == NotificationTarget.substitutionRequestsKind) {
+      unawaited(router.push('/substitution-requests'));
+    } else if (t.kind == NotificationTarget.inboxKind) {
       ref.read(infoTabProvider.notifier).set(InfoTab.messages);
       unawaited(router.push('/info'));
     } else if (t.day != null) {
