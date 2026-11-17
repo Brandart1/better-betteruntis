@@ -799,11 +799,32 @@ void main() {
       await t.tap(find.byKey(const ValueKey('lesson-exam-create')));
       expect(exam, same(block));
 
-      // Once the lesson has started, rooms can't change.
+      // Once the lesson has started, rooms and exams can't change: the
+      // buttons stay but are greyed out.
       await t.pumpWidget(const SizedBox());
       await pump(now: DateTime(2026, 11, 10, 9, 45));
-      expect(find.byKey(const ValueKey('room-add')), findsNothing);
-      expect(find.byKey(const ValueKey('room-replace-31')), findsNothing);
+      for (final k in ['room-add', 'room-replace-31', 'room-remove-31']) {
+        expect(
+          t.widget<IconButton>(find.byKey(ValueKey(k))).onPressed,
+          isNull,
+          reason: k,
+        );
+      }
+      expect(
+        t
+            .widget<ButtonStyleButton>(
+              find.byKey(const ValueKey('lesson-exam-create')),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(find.byKey(const ValueKey('lesson-exam-locked')), findsOneWidget);
+      actions.clear();
+      exam = null;
+      await t.tap(find.byKey(const ValueKey('room-add')));
+      await t.tap(find.byKey(const ValueKey('lesson-exam-create')));
+      expect(actions, isEmpty);
+      expect(exam, isNull);
       expect(
         find.byKey(const ValueKey('details-rooms-locked')),
         findsOneWidget,

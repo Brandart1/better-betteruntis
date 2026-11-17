@@ -214,6 +214,11 @@ class LessonDetailsPage extends ConsumerWidget {
     final onRoomAction = colleague ? null : this.onRoomAction;
     final onCreateExam = colleague ? null : this.onCreateExam;
     final onEditLessonInfo = colleague ? null : this.onEditLessonInfo;
+    // Rooms and exams can only change before the lesson starts (the server
+    // seems to refuse both afterwards): the buttons show greyed out then.
+    final started = !ref
+        .watch(teacherToolsClockProvider)()
+        .isBefore(this.block.start);
     // The sheet stays open while the user edits their notes: apply the
     // current ones instead of those the block was built with.
     final notes = ref.watch(lessonNotesProvider);
@@ -328,9 +333,24 @@ class LessonDetailsPage extends ConsumerWidget {
             padding: const EdgeInsets.only(top: 8),
             child: OutlinedButton.icon(
               key: const ValueKey('lesson-exam-create'),
-              onPressed: () => onCreateExam(this.block),
+              onPressed: started ? null : () => onCreateExam(this.block),
               icon: const Icon(Icons.assignment_add),
               label: const Text('Create exam'),
+            ),
+          ),
+        if (started &&
+            onCreateExam != null &&
+            !block.isCancelled &&
+            block.periods.any((q) => !q.isCancelled && q.canHoldExam) &&
+            !block.periods.any((q) => q.isSchoolExam))
+          Padding(
+            key: const ValueKey('lesson-exam-locked'),
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Exams can be created until the lesson starts.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
         if (noteKeys.isNotEmpty || onEditLessonInfo != null)
@@ -356,9 +376,7 @@ class LessonDetailsPage extends ConsumerWidget {
             names: names,
             onOpen: onOpenElement,
             // Rooms can only change before the lesson starts.
-            editable: ref
-                .watch(teacherToolsClockProvider)()
-                .isBefore(block.start),
+            editable: !started,
             onAction: (a) => onRoomAction(this.block, a),
           )
         else
@@ -595,13 +613,14 @@ class _RoomSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final refs = period.ofType(ElementType.room).toList();
+    // Greyed out (disabled) once the lesson has started.
     Widget icon(String key, IconData i, String tip, VoidCallback onTap) =>
         IconButton(
           key: ValueKey(key),
           icon: Icon(i, size: 20),
           tooltip: tip,
           visualDensity: VisualDensity.compact,
-          onPressed: onTap,
+          onPressed: editable ? onTap : null,
         );
     return Padding(
       key: const ValueKey('details-rooms'),
@@ -628,7 +647,7 @@ class _RoomSection extends StatelessWidget {
                       ),
                     ),
                     // Removed rooms (id 0) have nothing to replace.
-                    if (editable && r.id != 0) ...[
+                    if (r.id != 0) ...[
                       icon(
                         'room-replace-${r.id}',
                         Icons.autorenew,
@@ -644,13 +663,12 @@ class _RoomSection extends StatelessWidget {
                     ],
                   ],
                 ),
-              if (editable)
-                icon(
-                  'room-add',
-                  Icons.add,
-                  'Add a room',
-                  () => onAction(const RoomAction.add()),
-                ),
+              icon(
+                'room-add',
+                Icons.add,
+                'Add a room',
+                () => onAction(const RoomAction.add()),
+              ),
             ],
           ),
           if (refs.isEmpty && !editable) const Text('No room'),

@@ -24,6 +24,7 @@ Teacher test build (branch `teacher`). Absences, lesson topic, previous topics a
 - Teachers: a **supervision before the first lesson** (e.g. Gangaufsicht 7:40) now shows, also when another teacher's timetable couldn't be opened before; very short lessons show their name instead of a cut-off line.
 - New **colours for supervisions and room bookings** (a booked room without a class) in Settings, with preview, fill or border.
 - Teachers: **Create exam** and "Absences & lesson topic" are no longer offered for supervisions, an Aufsichtsstunde or anything else without a class; the exam editor doesn't pick them as periods either.
+- Teachers: once a lesson has started (or is over), the room buttons (⟳ × +) and **Create exam** show greyed out instead of disappearing — the server seems to refuse both then. Try creating an exam on a future lesson.
 - Web test version for teachers (no sync): https://bbu-teacher-alpha.brandart1.workers.dev
 - Demo school: log in as `teacher` to try the teacher features.
 
