@@ -3,7 +3,7 @@ library;
 
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
+import 'package:otp/otp.dart';
 
 const _base32Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
@@ -29,21 +29,18 @@ Uint8List base32Decode(String input) {
 /// Computes the 6-digit TOTP for [secret] (Base32) at [timeMillis].
 /// Returns 0 when the secret is empty or decodes to no bytes.
 int totp(String secret, int timeMillis) {
-  final key = base32Decode(secret);
-  if (key.isEmpty) return 0;
-  final counter = timeMillis ~/ 30000;
-  // Two u32 halves: ByteData.setInt64 throws on the web (dart2js), which
-  // broke every web login after the password check. The counter (~5.9e7)
-  // fits in 32 bits, the high word stays 0 for millennia.
-  final msg = ByteData(8)
-    ..setUint32(0, counter ~/ 0x100000000, Endian.big)
-    ..setUint32(4, counter % 0x100000000, Endian.big);
-  final hash = Hmac(sha1, key).convert(msg.buffer.asUint8List()).bytes;
-  final offset = hash[hash.length - 1] & 0x0F;
-  final binary =
-      ((hash[offset] & 0x7F) << 24) |
-      ((hash[offset + 1] & 0xFF) << 16) |
-      ((hash[offset + 2] & 0xFF) << 8) |
-      (hash[offset + 3] & 0xFF);
-  return binary % 1000000;
+  // Normalise like base32Decode: uppercase, drop everything outside the
+  // alphabet (spaces, dashes, padding).
+  final clean = secret.toUpperCase().replaceAll(RegExp('[^A-Z2-7]'), '');
+  if (base32Decode(clean).isEmpty) return 0;
+  return int.parse(
+    OTP.generateTOTPCodeString(
+      clean,
+      timeMillis,
+      length: 6,
+      interval: 30,
+      algorithm: Algorithm.SHA1,
+      isGoogle: true,
+    ),
+  );
 }
