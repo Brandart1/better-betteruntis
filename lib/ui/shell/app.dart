@@ -8,6 +8,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/accessibility.dart';
+import 'notification_service.dart';
 import 'router.dart';
 import 'update_check.dart';
 import 'whats_new.dart';
@@ -116,6 +117,7 @@ class BetterUntisApp extends ConsumerWidget {
         ContrastMode.dark => ThemeMode.dark,
       },
       routerConfig: router,
+      scaffoldMessengerKey: appScaffoldMessengerKey,
       builder: (context, child) {
         // Accessibility text size multiplies the system's.
         final mq = MediaQuery.of(context);
@@ -132,7 +134,9 @@ class BetterUntisApp extends ConsumerWidget {
               child: WhatsNewChecker(
                 navigatorKey: router.routerDelegate.navigatorKey,
                 child: CalendarAutoSync(
-                  child: child ?? const SizedBox.shrink(),
+                  child: NotificationAutoCheck(
+                    child: child ?? const SizedBox.shrink(),
+                  ),
                 ),
               ),
             ),

@@ -33,3 +33,8 @@ the app's version name and N the Android versionCode / iOS build number.
 - CI only analyzes and tests; the app is built once, by the release workflow, when a tag is pushed.
 - Minor (`Y`) and major (`X`) only change when explicitly decided.
 - Release tags are `vX.Y.Z[-alpha|-beta|-rc]` and must match pubspec (the release workflow checks this).
+
+## Notifications and background checks
+Local only, no push and no server. lib/core/notifications.dart (settings per account, de-duplication, `ChangeChecker`), lib/core/change_sources.dart (timetable, messages), lib/app/notifications/ (system notifiers, state store, background task). What was already notified lives in `notification_state.json` (web: localStorage `bbu.notificationState`), separate from settings.json so the app and the background isolate don't overwrite each other.
+
+Android: while any account has notifications on, a periodic WorkManager task (`bbu-change-check`, about every 45 min, network required; Android may delay it in Doze / battery saver) starts a background isolate (`notificationCallbackDispatcher` in lib/app/notifications/background_check_io.dart). It opens the same database, secure storage and settings as the app and runs the same `ChangeChecker`: refresh this and next week of "My timetable", then the inbox, with the stored credentials. Skipped if the app checked less than 10 minutes earlier; capped at 8 minutes. Turning notifications off everywhere cancels the task. iOS checks only on start and resume; the web app only while open (changes as a snackbar).

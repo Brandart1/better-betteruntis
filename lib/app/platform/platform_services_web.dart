@@ -5,16 +5,48 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:web/web.dart' as web;
 
+import '../../core/notifications.dart';
 import '../../core/settings.dart';
 import '../../data/secret_store.dart';
 import '../web_proxy.dart';
 
 const _settingsKey = 'bbu.settings';
 const _secretPrefix = 'bbu.secret.';
+const _notificationStateKey = 'bbu.notificationState';
 
 Future<SettingsStore> openSettingsStore() async => LocalStorageSettingsStore();
 
 SecretStore createSecretStore() => LocalStorageSecretStore();
+
+NotificationStateStore createNotificationStateStore() =>
+    LocalStorageNotificationStateStore();
+
+/// "Already notified" state in its own localStorage entry (per browser
+/// profile; open tabs share it).
+class LocalStorageNotificationStateStore implements NotificationStateStore {
+  @override
+  Future<Map<String, Object?>> load() async {
+    try {
+      final raw = web.window.localStorage.getItem(_notificationStateKey);
+      final decoded = raw == null ? null : jsonDecode(raw);
+      if (decoded is Map) {
+        return {for (final e in decoded.entries) '${e.key}': e.value};
+      }
+    } catch (_) {
+      // Blocked or corrupt: the next run only records a baseline.
+    }
+    return {};
+  }
+
+  @override
+  Future<void> save(Map<String, Object?> state) async {
+    try {
+      web.window.localStorage.setItem(_notificationStateKey, jsonEncode(state));
+    } catch (_) {
+      // Quota or private mode: keep nothing.
+    }
+  }
+}
 
 List<Interceptor> platformInterceptors() => [WebProxyInterceptor(Uri.base)];
 
