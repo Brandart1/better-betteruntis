@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/app_update.dart';
 import '../../core/build_channel.dart';
+import '../../core/class_lead.dart';
 import '../../core/class_register.dart';
 import '../../core/providers.dart';
 import '../accounts/account_switcher.dart';
@@ -61,6 +62,11 @@ class AppDrawer extends StatelessWidget {
               ),
             );
             if (!teacher) return const SizedBox.shrink();
+            final classLead = ref.watch(
+              activeAccountProvider.select(
+                (a) => a.value != null && leadsClass(a.value!),
+              ),
+            );
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -77,6 +83,14 @@ class AppDrawer extends StatelessWidget {
                   subtitle: const Text('Your exams, create new ones'),
                   onTap: () => go('/exams'),
                 ),
+                if (classLead)
+                  ListTile(
+                    key: const ValueKey('drawer-class-lead'),
+                    leading: const Icon(Icons.groups_outlined),
+                    title: const Text('My class'),
+                    subtitle: const Text('Class teacher overview'),
+                    onTap: () => go('/classlead'),
+                  ),
                 ListTile(
                   key: const ValueKey('drawer-excuses'),
                   leading: const Icon(Icons.fact_check_outlined),

@@ -12,7 +12,11 @@ import '../timetable/timetable_utils.dart';
 /// filtered by excuse status; tap one to excuse it (or not) with a text.
 /// Who may excuse is decided by the server (usually the class teacher).
 class ExcusesScreen extends ConsumerStatefulWidget {
-  const ExcusesScreen({super.key});
+  const ExcusesScreen({super.key, this.initialClassId});
+
+  /// The class to show first (e.g. from the class dashboard); else one of
+  /// the account's classes.
+  final int? initialClassId;
 
   @override
   ConsumerState<ExcusesScreen> createState() => _ExcusesScreenState();
@@ -43,8 +47,10 @@ class _ExcusesScreenState extends ConsumerState<ExcusesScreen> {
     try {
       final meta = _meta ?? await _repo.meta(account);
       if (!mounted || gen != _generation) return;
+      final initial = widget.initialClassId;
       final classId =
           _classId ??
+          (meta.classes.any((c) => c.id == initial) ? initial : null) ??
           // A class of the account (class teacher), else the first one.
           meta.classes
               .where((c) => account.klassenIds.contains(c.id))

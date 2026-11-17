@@ -509,6 +509,18 @@ void main() {
       },
     );
 
+    test('all subjects of a whole class (no lesson): no period data', () async {
+      final s = await repo.summary(
+        teacherAccount(),
+        [_lesson(0, DateTime(2026, 11, 10, 8))],
+        scope: AbsenceSummaryScope.all,
+        from: DateTime(2026, 11, 2),
+        to: DateTime(2026, 11, 6),
+      );
+      expect(api.calls, isEmpty);
+      expect(s.pupils, isNotEmpty);
+    });
+
     test('errors: not a teacher, end before start', () async {
       final p = _lesson(1, DateTime(2026, 11, 10, 8));
       expect(

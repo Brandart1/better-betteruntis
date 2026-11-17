@@ -316,14 +316,21 @@ class AbsenceSummaryRepositoryImpl implements AbsenceSummaryRepository {
     final auth = await accounts.credentials(a.id);
     // The lesson's pupils: only they are listed (a course may be a group of
     // a class, or pupils of several classes).
+    // A block without real lessons (the class dashboard's whole-class
+    // summary, ids <= 0): every pupil of the class.
     var roster = const <int, ClassRegStudent>{};
-    try {
-      final data = await _periodData(a, auth, [for (final p in block) p.id]);
-      roster = _roster([
-        for (final p in block) ?data.periods[p.id],
-      ], data.students);
-    } on UntisException catch (e) {
-      if (e.isNetwork || e.isTimeout) rethrow;
+    if (block.any((p) => p.id > 0)) {
+      try {
+        final data = await _periodData(a, auth, [
+          for (final p in block)
+            if (p.id > 0) p.id,
+        ]);
+        roster = _roster([
+          for (final p in block) ?data.periods[p.id],
+        ], data.students);
+      } on UntisException catch (e) {
+        if (e.isNetwork || e.isTimeout) rethrow;
+      }
     }
     final records = <int, ClassAbsenceRecord>{};
     for (final k in klassen) {

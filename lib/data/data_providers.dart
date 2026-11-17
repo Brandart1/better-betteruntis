@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 
 import '../core/absence_summary.dart';
+import '../core/class_lead.dart';
 import '../core/class_register.dart';
 import '../core/excuses.dart';
 import '../core/info.dart';
@@ -14,6 +15,7 @@ import '../core/pupil_photos.dart';
 import '../core/teacher_tools.dart';
 import 'absence_summary_repository_impl.dart';
 import 'account_repository_impl.dart';
+import 'class_lead_repository_impl.dart';
 import 'class_register_repository_impl.dart';
 import 'db/database.dart';
 import 'excuse_repository_impl.dart';
@@ -93,6 +95,15 @@ List<Override> dataOverrides({
       accounts: ref.watch(accountRepositoryProvider),
       timetables: ref.watch(timetableRepositoryProvider),
       clock: clock,
+    ),
+  ),
+  classLeadRepositoryProvider.overrideWith(
+    (ref) => ClassLeadRepositoryImpl(
+      api: api ?? ref.watch(untisApiProvider),
+      accounts: ref.watch(accountRepositoryProvider),
+      timetables: ref.watch(timetableRepositoryProvider),
+      excuses: ref.watch(excuseRepositoryProvider),
+      classRegister: ref.watch(classRegisterRepositoryProvider),
     ),
   ),
   teacherToolsRepositoryProvider.overrideWith(

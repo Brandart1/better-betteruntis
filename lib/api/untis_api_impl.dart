@@ -9,6 +9,7 @@ import 'package:dio/dio.dart';
 
 import '../core/absence_details.dart';
 import '../core/absence_summary.dart';
+import '../core/class_lead.dart';
 import '../core/class_register.dart';
 import '../core/excuses.dart';
 import '../core/info.dart';
@@ -17,6 +18,7 @@ import '../core/models.dart';
 import '../core/teacher_tools.dart';
 import '../core/pupil_photos.dart';
 import 'absence_summary_parsers.dart';
+import 'class_lead_parsers.dart';
 import 'class_register_parsers.dart';
 import 'excuse_parsers.dart';
 import 'json_rpc.dart';
@@ -30,7 +32,8 @@ class UntisApiImpl
         PupilPhotoApi,
         TeacherToolsApi,
         ClassAbsencesApi,
-        ExcuseApi {
+        ExcuseApi,
+        ClassLeadApi {
   /// [interceptors] are added to the default client (e.g. the web proxy
   /// rewrite); ignored when [dio] is given.
   UntisApiImpl({
@@ -1182,6 +1185,36 @@ class UntisApiImpl
       throw UntisException(-1, 'Not saved: ${errors.join('; ')}');
     }
     return null;
+  }
+
+  // ---- Class teacher dashboard (lib/core/class_lead.dart) ---------------
+
+  @override
+  Future<ClassLeadData> classLeadData({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int klasseId,
+    required DateTime start,
+    required DateTime end,
+    required ExcuseMeta meta,
+  }) async {
+    final params = classregDataParams(klasseId, start, end);
+    _recordRequest('getClassregData2017', params);
+    final Object? r;
+    try {
+      r = await _rpc.call(rpcUrl(host, school), 'getClassregData2017', {
+        ...params,
+        'auth': _rpc.auth(auth),
+      });
+    } on UntisException catch (e) {
+      if (e.code != UntisException.noRight) rethrow;
+      throw UntisException(
+        e.code,
+        'Only the class teacher can see this class (${e.message}).',
+      );
+    }
+    return parseClassLeadData(r, meta);
   }
 
   // ---- Pupil photos (assumed, docs/API.md "Pupil photos") ---------------

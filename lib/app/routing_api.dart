@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import '../core/absence_details.dart';
 import '../core/absence_summary.dart';
+import '../core/class_lead.dart';
 import '../core/class_register.dart';
 import '../core/excuses.dart';
 import '../core/info.dart';
@@ -19,7 +20,8 @@ class RoutingUntisApi
         TeacherToolsApi,
         ClassAbsencesApi,
         PupilPhotoApi,
-        ExcuseApi {
+        ExcuseApi,
+        ClassLeadApi {
   RoutingUntisApi({required this.real, required this.demo});
 
   final FullUntisApi real;
@@ -602,4 +604,29 @@ class RoutingUntisApi
     status: status,
     text: text,
   );
+
+  @override
+  Future<ClassLeadData> classLeadData({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int klasseId,
+    required DateTime start,
+    required DateTime end,
+    required ExcuseMeta meta,
+  }) {
+    final Object a = _for(host);
+    if (a is! ClassLeadApi) {
+      throw const UntisException(-1, 'Not supported for this account.');
+    }
+    return a.classLeadData(
+      host: host,
+      school: school,
+      auth: auth,
+      klasseId: klasseId,
+      start: start,
+      end: end,
+      meta: meta,
+    );
+  }
 }

@@ -26,12 +26,16 @@ class AbsenceSummaryScreen extends ConsumerStatefulWidget {
     required this.periods,
     required this.title,
     this.initialScope = AbsenceSummaryScope.lesson,
+    this.scopes = AbsenceSummaryScope.values,
   });
 
   final Account account;
   final List<Period> periods;
   final String title;
   final AbsenceSummaryScope initialScope;
+
+  /// The scopes to choose from; no choice when only one.
+  final List<AbsenceSummaryScope> scopes;
 
   @override
   ConsumerState<AbsenceSummaryScreen> createState() =>
@@ -143,16 +147,17 @@ class _AbsenceSummaryScreenState extends ConsumerState<AbsenceSummaryScreen> {
         child: ListView(
           padding: const EdgeInsets.only(bottom: 24),
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: _Choice<AbsenceSummaryScope>(
-                keyPrefix: 'summary-scope',
-                values: AbsenceSummaryScope.values,
-                selected: _scope,
-                label: (s) => s.label,
-                onSelected: _setScope,
+            if (widget.scopes.length > 1)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: _Choice<AbsenceSummaryScope>(
+                  keyPrefix: 'summary-scope',
+                  values: widget.scopes,
+                  selected: _scope,
+                  label: (s) => s.label,
+                  onSelected: _setScope,
+                ),
               ),
-            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: _Choice<AbsenceSummaryGrouping>(

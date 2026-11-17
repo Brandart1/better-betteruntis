@@ -11,6 +11,7 @@ import 'dart:typed_data';
 
 import '../core/absence_details.dart';
 import '../core/absence_summary.dart';
+import '../core/class_lead.dart';
 import '../core/class_register.dart';
 import '../core/excuses.dart';
 import '../core/info.dart';
@@ -47,7 +48,8 @@ class FakeUntisApi
         TeacherToolsApi,
         PupilPhotoApi,
         ClassAbsencesApi,
-        ExcuseApi {
+        ExcuseApi,
+        ClassLeadApi {
   FakeUntisApi({this.latency = const Duration(milliseconds: 400)});
 
   /// Artificial delay for every call. Use [Duration.zero] in widget tests.
@@ -223,7 +225,8 @@ class FakeUntisApi
         displayName: 'Demo Teacher',
         elementType: ElementType.teacher,
         elementId: demoTeacherId,
-        klassenIds: const [],
+        // Class teacher of 9b (class dashboard).
+        klassenIds: const [1],
         rights: const {'R_MY_TIMETABLE'},
         masterData: demoMasterData,
       );
@@ -1344,6 +1347,71 @@ class FakeUntisApi
       );
     }
     return absence.withExcuse(status, text.trim());
+  }
+
+  /// Every classLeadData call (class id), for test assertions.
+  final classLeadCalls = <int>[];
+
+  /// The demo class teacher dashboard of 9b: its absences (as the Excuses
+  /// list has them) and the class register entries of its lessons.
+  @override
+  Future<ClassLeadData> classLeadData({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int klasseId,
+    required DateTime start,
+    required DateTime end,
+    required ExcuseMeta meta,
+  }) async {
+    classLeadCalls.add(klasseId);
+    if (klasseId != 1) {
+      await _delay();
+      return const ClassLeadData();
+    }
+    final absences = await excuseAbsences(
+      host: host,
+      school: school,
+      auth: auth,
+      meta: meta,
+      query: ExcuseQuery(
+        classId: klasseId,
+        range: ExcuseRange.last14,
+        start: start,
+        end: end,
+        filter: ExcuseFilter.all,
+      ),
+    );
+    final names = {for (final s in demoStudents) s.id: s.displayName};
+    final events = <ClassRegEvent>[];
+    for (
+      var day = DateTime(start.year, start.month, start.day);
+      !day.isAfter(end);
+      day = DateTime(day.year, day.month, day.day + 1)
+    ) {
+      if (day.weekday > 5) continue;
+      for (var unit = 0; unit < 5; unit++) {
+        final ttId = demoPeriodId(day, unit);
+        for (final e in _demoEvents(ttId)) {
+          final x = e.inLesson(
+            ttId,
+            DateTime(day.year, day.month, day.day, 8 + unit),
+          );
+          events.add(
+            ClassRegEvent(
+              id: x.id,
+              ttId: x.ttId,
+              studentId: x.studentId,
+              studentName: names[x.studentId] ?? x.studentName,
+              reasonId: x.reasonId,
+              text: x.text,
+              date: x.date,
+            ),
+          );
+        }
+      }
+    }
+    return ClassLeadData(absences: absences, events: events, students: names);
   }
 
   /// Class register entries created in the demo, by timetable id.

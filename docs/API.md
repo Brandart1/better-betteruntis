@@ -187,6 +187,9 @@ From the decompiled official app (student absence administration), bearer token,
 - Date-times local with a literal Z (`yyyy-MM-dd'T'HH:mm:00'Z'`). BBU sends both `dateRange` and `dateRangeType`. 403 → "Only class teachers may excuse absences of this class".
 - On HTTP 404 (remembered per school for the session): master data `excuseStatuses` (type guessed from the name), the class absence list (`absences/students?klasseId` / getStudentAbsences2017) and JSON-RPC `submitExcuse2017 {absenceId, excuseStatusId, date:null, text}` → `{absence, errors}`. Unconfirmed with a real teacher account.
 
+### Class teacher dashboard (getClassregData2017)
+The official app's class-teacher tile calls JSON-RPC `getClassregData2017 {auth, klasseId, startDate:"yyyy-MM-dd", endDate}` once per class of `userData.klassenIds` → `{absences:[UMStudentAbsence], classRegEvents:[{id, elementType STUDENT|CLASS, elementId, eventReasonId, dateTime, text, write, delete}], referencedStudents:[{id, firstName, lastName, klasseId, birthDate, imageUrl, studentOfAge, medicalCertSince}]}`, and excuses with `submitExcuse2017 {absenceId, excuseStatusId, date:null, text}`. We map absences to Excuses (status from `excuse.excuseStatusId`) and entries to class register entries (reason names from master data `eventReasons`); entries with `delete:true` are skipped. No-right → "Only the class teacher can see this class". Not yet seen with a real teacher account.
+
 ## Room booking and exams (teachers)
 Teacher accounts with the class register get room actions (⟳ replace, × remove, + add) on lessons of their own timetable, "Book a room" (without a lesson) in the drawer, "Create exam" on lessons (instead of the device-only "Mark as exam") and "Exams" in the drawer (their exam list and "New exam"). Built on branch `teacher` (0.6.0 alphas).
 

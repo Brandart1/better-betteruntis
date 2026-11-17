@@ -9,6 +9,7 @@ import '../accessibility/accessibility_screen.dart';
 import '../accounts/manage_accounts_screen.dart';
 import '../calendar/calendar_sync_screen.dart';
 import '../calendar/calendar_syncs_screen.dart';
+import '../classreg/class_lead_screen.dart';
 import '../classreg/class_register_overview_screen.dart';
 import '../classreg/excuses_screen.dart';
 import '../classreg/free_room_booking_screen.dart';
@@ -93,7 +94,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Old name of the class register overview ("Open lessons").
       GoRoute(path: '/classreg/open', redirect: (_, _) => '/classreg'),
       GoRoute(path: '/exams', builder: (_, _) => const TeacherExamsScreen()),
-      GoRoute(path: '/excuses', builder: (_, _) => const ExcusesScreen()),
+      GoRoute(
+        path: '/excuses',
+        builder: (_, s) => ExcusesScreen(
+          initialClassId: int.tryParse(s.uri.queryParameters['class'] ?? ''),
+        ),
+      ),
+      GoRoute(path: '/classlead', builder: (_, _) => const ClassLeadScreen()),
       GoRoute(
         path: '/rooms/book',
         builder: (_, _) => const FreeRoomBookingScreen(),

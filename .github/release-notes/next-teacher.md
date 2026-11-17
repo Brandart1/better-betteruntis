@@ -29,6 +29,7 @@ Teacher test build (branch `teacher`). Absences, lesson topic, previous topics a
 - Teachers: lesson details now have **Notes for pupils** (the lesson info, as before) and **Notes for teachers**, which only teachers see and which you can edit right in the lesson sheet.
 - Teachers: **Homework** in "Absences & lesson topic": add and edit the homework you give in a lesson (text, a remark only teachers see, due date — the next lesson of the course by default — and done). Homework can't be deleted in the app; remove it in WebUntis.
 - Teachers: **Excuses** in the menu: the absences of your class for the last 14 days, a week, a month or the school year, filtered by open / not excused / excused; tap one to mark it excused or not excused with an excuse text.
+- Teachers: **My class** for class teachers: open absences of your class (excuse them right there), the pupils absent most often, recent class register entries, and links to Excuses, the class timetable and the absence summary.
 - Web test version for teachers (no sync): https://bbu-teacher-alpha.brandart1.workers.dev
 - Demo school: log in as `teacher` to try the teacher features.
 
