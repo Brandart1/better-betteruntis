@@ -190,6 +190,19 @@ From the decompiled official app (student absence administration), bearer token,
 ### Class teacher dashboard (getClassregData2017)
 The official app's class-teacher tile calls JSON-RPC `getClassregData2017 {auth, klasseId, startDate:"yyyy-MM-dd", endDate}` once per class of `userData.klassenIds` → `{absences:[UMStudentAbsence], classRegEvents:[{id, elementType STUDENT|CLASS, elementId, eventReasonId, dateTime, text, write, delete}], referencedStudents:[{id, firstName, lastName, klasseId, birthDate, imageUrl, studentOfAge, medicalCertSince}]}`, and excuses with `submitExcuse2017 {absenceId, excuseStatusId, date:null, text}`. We map absences to Excuses (status from `excuse.excuseStatusId`) and entries to class register entries (reason names from master data `eventReasons`); entries with `delete:true` are skipped. No-right → "Only the class teacher can see this class". Not yet seen with a real teacher account.
 
+### Substitution planning (teachers)
+From the decompiled official app. Separate host `https://substitution.webuntis.com/api/`, WebUntis bearer token plus `X-TenantID: <URLEncoder.encode(school login)>`, no `?school=`:
+- `GET v2/view/ask-teacher-requests-view` → `{substitutionRequests:[{period:{wuId, startDateTime, endDateTime, unitOfDay, subject, klassen, rooms, teachers:[{currentTeacher, removedTeacher, conflictState}]}, periodConflict:{id, startDateTime, endDateTime, unitOfDay, subject, klassen, rooms, originalTeacher, askTeacherStats}, state: PENDING|ACCEPTED|DECLINED|EXPIRED|TAKEN|ABORTED}]}`
+- `POST v2/periods/{id}/changes/ask-teacher/teacher/accept` / `…/decline`: no body. `{id}` = `periodConflict.id`, else `period.wuId`.
+- `GET v2/view/teacher-absences` → `{groups:[{group:{absence:{wuAbsenceId, teacher, reason:{id,displayName}, startDateTime, endDateTime, created, note, missedPeriods}, …}, periods:[…]}]}`
+Date-times read as local, trailing Z dropped (unconfirmed). 404 → "Your school doesn't use online substitution planning".
+
+### Teacher absences (WebUntis REST)
+Bearer, `/WebUntis/api/rest/`: `GET view/v1/teacher-absences/form` → `{startDateTime, endDateTime, reasons:[{id, displayName}], teachers}`; `POST view/v1/teacher-absences` `{id:0, teacherId, startDateTime, endDateTime ("yyyy-MM-dd'T'HH:mm:00", local, no Z), reasonId?, note}` → `TeacherAbsenceDto`. Also in the app but unused there and by us: update `POST view/v1/teacher-absences/{id}`, `DELETE view/v1/teacher-absences/{id}`.
+
+### Web relay methods
+The relay (worker/src/proxy.ts) forwards GET, POST, HEAD, PUT, PATCH and DELETE (bodies for all but GET/HEAD) and the `X-TenantID` header; other methods get 405.
+
 ## Room booking and exams (teachers)
 Teacher accounts with the class register get room actions (⟳ replace, × remove, + add) on lessons of their own timetable, "Book a room" (without a lesson) in the drawer, "Create exam" on lessons (instead of the device-only "Mark as exam") and "Exams" in the drawer (their exam list and "New exam"). Built on branch `teacher` (0.6.0 alphas).
 

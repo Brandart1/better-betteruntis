@@ -99,6 +99,20 @@ class AppDrawer extends StatelessWidget {
                   onTap: () => go('/excuses'),
                 ),
                 ListTile(
+                  key: const ValueKey('drawer-substitution-requests'),
+                  leading: const Icon(Icons.swap_horiz),
+                  title: const Text('Substitution requests'),
+                  subtitle: const Text('Accept or decline covering a lesson'),
+                  onTap: () => go('/substitution-requests'),
+                ),
+                ListTile(
+                  key: const ValueKey('drawer-teacher-absences'),
+                  leading: const Icon(Icons.event_busy_outlined),
+                  title: const Text('My absences'),
+                  subtitle: const Text('Report yourself absent'),
+                  onTap: () => go('/teacher-absences'),
+                ),
+                ListTile(
                   key: const ValueKey('drawer-book-room'),
                   leading: const Icon(Icons.meeting_room_outlined),
                   title: const Text('Book a room'),

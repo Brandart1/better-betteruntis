@@ -4,8 +4,9 @@
  * `https://<host>/<path>?<query>` for allowlisted hosts.
  *
  * What goes upstream: method (GET/POST/HEAD), path, raw query, the body, and
- * only content-type, accept, accept-language and a bearer authorization
- * header, with a neutral user agent. What comes back: status, body and
+ * only content-type, accept, accept-language, a bearer authorization header
+ * and x-tenantid (the school login the substitution planning service,
+ * substitution.webuntis.com, needs), with a neutral user agent. What comes back: status, body and
  * content-type, plus `cache-control: no-store`. Cookies are never forwarded
  * in either direction (same as the Dart server); redirects are not followed
  * and their `location` is dropped.
@@ -20,11 +21,20 @@ import { clientIpKey } from "./ip";
 export const PROXY_PREFIX = "/proxy/";
 
 /** Request headers copied upstream; everything else is dropped. */
-export const FORWARDED_REQUEST_HEADERS = ["content-type", "accept", "accept-language", "authorization"] as const;
+export const FORWARDED_REQUEST_HEADERS = [
+  "content-type",
+  "accept",
+  "accept-language",
+  "authorization",
+  "x-tenantid",
+] as const;
 
 export const UPSTREAM_USER_AGENT = "BetterBetterUntis-Web/1.0";
 
-const ALLOWED_METHODS = new Set(["GET", "POST", "HEAD"]);
+// PUT / PATCH / DELETE: teacher writes on WebUntis REST (excuses, lesson
+// notes, deleting reported absences) use them.
+const ALLOWED_METHODS = new Set(["GET", "POST", "HEAD", "PUT", "PATCH", "DELETE"]);
+const ALLOW_HEADER = "GET, POST, HEAD, PUT, PATCH, DELETE";
 
 /** Statuses whose responses must not have a body. */
 const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
@@ -110,12 +120,12 @@ async function relay(
 
   const method = request.method.toUpperCase();
   if (!ALLOWED_METHODS.has(method)) {
-    return textError(405, "Method not allowed", { allow: "GET, POST, HEAD" });
+    return textError(405, "Method not allowed", { allow: ALLOW_HEADER });
   }
 
   let body: Uint8Array | undefined;
   // GET/HEAD requests can't carry a body in fetch; WebUntis never needs one.
-  if (method === "POST") {
+  if (method !== "GET" && method !== "HEAD") {
     const declared = Number(request.headers.get("content-length") ?? "NaN");
     if (Number.isFinite(declared) && declared > maxRequest) return textError(413, "Request body too large");
     try {

@@ -13,6 +13,8 @@ import '../classreg/class_lead_screen.dart';
 import '../classreg/class_register_overview_screen.dart';
 import '../classreg/excuses_screen.dart';
 import '../classreg/free_room_booking_screen.dart';
+import '../classreg/substitution_requests_screen.dart';
+import '../classreg/teacher_absences_screen.dart';
 import '../classreg/teacher_exams_screen.dart';
 import '../infocenter/info_center_screen.dart';
 import '../infocenter/messages_tab.dart';
@@ -101,6 +103,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(path: '/classlead', builder: (_, _) => const ClassLeadScreen()),
+      GoRoute(
+        path: '/substitution-requests',
+        builder: (_, _) => const SubstitutionRequestsScreen(),
+      ),
+      GoRoute(
+        path: '/teacher-absences',
+        builder: (_, _) => const TeacherAbsencesScreen(),
+      ),
       GoRoute(
         path: '/rooms/book',
         builder: (_, _) => const FreeRoomBookingScreen(),

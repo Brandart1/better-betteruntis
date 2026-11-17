@@ -12,6 +12,7 @@ import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/providers.dart';
 import '../core/pupil_photos.dart';
+import '../core/substitution_planning.dart';
 import '../core/teacher_tools.dart';
 import 'absence_summary_repository_impl.dart';
 import 'account_repository_impl.dart';
@@ -22,6 +23,7 @@ import 'excuse_repository_impl.dart';
 import 'info_center_repository_impl.dart';
 import 'pupil_photo_repository_impl.dart';
 import 'secret_store.dart';
+import 'substitution_planning_repository_impl.dart';
 import 'teacher_tools_repository_impl.dart';
 import 'timetable_repository_impl.dart';
 
@@ -104,6 +106,14 @@ List<Override> dataOverrides({
       timetables: ref.watch(timetableRepositoryProvider),
       excuses: ref.watch(excuseRepositoryProvider),
       classRegister: ref.watch(classRegisterRepositoryProvider),
+    ),
+  ),
+  substitutionPlanningRepositoryProvider.overrideWith(
+    (ref) => SubstitutionPlanningRepositoryImpl(
+      api: api ?? ref.watch(untisApiProvider),
+      accounts: ref.watch(accountRepositoryProvider),
+      timetables: ref.watch(timetableRepositoryProvider),
+      clock: clock,
     ),
   ),
   teacherToolsRepositoryProvider.overrideWith(

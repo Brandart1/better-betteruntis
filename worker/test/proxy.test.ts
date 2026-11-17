@@ -182,6 +182,20 @@ describe("proxy forwarding", () => {
     expect([...sent.values()].join("\n")).not.toContain("secret");
   });
 
+  it("forwards X-TenantID for the substitution planning service", async () => {
+    await call(
+      req("GET", "/proxy/substitution.webuntis.com/api/v2/view/ask-teacher-requests-view", {
+        headers: { authorization: "Bearer jwt", "x-tenantid": "gym+musterstadt", cookie: "a=b" },
+      }),
+      { fetch: rec.fetch },
+    );
+    const sent = rec.single;
+    expect(sent.url).toBe("https://substitution.webuntis.com/api/v2/view/ask-teacher-requests-view");
+    expect(sent.headers.get("x-tenantid")).toBe("gym+musterstadt");
+    expect(sent.headers.get("authorization")).toBe("Bearer jwt");
+    expect(sent.headers.has("cookie")).toBe(false);
+  });
+
   it("basic-auth credentials are never forwarded upstream", async () => {
     await call(
       req("POST", "/proxy/x.webuntis.com/WebUntis/jsonrpc_intern.do", {
@@ -267,12 +281,27 @@ describe("proxy forwarding", () => {
     expect(await res.text()).toBe("");
   });
 
-  for (const m of ["PUT", "DELETE", "PATCH", "OPTIONS"]) {
+  for (const m of ["OPTIONS"]) {
     it(`rejects method ${m}`, async () => {
       const res = await call(req(m, "/proxy/x.webuntis.com/x"), { fetch: rec.fetch });
       expect(res.status).toBe(405);
-      expect(res.headers.get("allow")).toBe("GET, POST, HEAD");
+      expect(res.headers.get("allow")).toBe("GET, POST, HEAD, PUT, PATCH, DELETE");
       expect(rec.requests).toHaveLength(0);
+    });
+  }
+
+  for (const m of ["PUT", "PATCH", "DELETE"]) {
+    it(`forwards ${m} with its body`, async () => {
+      const res = await call(
+        req(m, "/proxy/x.webuntis.com/WebUntis/api/rest/x", {
+          body: new TextEncoder().encode('{"a":1}'),
+          headers: { "content-type": "application/json" },
+        }),
+        { fetch: rec.fetch },
+      );
+      expect(res.status).toBe(200);
+      expect(rec.single.method).toBe(m);
+      expect(new TextDecoder().decode(rec.requests[0]!.body)).toBe('{"a":1}');
     });
   }
 
@@ -486,7 +515,7 @@ describe("through the Worker", () => {
   });
 
   it("rejects other methods via the Worker", async () => {
-    const res = await SELF.fetch("https://bbu.test/proxy/x.webuntis.com/x", { method: "PUT", body: "x" });
+    const res = await SELF.fetch("https://bbu.test/proxy/x.webuntis.com/x", { method: "OPTIONS" });
     expect(res.status).toBe(405);
     expectSecurityHeaders(res);
   });

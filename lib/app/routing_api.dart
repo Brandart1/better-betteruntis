@@ -10,6 +10,7 @@ import '../core/interfaces.dart';
 
 import '../core/models.dart';
 import '../core/pupil_photos.dart';
+import '../core/substitution_planning.dart';
 import '../core/teacher_tools.dart';
 
 /// Sends demo accounts (host `*.invalid`) to [demo] and everything else to
@@ -21,7 +22,8 @@ class RoutingUntisApi
         ClassAbsencesApi,
         PupilPhotoApi,
         ExcuseApi,
-        ClassLeadApi {
+        ClassLeadApi,
+        SubstitutionPlanningApi {
   RoutingUntisApi({required this.real, required this.demo});
 
   final FullUntisApi real;
@@ -629,4 +631,64 @@ class RoutingUntisApi
       meta: meta,
     );
   }
+
+  SubstitutionPlanningApi _substitution(String host) {
+    final Object a = _for(host);
+    if (a is! SubstitutionPlanningApi) {
+      throw const UntisException(-1, 'Not supported for this account.');
+    }
+    return a;
+  }
+
+  @override
+  Future<List<SubstitutionRequest>> substitutionRequests({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) =>
+      _substitution(host)
+          .substitutionRequests(host: host, school: school, auth: auth);
+
+  @override
+  Future<void> answerSubstitutionRequest({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required SubstitutionRequest request,
+    required bool accept,
+  }) => _substitution(host).answerSubstitutionRequest(
+    host: host,
+    school: school,
+    auth: auth,
+    request: request,
+    accept: accept,
+  );
+
+  @override
+  Future<List<TeacherAbsence>> teacherAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) =>
+      _substitution(host)
+          .teacherAbsences(host: host, school: school, auth: auth);
+
+  @override
+  Future<TeacherAbsenceForm> teacherAbsenceForm({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) =>
+      _substitution(host)
+          .teacherAbsenceForm(host: host, school: school, auth: auth);
+
+  @override
+  Future<int?> createTeacherAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required TeacherAbsenceDraft draft,
+  }) => _substitution(
+    host,
+  ).createTeacherAbsence(host: host, school: school, auth: auth, draft: draft);
 }

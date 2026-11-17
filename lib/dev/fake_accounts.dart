@@ -18,6 +18,7 @@ import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
 import '../core/pupil_photos.dart';
+import '../core/substitution_planning.dart';
 import '../core/teacher_tools.dart';
 import 'fake_pupil_photos.dart';
 
@@ -49,7 +50,8 @@ class FakeUntisApi
         PupilPhotoApi,
         ClassAbsencesApi,
         ExcuseApi,
-        ClassLeadApi {
+        ClassLeadApi,
+        SubstitutionPlanningApi {
   FakeUntisApi({this.latency = const Duration(milliseconds: 400)});
 
   /// Artificial delay for every call. Use [Duration.zero] in widget tests.
@@ -1412,6 +1414,211 @@ class FakeUntisApi
       }
     }
     return ClassLeadData(absences: absences, events: events, students: names);
+  }
+
+  // ---- Substitution planning demo (teacher login) -----------------------
+
+  /// Demo absence reasons of the teacher absence form.
+  static const demoTeacherAbsenceReasons = [
+    TeacherAbsenceReason(id: 1, name: 'Krankheit'),
+    TeacherAbsenceReason(id: 2, name: 'Fortbildung'),
+    TeacherAbsenceReason(id: 3, name: 'Dienstgang'),
+    TeacherAbsenceReason(id: 4, name: 'Sonstiges'),
+  ];
+
+  /// Every answerSubstitutionRequest call, for test assertions.
+  final substitutionAnswerCalls = <({int id, bool accept})>[];
+
+  /// Every createTeacherAbsence call, for test assertions.
+  final teacherAbsenceCalls = <TeacherAbsenceDraft>[];
+
+  /// When set, the substitution planning calls throw it (error paths).
+  UntisException? substitutionError;
+
+  List<SubstitutionRequest>? _demoRequests;
+  List<TeacherAbsence>? _demoTeacherAbsences;
+
+  /// The [n]th weekday after (n > 0) or before (n < 0) today.
+  static DateTime _weekdayFrom(DateTime today, int n) {
+    var d = DateTime(today.year, today.month, today.day);
+    final step = n > 0 ? 1 : -1;
+    for (var left = n.abs(); left > 0;) {
+      d = DateTime(d.year, d.month, d.day + step);
+      if (d.weekday <= 5) left--;
+    }
+    return d;
+  }
+
+  /// Two open requests (the next two weekdays) and one declined last week.
+  List<SubstitutionRequest> get demoSubstitutionRequests =>
+      _demoRequests ??= () {
+        final now = DateTime.now();
+        DateTime at(DateTime d, int h, int m) =>
+            DateTime(d.year, d.month, d.day, h, m);
+        final d1 = _weekdayFrom(now, 1);
+        final d2 = _weekdayFrom(now, 2);
+        final past = _weekdayFrom(now, -3);
+        return [
+          SubstitutionRequest(
+            id: 9101,
+            periodId: demoPeriodId(d1, 2),
+            start: at(d1, 9, 50),
+            end: at(d1, 10, 35),
+            unitOfDay: 3,
+            subject: 'Englisch',
+            classes: const ['9b'],
+            rooms: const ['R102'],
+            absentTeacher: 'Weber',
+          ),
+          SubstitutionRequest(
+            id: 9102,
+            periodId: demoPeriodId(d2, 0),
+            start: at(d2, 8, 0),
+            end: at(d2, 8, 45),
+            unitOfDay: 1,
+            subject: 'Physik',
+            classes: const ['10a'],
+            rooms: const ['PH1'],
+            absentTeacher: 'Schulz',
+          ),
+          SubstitutionRequest(
+            id: 9100,
+            periodId: demoPeriodId(past, 4),
+            start: at(past, 11, 40),
+            end: at(past, 12, 25),
+            unitOfDay: 5,
+            subject: 'Deutsch',
+            classes: const ['9b'],
+            rooms: const ['R101'],
+            absentTeacher: 'Schulz',
+            state: SubstitutionRequestState.declined,
+          ),
+        ];
+      }();
+
+  /// One past absence (a training day last week) with two covered lessons.
+  List<TeacherAbsence> get demoTeacherAbsences => _demoTeacherAbsences ??= () {
+    final d = _weekdayFrom(DateTime.now(), -5);
+    DateTime at(int h, int m) => DateTime(d.year, d.month, d.day, h, m);
+    return [
+      TeacherAbsence(
+        id: 8801,
+        start: at(7, 0),
+        end: at(19, 0),
+        reason: 'Fortbildung',
+        note: 'Arbeitsblätter liegen im Lehrerzimmer, Fach MUE.',
+        missedPeriods: 2,
+        lessons: [
+          AbsenceLesson(
+            start: at(8, 0),
+            end: at(8, 45),
+            subject: 'M',
+            classes: const ['9b'],
+            substitute: 'SCH',
+            state: 'SUBSTITUTION',
+          ),
+          AbsenceLesson(
+            start: at(8, 55),
+            end: at(9, 40),
+            subject: 'PH',
+            classes: const ['9b'],
+            cancelled: true,
+            state: 'NO_SUBSTITUTION',
+          ),
+        ],
+      ),
+    ];
+  }();
+
+  @override
+  Future<List<SubstitutionRequest>> substitutionRequests({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    await _delay();
+    final error = substitutionError;
+    if (error != null) throw error;
+    return List.of(demoSubstitutionRequests);
+  }
+
+  @override
+  Future<void> answerSubstitutionRequest({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required SubstitutionRequest request,
+    required bool accept,
+  }) async {
+    await _delay();
+    final error = substitutionError;
+    if (error != null) throw error;
+    substitutionAnswerCalls.add((id: request.id, accept: accept));
+    final list = demoSubstitutionRequests;
+    final i = list.indexWhere((r) => r.id == request.id);
+    if (i >= 0) {
+      list[i] = list[i].withState(
+        accept
+            ? SubstitutionRequestState.accepted
+            : SubstitutionRequestState.declined,
+      );
+    }
+  }
+
+  @override
+  Future<List<TeacherAbsence>> teacherAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    await _delay();
+    final error = substitutionError;
+    if (error != null) throw error;
+    return List.of(demoTeacherAbsences);
+  }
+
+  @override
+  Future<TeacherAbsenceForm> teacherAbsenceForm({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    await _delay();
+    final now = DateTime.now();
+    return TeacherAbsenceForm(
+      reasons: demoTeacherAbsenceReasons,
+      start: DateTime(now.year, now.month, now.day, 7),
+      end: DateTime(now.year, now.month, now.day, 19),
+    );
+  }
+
+  @override
+  Future<int?> createTeacherAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required TeacherAbsenceDraft draft,
+  }) async {
+    await _delay();
+    final error = substitutionError;
+    if (error != null) throw error;
+    teacherAbsenceCalls.add(draft);
+    final id = 8802 + teacherAbsenceCalls.length;
+    demoTeacherAbsences.add(
+      TeacherAbsence(
+        id: id,
+        start: draft.start,
+        end: draft.end,
+        reason:
+            demoTeacherAbsenceReasons
+                .where((r) => r.id == draft.reasonId)
+                .firstOrNull
+                ?.name ??
+            '',
+        note: draft.note,
+      ),
+    );
+    return id;
   }
 
   /// Class register entries created in the demo, by timetable id.

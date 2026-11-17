@@ -17,6 +17,7 @@ import '../core/interfaces.dart';
 import '../core/models.dart';
 import '../core/teacher_tools.dart';
 import '../core/pupil_photos.dart';
+import '../core/substitution_planning.dart';
 import 'absence_summary_parsers.dart';
 import 'class_lead_parsers.dart';
 import 'class_register_parsers.dart';
@@ -24,6 +25,7 @@ import 'excuse_parsers.dart';
 import 'json_rpc.dart';
 import 'parsers.dart';
 import 'rest_teachers.dart';
+import 'substitution_parsers.dart';
 import 'teacher_tools_parsers.dart';
 
 class UntisApiImpl
@@ -33,7 +35,8 @@ class UntisApiImpl
         TeacherToolsApi,
         ClassAbsencesApi,
         ExcuseApi,
-        ClassLeadApi {
+        ClassLeadApi,
+        SubstitutionPlanningApi {
   /// [interceptors] are added to the default client (e.g. the web proxy
   /// rewrite); ignored when [dio] is given.
   UntisApiImpl({
@@ -1215,6 +1218,176 @@ class UntisApiImpl
       );
     }
     return parseClassLeadData(r, meta);
+  }
+
+  // ---- Substitution planning (teachers) ----------------------------------
+  // The official app's "Ask teacher" requests and own absences
+  // (lib/core/substitution_planning.dart). Lists and answers go to the
+  // Substitution Planning service (bearer token + X-TenantID); the absence
+  // form and creating one are WebUntis REST.
+
+  /// [UntisException.code] when the school doesn't use the substitution
+  /// planning service (HTTP 404 there) or has no teacher absence calls.
+  static const substitutionPlanningMissing = -8532;
+
+  static const _noSubstitutionPlanning =
+      "Your school doesn't use online substitution planning";
+
+  /// Bearer call to the substitution service ([sp] true, path under
+  /// `https://substitution.webuntis.com/api/`) or WebUntis REST (path under
+  /// `/WebUntis/api/rest/`). 404 -> [substitutionPlanningMissing], 403 ->
+  /// [UntisException.noRight] with [forbidden], else [restError].
+  Future<Object?> _substitutionCall(
+    String host,
+    String school,
+    UntisCredentials auth,
+    String method,
+    String path,
+    String label, {
+    required bool sp,
+    required String forbidden,
+    Object? body,
+  }) async {
+    final resp = await _bearerRequest(
+      host,
+      school,
+      auth,
+      method,
+      sp
+          ? 'https://$substitutionHost/api/$path'
+          : 'https://$host/WebUntis/api/rest/$path',
+      label,
+      body: body,
+      headers: sp ? {'X-TenantID': substitutionTenantId(school)} : const {},
+    );
+    final status = resp.statusCode ?? 0;
+    final text = resp.data ?? '';
+    Object? decoded;
+    try {
+      decoded = text.trim().isEmpty ? null : jsonDecode(text);
+    } on FormatException {
+      // Answers without a JSON body are fine for the writes (Void).
+      if (status >= 200 && status < 300 && method == 'GET') {
+        throw const UntisException(-1, 'Invalid JSON response');
+      }
+    }
+    if (status == 404) {
+      throw UntisException(
+        substitutionPlanningMissing,
+        sp
+            ? '$_noSubstitutionPlanning ($substitutionHost answered HTTP 404).'
+            : "$_noSubstitutionPlanning: your school's WebUntis has no "
+                  'teacher absence reporting (HTTP 404).',
+      );
+    }
+    if (status == 403) {
+      final msg = parseRestErrorMessage(decoded);
+      throw UntisException(
+        UntisException.noRight,
+        '$forbidden (${msg ?? 'HTTP 403'}).',
+      );
+    }
+    if (status < 200 || status >= 300) throw restError(status, decoded);
+    return decoded;
+  }
+
+  @override
+  Future<List<SubstitutionRequest>> substitutionRequests({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async => parseSubstitutionRequests(
+    await _substitutionCall(
+      host,
+      school,
+      auth,
+      'GET',
+      'v2/view/ask-teacher-requests-view',
+      'SP ask-teacher-requests-view',
+      sp: true,
+      forbidden: 'Your account may not answer substitution requests',
+    ),
+  );
+
+  @override
+  Future<void> answerSubstitutionRequest({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required SubstitutionRequest request,
+    required bool accept,
+  }) async {
+    final action = accept ? 'accept' : 'decline';
+    await _substitutionCall(
+      host,
+      school,
+      auth,
+      'POST',
+      'v2/periods/${request.id}/changes/ask-teacher/teacher/$action',
+      'SP ask-teacher $action ${request.id}',
+      sp: true,
+      forbidden: 'The request could not be ${accept ? 'accepted' : 'declined'}',
+    );
+  }
+
+  @override
+  Future<List<TeacherAbsence>> teacherAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async => parseTeacherAbsences(
+    await _substitutionCall(
+      host,
+      school,
+      auth,
+      'GET',
+      'v2/view/teacher-absences',
+      'SP teacher-absences',
+      sp: true,
+      forbidden: 'Your account may not see its absences',
+    ),
+  );
+
+  @override
+  Future<TeacherAbsenceForm> teacherAbsenceForm({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async => parseTeacherAbsenceForm(
+    await _substitutionCall(
+      host,
+      school,
+      auth,
+      'GET',
+      'view/v1/teacher-absences/form',
+      'REST teacher-absences/form',
+      sp: false,
+      forbidden: 'Your account may not report absences',
+    ),
+  );
+
+  @override
+  Future<int?> createTeacherAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required TeacherAbsenceDraft draft,
+  }) async {
+    final body = teacherAbsencePayload(draft);
+    _recordRequest('REST POST teacher-absences', body);
+    return createdTeacherAbsenceId(
+      await _substitutionCall(
+        host,
+        school,
+        auth,
+        'POST',
+        'view/v1/teacher-absences',
+        'REST create teacher absence',
+        sp: false,
+        forbidden: 'Your account may not report absences',
+        body: body,
+      ),
+    );
   }
 
   // ---- Pupil photos (assumed, docs/API.md "Pupil photos") ---------------
