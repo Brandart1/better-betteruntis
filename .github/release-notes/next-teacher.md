@@ -47,6 +47,8 @@ Teacher test build (branch `teacher`). Absences, lesson topic, previous topics a
 - Teachers: changing a lesson's room back to the planned room now works (the app sent the planned room instead of the current one).
 
 ### Changed
+- Messages are displayed with a well-tested HTML library instead of the app's own parser: headings, tables and nested lists look right now. Images in messages still aren't loaded (privacy); their description is shown instead.
+- "What's new" and release notes use a standard Markdown library; two-factor login codes come from a standard TOTP library (same codes as before).
 - Teachers: **Substitution requests** and **My absences** only show when Settings → **Online substitution planning** is on (off by default — many schools arrange substitutions by phone). Notifications for requests are off by default too.
 - Timetables show changes of the timetable's own class, teacher or room: e.g. a teacher sees who substitutes them in their own timetable, a room's timetable shows a lesson moved to another room, and lessons shared by several classes list all of them.
 - Includes everything from v0.5.2-beta (web version, optional encrypted sync, "What's new", keyboard navigation, Android in-app updater, large-text fixes).
