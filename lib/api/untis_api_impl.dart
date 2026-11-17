@@ -36,6 +36,7 @@ class UntisApiImpl
         FullUntisApi,
         PupilPhotoApi,
         TeacherToolsApi,
+        RoomPatchApi,
         ClassAbsencesApi,
         ExcuseApi,
         ClassLeadApi,
@@ -990,11 +991,6 @@ class UntisApiImpl
       'ttIds': ttIds,
       'auth': _rpc.auth(auth),
     });
-    // Where photos might be (keys only, no names or values).
-    _rpc.record(
-      'getPeriodData2017 referencedStudents keys',
-      jsonEncode(referencedStudentsShape(raw)),
-    );
     return parsePeriodData(raw);
   }
 
@@ -1154,25 +1150,33 @@ class UntisApiImpl
     int? studentId,
     int? eventReasonId,
     required String text,
+    DateTime? start,
+    int? eventId,
   }) async {
-    final params = {
-      'periodId': ttId,
-      'studentId': ?studentId,
-      'eventReasonId': ?eventReasonId,
-      'text': text,
-    };
-    _recordRequest('createClassRegEvent2017', params);
-    await _rpc.call(rpcUrl(host, school), 'createClassRegEvent2017', {
+    if (studentId == null) {
+      throw const UntisException(-1, 'A class register entry needs a pupil.');
+    }
+    final params = submitClassRegEventParams(
+      ttId: ttId,
+      studentId: studentId,
+      start: start ?? DateTime.now(),
+      text: text,
+      reasonId: eventReasonId,
+      eventId: eventId,
+    );
+    _recordRequest('submitClassRegEvents', params);
+    final r = await _rpc.call(rpcUrl(host, school), 'submitClassRegEvents', {
       ...params,
       'auth': _rpc.auth(auth),
     });
+    if (r is Map && r['success'] == false) {
+      throw const UntisException(-1, 'The server did not save the entry.');
+    }
   }
 
-  // ---- Absence summaries (teachers, assumed) ---------------------------
-  // docs/API.md "Absence summaries (teachers)": the class absence list of
-  // the WebUntis web client (`absences/students` with `studentId=-1` and a
-  // `klasseId`), else getStudentAbsences2017 with a `klasseId`. Both are
-  // guesses; requests and answers are in the Debug log.
+  // ---- Absence summaries (teachers) --------------------------------------
+  // getClassregData2017 `{klasseId, startDate, endDate}` -> `{absences, ...}`
+  // (same call as the class teacher dashboard); only the class teacher may.
 
   @override
   Future<List<ClassAbsenceRecord>> classAbsences({
@@ -1183,53 +1187,21 @@ class UntisApiImpl
     required DateTime start,
     required DateTime end,
   }) async {
-    final from = ymdNumber(start);
-    final to = ymdNumber(end);
-    final path =
-        'absences/students?startDate=$from&endDate=$to'
-        '&studentId=-1&klasseId=$klasseId&excuseStatusId=-1';
-    _rpc.record(
-      'REST classreg class absences request',
-      jsonEncode({'GET': '/WebUntis/api/classreg/$path'}),
-    );
-    late UntisException classicError;
+    final params = classregDataParams(klasseId, start, end);
+    _recordRequest('getClassregData2017 (absences)', params);
     try {
       return parseClassAbsenceRecords(
-        await _classic(
-          host,
-          school,
-          auth,
-          'GET',
-          classregUrl(host, path),
-          'REST classreg absences/students klasseId=$klasseId $from..$to',
-        ),
-      );
-    } on UntisException catch (e) {
-      if (e.isNetwork || e.isTimeout) rethrow;
-      classicError = e;
-    }
-    final params = {
-      'startDate': formatDate(start),
-      'endDate': formatDate(end),
-      'includeExcused': true,
-      'includeUnExcused': true,
-      'klasseId': klasseId,
-    };
-    _recordRequest('getStudentAbsences2017 (class)', params);
-    try {
-      return parseClassAbsenceRecords(
-        await _rpc.call(rpcUrl(host, school), 'getStudentAbsences2017', {
+        await _rpc.call(rpcUrl(host, school), 'getClassregData2017', {
           ...params,
           'auth': _rpc.auth(auth),
         }),
       );
     } on UntisException catch (e) {
-      if (e.isNetwork || e.isTimeout) rethrow;
-      // The first answer is usually the more telling one.
+      if (e.code != UntisException.noRight) rethrow;
       throw UntisException(
-        classicError.code,
-        '${classicError.message} (fallback getStudentAbsences2017: '
-        '${e.message})',
+        e.code,
+        'Only the class teacher can see the absences of this class '
+        '(${e.message}).',
       );
     }
   }
@@ -1494,7 +1466,9 @@ class UntisApiImpl
       method,
       sp
           ? 'https://$substitutionHost/api/$path'
-          : 'https://$host/WebUntis/api/rest/$path',
+          : 'https://$host/WebUntis/api/rest/$path'
+                '${path.contains('?') ? '&' : '?'}'
+                'school=${substitutionTenantId(school)}',
       label,
       body: body,
       headers: sp ? {'X-TenantID': substitutionTenantId(school)} : const {},
@@ -1588,6 +1562,24 @@ class UntisApiImpl
   );
 
   @override
+  Future<SubstitutionAvailability> homeAvailability({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async => parseHomeAvailability(
+    await _substitutionCall(
+      host,
+      school,
+      auth,
+      'GET',
+      'view/v2/home',
+      'REST home (availability)',
+      sp: false,
+      forbidden: 'Your account may not see the home view',
+    ),
+  );
+
+  @override
   Future<TeacherAbsenceForm> teacherAbsenceForm({
     required String host,
     required String school,
@@ -1629,24 +1621,9 @@ class UntisApiImpl
     );
   }
 
-  // ---- Pupil photos (assumed, docs/API.md "Pupil photos") ---------------
-
-  /// Guessed photo endpoints, tried in this order until one answers with an
-  /// image; `{id}` is the student id. None is confirmed.
-  static const pupilPhotoPaths = [
-    '/WebUntis/api/rest/view/v1/students/{id}/image',
-    '/WebUntis/api/portrait/students/{id}',
-    '/WebUntis/api/classreg/students/{id}/image',
-  ];
-
-  /// After this many pupils for whom no guessed endpoint gave an image, the
-  /// guesses are given up for the session.
-  static const pupilPhotoMaxMisses = 2;
-
-  /// Working [pupilPhotoPaths] index per `host|school`; -1 = none works.
-  final _photoSources = <String, int>{};
-  final _photoMisses = <String, int>{};
-  final _photoProbes = <String, Future<void>>{};
+  // ---- Pupil photos ------------------------------------------------------
+  // The official app loads `masterData.students[].imageUrl` (getUserData2017)
+  // as given.
 
   /// Absolute URL of a photo [url] (absolute or a server path) on [host].
   static String pupilPhotoUrl(String host, String url) =>
@@ -1660,61 +1637,30 @@ class UntisApiImpl
     required int studentId,
     String? imageUrl,
   }) async {
-    if (imageUrl != null && imageUrl.isNotEmpty) {
-      return _photoGet(
-        host,
-        school,
-        auth,
-        pupilPhotoUrl(host, imageUrl),
-        'pupil photo (imageUrl)',
-      );
-    }
-    final key = '$host|$school';
-    String url(int i) =>
-        'https://$host${pupilPhotoPaths[i].replaceAll('{id}', '$studentId')}';
-    while (true) {
-      final src = _photoSources[key];
-      if (src == -1) return null;
-      if (src != null) {
-        return _photoGet(host, school, auth, url(src), 'pupil photo #$src');
-      }
-      final running = _photoProbes[key];
-      if (running != null) {
-        await running;
-        continue;
-      }
-      // Probe the guesses once at a time; the others wait for the result.
-      final done = Completer<void>();
-      _photoProbes[key] = done.future;
-      try {
-        for (var i = 0; i < pupilPhotoPaths.length; i++) {
-          final img = await _photoGet(
-            host,
-            school,
-            auth,
-            url(i),
-            'pupil photo probe #$i',
-          );
-          if (img != null) {
-            _photoSources[key] = i;
-            return img;
-          }
+    var url = imageUrl;
+    if (url == null || url.isEmpty) {
+      final key = '$host|$school';
+      url = _lookups[key]?.studentImages[studentId];
+      if (url == null && !_lookups.containsKey(key)) {
+        try {
+          url = (await absenceLookups(
+            host: host,
+            school: school,
+            auth: auth,
+          )).studentImages[studentId];
+        } on UntisException {
+          return null;
         }
-        final misses = (_photoMisses[key] ?? 0) + 1;
-        _photoMisses[key] = misses;
-        if (misses >= pupilPhotoMaxMisses) {
-          _photoSources[key] = -1;
-          _rpc.record(
-            'pupil photo: no source',
-            jsonEncode({'triedPaths': pupilPhotoPaths, 'pupils': misses}),
-          );
-        }
-        return null;
-      } finally {
-        _photoProbes.remove(key);
-        done.complete();
       }
     }
+    if (url == null || url.isEmpty) return null;
+    return _photoGet(
+      host,
+      school,
+      auth,
+      pupilPhotoUrl(host, url),
+      'pupil photo (imageUrl)',
+    );
   }
 
   /// GET of an image: with the bearer token (only to [host]), and once more
@@ -1882,6 +1828,44 @@ class UntisApiImpl
         'auth': _rpc.auth(auth),
       }),
     );
+  }
+
+  @override
+  Future<RoomChangeResult?> patchLessonRooms({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+    required List<int> roomIds,
+    bool wholeBlock = false,
+  }) async {
+    // The official app's room change (6.8.1): the complete room list in a
+    // calendar-entry PATCH; submitRoomChange2017 let the old room come back.
+    final path =
+        'view/v1/calendar-entry/$periodId${wholeBlock ? '/block' : ''}';
+    final body = roomsPayload(roomIds);
+    _rpc.record('REST PATCH $path request body', jsonEncode(body));
+    try {
+      final answer = await _restSend(
+        host,
+        school,
+        auth,
+        'PATCH',
+        path,
+        'REST PATCH $path',
+        body: body,
+      );
+      return RoomChangeResult(
+        periodCount: 1,
+        roomIds: parseCalendarRooms(answer),
+      );
+    } on UntisException catch (e) {
+      final missing =
+          e.code == -1 &&
+          (e.message.contains('HTTP 404') || e.message.contains('HTTP 405'));
+      if (missing) return null;
+      rethrow;
+    }
   }
 
   @override

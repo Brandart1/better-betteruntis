@@ -379,6 +379,9 @@ class SubstitutionRequestChangeSource extends ChangeSource {
   ) async {
     if (!hasClassRegister(account)) return null;
     try {
+      // The server decides whether the school plans substitutions online.
+      final offer = await repo.availability(account);
+      if (!offer.substitutionRequests) return null;
       final list = await repo
           .requests(account)
           .timeout(const Duration(seconds: 45));

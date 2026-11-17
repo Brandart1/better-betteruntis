@@ -98,6 +98,42 @@ RoomChangeResult parseRoomChangeResult(Object? raw) {
   );
 }
 
+/// Body of the REST room change (the official app's calendar-entry PATCH):
+/// always the **complete** list of desired room ids.
+Map<String, Object?> roomsPayload(List<int> roomIds) => {
+  'rooms': {'value': roomIds},
+};
+
+/// The rooms of a calendar entry (the PATCH answer, same shape as
+/// `view/v2/calendar-entry/{id}/detail`, also inside `{calendarEntries}` or
+/// `{data}`): `rooms` as ids or `{id | roomId, status}` objects; rooms with
+/// status REMOVED are left out. Null when the answer has no `rooms`.
+List<int>? parseCalendarRooms(Object? raw) {
+  var j = _map(raw);
+  if (j['rooms'] == null) {
+    final data = _map(j['data']);
+    final entries = j['calendarEntries'] ?? data['calendarEntries'];
+    if (data['rooms'] != null) {
+      j = data;
+    } else if (entries is List && entries.isNotEmpty) {
+      j = _map(entries.first);
+    }
+  }
+  var rooms = j['rooms'];
+  if (rooms is Map) rooms = rooms['value'] ?? rooms['values'];
+  if (rooms is! List) return null;
+  final out = <int>[];
+  for (final e in rooms) {
+    if (e is Map && _str(_map(e)['status']).toUpperCase() == 'REMOVED') {
+      continue;
+    }
+    for (final id in _ids([e])) {
+      if (!out.contains(id)) out.add(id);
+    }
+  }
+  return out;
+}
+
 /// Master data `examTypes` (also accepted: `examtypes`, a bare list).
 List<ExamType> parseExamTypes(Object? masterData) {
   final j = _map(masterData);
