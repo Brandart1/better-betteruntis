@@ -1,6 +1,7 @@
 /// Android in-app updater: downloads the release APK from GitHub, verifies
 /// its SHA-256 digest and hands it to the system installer, all done by the
-/// `ota_update` plugin. Only betas and stables reach this: see [parseRelease].
+/// `ota_update` plugin. Betas and stables, plus newer alphas for alpha builds: see
+/// [parseRelease] and [pickAlphaUpdate].
 library;
 
 import 'dart:async';

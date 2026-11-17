@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/apk_update.dart';
 import '../../app/app_update.dart';
+import '../../core/build_channel.dart';
 import '../infocenter/info_providers.dart';
 
 /// Checks once per app start whether a newer release exists on GitHub and,
@@ -39,7 +40,15 @@ class _UpdateCheckerState extends ConsumerState<UpdateChecker> {
     final current = await ref.read(appVersionProvider.future);
     if (current == null) return;
     final latest = await ref.read(latestReleaseFetcherProvider)();
-    if (latest == null || !isNewerVersion(latest.tag, current.version)) return;
+    if (latest == null ||
+        !isUpdate(
+          latest.tag,
+          current.version,
+          // Beta and stable builds keep comparing X.Y.Z only.
+          currentTag: buildChannel == 'alpha' ? buildTag : '',
+        )) {
+      return;
+    }
     if (!mounted) return;
     // The navigator may not exist yet on the very first frame.
     var context = widget.navigatorKey.currentContext;
