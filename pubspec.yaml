@@ -58,6 +58,8 @@ dependencies:
   flutter_tts: ^4.2.5
   device_calendar_plus: ^0.12.0
   cryptography: ^2.9.0
+  flutter_widget_from_html_core: ^0.17.4
+  html: ^0.15.6
 
 dev_dependencies:
   flutter_test:
