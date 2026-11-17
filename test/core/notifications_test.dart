@@ -194,15 +194,15 @@ void main() {
       expect(items.first.text, 'M 4b · instead of Weber');
     });
 
-    test('settings: on by default, saved, switch only for it', () {
+    test('settings: off by default (schools often plan by phone), saved', () {
       const s = NotificationSettings();
-      expect(s.substitutionRequests, isTrue);
-      final off = s.copyWith(substitutionRequests: false);
-      expect(NotificationSettings.fromJson(off.toJson()), off);
-      expect(off == s, isFalse);
+      expect(s.substitutionRequests, isFalse);
+      final on = s.copyWith(substitutionRequests: true);
+      expect(NotificationSettings.fromJson(on.toJson()), on);
+      expect(on == s, isFalse);
       expect(
         NotificationSettings.fromJson({'enabled': true}).substitutionRequests,
-        isTrue,
+        isFalse,
       );
     });
 
@@ -217,7 +217,10 @@ void main() {
     test('source: teachers only, failures skip, lines with time', () async {
       final repo = _FakeSubstitutionRepo([req(5, DateTime(2026, 11, 18, 8))]);
       final source = SubstitutionRequestChangeSource(repo);
-      const settings = NotificationSettings(enabled: true);
+      const settings = NotificationSettings(
+        enabled: true,
+        substitutionRequests: true,
+      );
       expect(await source.current(_account('p'), settings, now), isNull);
       final teacher = Account(
         id: 't',

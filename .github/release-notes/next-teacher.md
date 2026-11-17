@@ -39,8 +39,14 @@ Teacher test build (branch `teacher`). Absences, lesson topic, previous topics a
 - Demo school: log in as `teacher` to try the teacher features.
 
 ### Fixed
+- Teachers: your own timetable shows the class (and room) of each lesson again instead of your own name.
+- Teachers: removing the notes for pupils no longer removes the notes for teachers too.
+- Teachers: the class register no longer runs into the school server's request limit: requests are paced, a refused one is repeated after a short wait, and the lesson screen asks for its data only once.
+- Teachers: "All subjects" in the absence summary explains that only the class teacher may see all of a class's absences, instead of "invalid user role".
+- Teachers: creating an exam now sends what the WebUntis website sends.
 - Teachers: changing a lesson's room back to the planned room now works (the app sent the planned room instead of the current one).
 
 ### Changed
+- Teachers: **Substitution requests** and **My absences** only show when Settings → **Online substitution planning** is on (off by default — many schools arrange substitutions by phone). Notifications for requests are off by default too.
 - Timetables show changes of the timetable's own class, teacher or room: e.g. a teacher sees who substitutes them in their own timetable, a room's timetable shows a lesson moved to another room, and lessons shared by several classes list all of them.
 - Includes everything from v0.5.2-beta (web version, optional encrypted sync, "What's new", keyboard navigation, Android in-app updater, large-text fixes).

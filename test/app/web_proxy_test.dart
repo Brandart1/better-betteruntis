@@ -7,7 +7,10 @@ void main() {
 
   test('maps absolute https URLs onto the proxy, keeping the query', () {
     expect(
-      proxiedUrl('https://nessa.webuntis.com/WebUntis/jsonrpc_intern.do?school=a%20b', origin),
+      proxiedUrl(
+        'https://nessa.webuntis.com/WebUntis/jsonrpc_intern.do?school=a%20b',
+        origin,
+      ),
       'https://untis.home.lan:8443/proxy/nessa.webuntis.com/WebUntis/jsonrpc_intern.do?school=a%20b',
     );
     expect(
@@ -16,14 +19,24 @@ void main() {
     );
   });
 
+  test('an already rewritten URL stays as it is (a repeated request)', () {
+    const once =
+        'https://untis.home.lan:8443/proxy/nessa.webuntis.com/WebUntis/x?a=1';
+    expect(proxiedUrl(once, origin), once);
+  });
+
   test('leaves non-https and relative URLs alone', () {
     expect(proxiedUrl('/proxy/x/y', origin), '/proxy/x/y');
-    expect(proxiedUrl('http://x.webuntis.com/a', origin), 'http://x.webuntis.com/a');
+    expect(
+      proxiedUrl('http://x.webuntis.com/a', origin),
+      'http://x.webuntis.com/a',
+    );
   });
 
   test('interceptor folds query parameters into the rewritten path', () {
     final opts = RequestOptions(
-      path: 'https://x.webuntis.com/WebUntis/api/rest/view/v1/timetable/entries',
+      path:
+          'https://x.webuntis.com/WebUntis/api/rest/view/v1/timetable/entries',
       queryParameters: {'start': '2026-11-09', 'format': 4},
     );
     late RequestOptions seen;

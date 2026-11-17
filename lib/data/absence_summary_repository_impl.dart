@@ -334,14 +334,27 @@ class AbsenceSummaryRepositoryImpl implements AbsenceSummaryRepository {
     }
     final records = <int, ClassAbsenceRecord>{};
     for (final k in klassen) {
-      for (final r in await _classes.classAbsences(
-        host: a.host,
-        school: a.school.loginName,
-        auth: auth,
-        klasseId: k,
-        start: from,
-        end: to,
-      )) {
+      final List<ClassAbsenceRecord> list;
+      try {
+        list = await _classes.classAbsences(
+          host: a.host,
+          school: a.school.loginName,
+          auth: auth,
+          klasseId: k,
+          start: from,
+          end: to,
+        );
+      } on UntisException catch (e) {
+        if (isClassListRefusal(e)) {
+          throw const UntisException(
+            UntisException.noRight,
+            'Only the class teacher can see all absences of the class. '
+            'Lesson and Subject still work.',
+          );
+        }
+        rethrow;
+      }
+      for (final r in list) {
         records[r.id] = r;
       }
     }
@@ -371,3 +384,9 @@ class AbsenceSummaryRepositoryImpl implements AbsenceSummaryRepository {
     );
   }
 }
+
+/// The server's refusal of a class's whole absence list to a teacher who
+/// isn't its class teacher ("invalid user role", or no right).
+bool isClassListRefusal(UntisException e) =>
+    e.code == UntisException.noRight ||
+    e.message.toLowerCase().contains('role');

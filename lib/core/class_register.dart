@@ -441,7 +441,7 @@ abstract interface class ClassRegisterRepository {
     Account account,
     List<Period> periods, {
     int topics = 5,
-    int weeks = 6,
+    int weeks = 4,
   });
 
   /// Entry reasons by id (empty when unknown or not loadable; never throws).

@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/substitution_planning.dart';
 import '../../core/class_register.dart';
 import '../../core/notifications.dart';
 import '../../core/providers.dart';
@@ -131,7 +132,8 @@ class _NotificationSettingsScreenState
                       prefs.update(account.id, (c) => c.copyWith(messages: v))
                 : null,
           ),
-          if (hasClassRegister(account))
+          if (hasClassRegister(account) &&
+              ref.watch(onlineSubstitutionPlanningProvider))
             AdaptiveSwitchTile(
               key: const ValueKey('notifications-substitution-requests'),
               title: const Text('Substitution requests'),

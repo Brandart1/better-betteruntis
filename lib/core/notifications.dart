@@ -28,7 +28,7 @@ class NotificationSettings {
     this.enabled = false,
     this.timetable = true,
     this.messages = true,
-    this.substitutionRequests = true,
+    this.substitutionRequests = false,
     this.daysAhead = defaultDaysAhead,
   });
 

@@ -738,7 +738,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     );
 
     return ViewingTarget(
-      target: widget.target,
+      target: target,
       ownTeacherId: isOwnTeacherTimetable(account, target)
           ? account.elementId
           : null,

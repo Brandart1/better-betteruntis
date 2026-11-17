@@ -24,6 +24,7 @@ import 'class_lead_parsers.dart';
 import 'class_register_parsers.dart';
 import 'excuse_parsers.dart';
 import 'json_rpc.dart';
+import 'request_throttle.dart';
 import 'messaging_parsers.dart';
 import 'parsers.dart';
 import 'rest_teachers.dart';
@@ -47,17 +48,22 @@ class UntisApiImpl
     DateTime Function()? now,
     bool isIos = false,
     List<Interceptor> interceptors = const [],
-  }) : this._(
-         dio ??
-             (Dio(
-               BaseOptions(
-                 connectTimeout: const Duration(seconds: 15),
-                 receiveTimeout: const Duration(seconds: 30),
-               ),
-             )..interceptors.addAll(interceptors)),
-         now,
-         isIos,
-       );
+  }) : this._(dio ?? _defaultDio(interceptors), now, isIos);
+
+  /// The app's client: [RequestThrottle] first (it sees the school's host,
+  /// before the web relay rewrites the URL), then [interceptors].
+  static Dio _defaultDio(List<Interceptor> interceptors) {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 30),
+      ),
+    );
+    dio.interceptors
+      ..add(RequestThrottle(dio))
+      ..addAll(interceptors);
+    return dio;
+  }
 
   UntisApiImpl._(Dio dio, DateTime Function()? now, this.isIos)
     : _dio = dio,
@@ -1886,6 +1892,32 @@ class UntisApiImpl
     required int periodId,
     required String text,
   }) async {
+    // The REST field write first (like the official app's notesAll PATCH):
+    // submitPeriodInfo2017 with an empty text also wiped the notes for
+    // teachers (real teacher account, 2026-11-17). Older servers without the
+    // REST calendar API get the JSON-RPC call.
+    final path = 'view/v1/calendar-entry/$periodId';
+    final body = {
+      'notesAll': {'value': text},
+    };
+    _rpc.record('REST PATCH $path request body', jsonEncode(body));
+    try {
+      await _restSend(
+        host,
+        school,
+        auth,
+        'PATCH',
+        path,
+        'REST PATCH $path',
+        body: body,
+      );
+      return true;
+    } on UntisException catch (e) {
+      final missing =
+          e.code == -1 &&
+          (e.message.contains('HTTP 404') || e.message.contains('HTTP 405'));
+      if (!missing) rethrow;
+    }
     final params = {'periodId': periodId, 'periodInfo': text};
     _recordRequest('submitPeriodInfo2017', params);
     final result = await _rpc.call(

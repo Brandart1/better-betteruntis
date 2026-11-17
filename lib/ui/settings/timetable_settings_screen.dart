@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/class_register.dart';
 import '../../core/models.dart';
+import '../../core/substitution_planning.dart';
 import '../../core/notifications.dart';
 import '../../core/providers.dart';
 import '../../core/settings.dart';
@@ -184,6 +186,20 @@ class TimetableSettingsScreen extends ConsumerWidget {
                     ),
                   ),
                 ),
+                if (account != null && hasClassRegister(account))
+                  AdaptiveSwitchTile(
+                    key: const ValueKey('online-substitution-planning'),
+                    secondary: const Icon(Icons.swap_horiz),
+                    title: const Text('Online substitution planning'),
+                    subtitle: const Text(
+                      'Your school handles substitution requests and teacher '
+                      'absences in Untis. Shows them in the menu.',
+                    ),
+                    value: ref.watch(onlineSubstitutionPlanningProvider),
+                    onChanged: (v) => ref
+                        .read(onlineSubstitutionPlanningProvider.notifier)
+                        .set(v),
+                  ),
                 const _Section('Lesson colors'),
                 for (final kind in LessonColorKind.values)
                   _ColorTile(

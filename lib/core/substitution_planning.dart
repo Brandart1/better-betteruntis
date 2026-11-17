@@ -10,10 +10,13 @@
 /// (`view/v1/teacher-absences/form`, `POST view/v1/teacher-absences`).
 library;
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'interfaces.dart';
 import 'models.dart';
+import 'settings.dart';
 
 /// State of a substitution request (`SubstitutionRequestDto.state`).
 enum SubstitutionRequestState {
@@ -255,3 +258,45 @@ final substitutionPlanningRepositoryProvider =
         'override substitutionPlanningRepositoryProvider',
       ),
     );
+
+/// Whether the school plans substitutions online (Settings, teachers; off by
+/// default). Many schools arrange substitutions by phone with the admin: then
+/// "Substitution requests" and "My absences" stay hidden from the menu and
+/// no notifications for requests are checked.
+final onlineSubstitutionPlanningProvider =
+    NotifierProvider<OnlineSubstitutionPlanningSetting, bool>(
+      OnlineSubstitutionPlanningSetting.new,
+    );
+
+class OnlineSubstitutionPlanningSetting extends Notifier<bool> {
+  static const storeKey = 'onlineSubstitutionPlanning';
+  bool _changed = false;
+
+  @override
+  bool build() {
+    final store = ref.watch(settingsStoreProvider);
+    final cached = store.peek(storeKey);
+    if (cached is bool) return cached;
+    unawaited(_load(store));
+    return false;
+  }
+
+  Future<void> _load(SettingsStore store) async {
+    try {
+      final raw = await store.read(storeKey);
+      if (!ref.mounted || _changed || raw is! bool) return;
+      state = raw;
+    } catch (_) {
+      // Unreadable: keep the default.
+    }
+  }
+
+  void set(bool value) {
+    _changed = true;
+    if (value == state) return;
+    state = value;
+    unawaited(
+      ref.read(settingsStoreProvider).write(storeKey, value).catchError((_) {}),
+    );
+  }
+}

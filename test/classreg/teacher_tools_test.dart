@@ -285,13 +285,30 @@ void main() {
           periodIds: const [202611102],
         ),
       );
-      expect(p['name'], 'Fractions');
-      expect(p['examDate'], 20261110);
-      expect(p['startTime'], 940);
-      expect(p['endTime'], 1115);
-      expect(p['startDateTime'], '2026-11-10T09:40');
-      expect(p['roomIds'], [34]);
-      expect(p.containsKey('examTypeId'), isFalse);
+      // The website's shape (F12 capture, 2026-11-17).
+      expect(p['examId'], -1);
+      expect(p['examName'], 'Fractions');
+      expect(p['examStart'], '2026-11-10T09:40:00');
+      expect(p['examEnd'], '2026-11-10T11:15:00');
+      expect(p['examDuration'], 95);
+      expect(p['rooms'], [
+        {'id': 34},
+      ]);
+      expect(p['classes'], [
+        {'id': 1},
+      ]);
+      expect(p['subject'], {'id': 21});
+      expect(p['lessonId'], 21);
+      expect(p['invigilators'], [
+        {
+          'start': '2026-11-10T09:40:00',
+          'end': '2026-11-10T11:15:00',
+          'teachers': [
+            {'id': 11},
+          ],
+        },
+      ]);
+      expect((p['examType'] as Map)['shortName'], 'Test');
       expect(
         parseCreatedExamId({
           'data': {'id': 5},
@@ -386,8 +403,43 @@ void main() {
       expect(entry.json, isNot(contains('otp')));
     });
 
-    test('submitPeriodInfo2017: params, success', () async {
-      handler = (_) => rpc({'success': true});
+    test('notes for pupils: REST notesAll PATCH, only that field', () async {
+      handler = (r) {
+        if (r.json?['method'] == 'getAuthToken') return rpc({'token': 'jwt'});
+        if (r.uri.path.contains('/api/rest/')) return ok({'notesAll': ''});
+        return rpc({});
+      };
+      final ok_ = await api.submitPeriodInfo(
+        host: 'h',
+        school: 's',
+        auth: creds,
+        periodId: 7,
+        text: '',
+      );
+      expect(ok_, isTrue);
+      final patch = adapter.requests.last;
+      expect(patch.method, 'PATCH');
+      expect(patch.uri.path, '/WebUntis/api/rest/view/v1/calendar-entry/7');
+      // An empty text must not touch the notes for teachers.
+      expect(patch.json, {
+        'notesAll': {'value': ''},
+      });
+      expect(
+        adapter.requests.where(
+          (r) => r.json?['method'] == 'submitPeriodInfo2017',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('submitPeriodInfo2017 when the REST API is missing', () async {
+      handler = (r) {
+        if (r.json?['method'] == 'getAuthToken') return rpc({'token': 'jwt'});
+        if (r.uri.path.contains('/api/rest/')) {
+          return (status: 404, body: '', headers: const {});
+        }
+        return rpc({'success': true});
+      };
       final ok = await api.submitPeriodInfo(
         host: 'h',
         school: 's',
@@ -399,7 +451,13 @@ void main() {
       expect(method(), 'submitPeriodInfo2017');
       expect(params()['periodId'], 7);
       expect(params()['periodInfo'], 'Atlas');
-      handler = (_) => rpc({'success': false});
+      handler = (r) {
+        if (r.json?['method'] == 'getAuthToken') return rpc({'token': 'jwt'});
+        if (r.uri.path.contains('/api/rest/')) {
+          return (status: 404, body: '', headers: const {});
+        }
+        return rpc({'success': false});
+      };
       expect(
         await api.submitPeriodInfo(
           host: 'h',

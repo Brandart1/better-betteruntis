@@ -13,6 +13,8 @@ String proxiedUrl(String url, Uri origin) {
   final u = Uri.tryParse(url);
   if (u == null || u.scheme != 'https' || u.host.isEmpty) return url;
   final base = origin.replace(path: '', query: null, fragment: null);
+  // Already rewritten (a request repeated after a rate limit).
+  if (u.origin == base.origin && u.path.startsWith('/proxy/')) return url;
   final path = u.path.isEmpty ? '/' : u.path;
   return '${base.origin}/proxy/${u.host}$path${u.hasQuery ? '?${u.query}' : ''}';
 }

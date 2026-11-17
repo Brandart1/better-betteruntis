@@ -179,31 +179,56 @@ RoomBookingResult parseRoomBookingResult(Object? raw) {
 int _yyyymmdd(DateTime d) => d.year * 10000 + d.month * 100 + d.day;
 int _hhmm(DateTime d) => d.hour * 100 + d.minute;
 
-/// Body of the exam creation request (assumed). Mirrors what
-/// `GET /WebUntis/api/exams` returns per exam (`examType`, `name`,
-/// `examDate` yyyymmdd, `startTime`/`endTime` hhmm, `text`), plus the ids of
-/// the elements the web client works with. Keys without a value are left
-/// out.
-Map<String, Object?> examPayload(NewExam e) => {
-  'examTypeId': ?e.examTypeId,
-  if (e.examType.trim().isNotEmpty) 'examType': e.examType.trim(),
-  'name': e.name.trim(),
-  'text': e.text.trim(),
-  'examDate': _yyyymmdd(e.start),
-  'startDate': _yyyymmdd(e.start),
-  'endDate': _yyyymmdd(e.end),
-  'startTime': _hhmm(e.start),
-  'endTime': _hhmm(e.end),
-  'startDateTime': formatUntisDateTime(e.start),
-  'endDateTime': formatUntisDateTime(e.end),
-  'subjectId': ?e.subjectId,
-  'lessonId': ?e.lessonId,
-  'klasseIds': e.klasseIds,
-  'studentIds': e.studentIds,
-  'roomIds': e.roomIds,
-  'teacherIds': e.teacherIds,
-  if (e.periodIds.isNotEmpty) 'periodIds': e.periodIds,
-};
+/// Body of the exam creation request, in the shape the WebUntis website
+/// sends (F12 capture of a real teacher account, 2026-11-17): `examId: -1`
+/// for a new exam, elements as `{id}` objects, local date-times with
+/// seconds and no zone, the duration in minutes, one invigilator slot for
+/// the teachers. Names are left out (the server knows them by id).
+Map<String, Object?> examPayload(NewExam e) {
+  List<Map<String, Object?>> ids(Iterable<int> l) => [
+    for (final id in l) {'id': id},
+  ];
+  final start = _localSeconds(e.start);
+  final end = _localSeconds(e.end);
+  return {
+    'examId': -1,
+    'examType': e.examTypeId != null
+        ? {'id': e.examTypeId}
+        : {
+            'id': -1,
+            'shortName': e.examType.trim(),
+            'longName': e.examType.trim(),
+          },
+    'gradingScale': null,
+    'examName': e.name.trim(),
+    'examText': e.text.trim(),
+    'examStart': start,
+    'examEnd': end,
+    'examDuration': e.end.difference(e.start).inMinutes,
+    'subject': e.subjectId != null ? {'id': e.subjectId} : null,
+    'classes': ids(e.klasseIds),
+    'teachers': ids(e.teacherIds),
+    'studentgroup': {'id': -1},
+    'students': ids(e.studentIds),
+    'invigilators': [
+      if (e.teacherIds.isNotEmpty)
+        {'start': start, 'end': end, 'teachers': ids(e.teacherIds)},
+    ],
+    'rooms': ids(e.roomIds),
+    'lessonId': e.lessonId ?? -1,
+    'exported': false,
+    'deleted': false,
+    'isUntisExam': false,
+  };
+}
+
+/// `yyyy-MM-ddTHH:mm:00`, local time without a zone (the website's exam
+/// format).
+String _localSeconds(DateTime d) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${d.year}-${two(d.month)}-${two(d.day)}T${two(d.hour)}:'
+      '${two(d.minute)}:00';
+}
 
 /// The new exam's id from the answer (`{data:{id}}`, `{id}`, `{exam:{id}}`,
 /// `{data:{exam:{id}}}`), else null.

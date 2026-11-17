@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app_update.dart';
+import '../../core/substitution_planning.dart';
 import '../../core/build_channel.dart';
 import '../../core/class_lead.dart';
 import '../../core/class_register.dart';
@@ -67,6 +68,7 @@ class AppDrawer extends StatelessWidget {
                 (a) => a.value != null && leadsClass(a.value!),
               ),
             );
+            final substitutions = ref.watch(onlineSubstitutionPlanningProvider);
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -98,20 +100,22 @@ class AppDrawer extends StatelessWidget {
                   subtitle: const Text("Excuse your class's absences"),
                   onTap: () => go('/excuses'),
                 ),
-                ListTile(
-                  key: const ValueKey('drawer-substitution-requests'),
-                  leading: const Icon(Icons.swap_horiz),
-                  title: const Text('Substitution requests'),
-                  subtitle: const Text('Accept or decline covering a lesson'),
-                  onTap: () => go('/substitution-requests'),
-                ),
-                ListTile(
-                  key: const ValueKey('drawer-teacher-absences'),
-                  leading: const Icon(Icons.event_busy_outlined),
-                  title: const Text('My absences'),
-                  subtitle: const Text('Report yourself absent'),
-                  onTap: () => go('/teacher-absences'),
-                ),
+                if (substitutions) ...[
+                  ListTile(
+                    key: const ValueKey('drawer-substitution-requests'),
+                    leading: const Icon(Icons.swap_horiz),
+                    title: const Text('Substitution requests'),
+                    subtitle: const Text('Accept or decline covering a lesson'),
+                    onTap: () => go('/substitution-requests'),
+                  ),
+                  ListTile(
+                    key: const ValueKey('drawer-teacher-absences'),
+                    leading: const Icon(Icons.event_busy_outlined),
+                    title: const Text('My absences'),
+                    subtitle: const Text('Report yourself absent'),
+                    onTap: () => go('/teacher-absences'),
+                  ),
+                ],
                 ListTile(
                   key: const ValueKey('drawer-book-room'),
                   leading: const Icon(Icons.meeting_room_outlined),

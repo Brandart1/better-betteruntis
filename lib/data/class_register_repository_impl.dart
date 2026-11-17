@@ -79,7 +79,24 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
     }
   }
 
-  Future<PeriodRegisterData> _periodData(Account a, List<int> ids) async {
+  /// getPeriodData2017 calls still running per `account|ids`: one lesson
+  /// screen asks for the same lessons several times at once (data,
+  /// homework), which then share one request. Writes start fresh.
+  final _running = <String, Future<PeriodRegisterData>>{};
+
+  Future<PeriodRegisterData> _periodData(Account a, List<int> ids) {
+    final key = '${a.id}|${([...ids]..sort()).join(',')}';
+    final running = _running[key];
+    if (running != null) return running;
+    final data = _fetchPeriodData(a, ids);
+    _running[key] = data;
+    data.whenComplete(() {
+      if (identical(_running[key], data)) _running.remove(key);
+    }).ignore();
+    return data;
+  }
+
+  Future<PeriodRegisterData> _fetchPeriodData(Account a, List<int> ids) async {
     final auth = await accounts.credentials(a.id);
     final periods = <int, PeriodRegister>{};
     final students = <int, ClassRegStudent>{};
@@ -113,7 +130,7 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
   ) {
     _check(account);
     _checkWritable(account, periods);
-    return _wrapAsync(() async {
+    return _writing(() async {
       final auth = await accounts.credentials(account.id);
       final host = account.host;
       final school = account.school.loginName;
@@ -284,7 +301,7 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
     Account account,
     List<Period> periods, {
     int topics = 5,
-    int weeks = 6,
+    int weeks = 4,
   }) {
     _check(account);
     return _wrapAsync(() async {
@@ -464,7 +481,7 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
   ) {
     _check(account);
     _checkWritable(account, periods);
-    return _wrapAsync(() async {
+    return _writing(() async {
       if (periods.isEmpty) {
         throw const UntisException(-1, 'No lesson selected.');
       }
@@ -599,7 +616,7 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
   ) {
     _check(account);
     _checkWritable(account, periods);
-    return _wrapAsync(() async {
+    return _writing(() async {
       if (periods.isEmpty) {
         throw const UntisException(-1, 'No lesson selected.');
       }
@@ -680,6 +697,16 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
           .timeout(const Duration(seconds: 3));
     } on TimeoutException {
       throw error ?? const UntisException(0, 'Timetable not available.');
+    }
+  }
+
+  /// A write: lesson data read before or during it is stale.
+  Future<T> _writing<T>(Future<T> Function() f) async {
+    _running.clear();
+    try {
+      return await _wrapAsync(f);
+    } finally {
+      _running.clear();
     }
   }
 
