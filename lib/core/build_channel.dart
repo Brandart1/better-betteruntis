@@ -15,3 +15,16 @@ const bool debugToolsEnabled = buildChannel == 'dev' || buildChannel == 'alpha';
 /// (release workflow). The app's version name only carries X.Y.Z, so this is
 /// how "What's new" knows which alpha it is. Empty in local and CI builds.
 const String buildTag = String.fromEnvironment('BBU_TAG');
+
+/// The channel as shown next to the version: alphas carry their number
+/// ("alpha.2"; a bare "-alpha" tag is alpha.1), the other channels stay as
+/// they are.
+String channelLabel([String channel = buildChannel, String tag = buildTag]) {
+  if (channel != 'alpha') return channel;
+  final m = RegExp(
+    r'-alpha(?:\.(\d+))?$',
+    caseSensitive: false,
+  ).firstMatch(tag);
+  if (m == null) return channel;
+  return 'alpha.${m.group(1) ?? '1'}';
+}

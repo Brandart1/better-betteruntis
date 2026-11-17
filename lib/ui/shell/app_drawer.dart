@@ -144,7 +144,7 @@ class _VersionFooter extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(28, 16, 28, 16),
       child: Text(
-        'Version $v · $buildChannel',
+        'Version $v · ${channelLabel()}',
         key: const ValueKey('app-version'),
         style: theme.textTheme.labelSmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
