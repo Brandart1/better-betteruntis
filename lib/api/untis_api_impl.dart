@@ -1239,6 +1239,95 @@ class UntisApiImpl
     return result != false;
   }
 
+  // Notes for teachers are REST only (the official app's CalendarPeriod
+  // detail and PATCH); bearer token, no web session.
+
+  @override
+  Future<StaffNotes> lessonStaffNotes({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+  }) async {
+    final path = 'view/v2/calendar-entry/$periodId/detail';
+    final answer = await _restSend(
+      host,
+      school,
+      auth,
+      'GET',
+      path,
+      'REST GET $path',
+    );
+    return parseStaffNotes(answer) ?? const StaffNotes();
+  }
+
+  @override
+  Future<StaffNotes?> submitStaffNotes({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+    required String text,
+    bool wholeBlock = false,
+  }) async {
+    final path =
+        'view/v1/calendar-entry/$periodId${wholeBlock ? '/block' : ''}';
+    final body = staffNotesPayload(text);
+    _rpc.record('REST PATCH $path request body', jsonEncode(body));
+    final answer = await _restSend(
+      host,
+      school,
+      auth,
+      'PATCH',
+      path,
+      'REST PATCH $path',
+      body: body,
+    );
+    return parseStaffNotes(answer);
+  }
+
+  /// Bearer REST request to `api/rest/[path]` returning decoded JSON;
+  /// non-2xx answers map to [restError] (with the server's message).
+  Future<Object?> _restSend(
+    String host,
+    String school,
+    UntisCredentials auth,
+    String method,
+    String path,
+    String label, {
+    Object? body,
+  }) async {
+    final resp = await _bearerRequest(
+      host,
+      school,
+      auth,
+      method,
+      'https://$host/WebUntis/api/rest/$path',
+      label,
+      body: body,
+    );
+    final status = resp.statusCode ?? 0;
+    final text = resp.data ?? '';
+    Object? decoded;
+    try {
+      decoded = text.trim().isEmpty ? null : jsonDecode(text);
+    } on FormatException {
+      if (status >= 200 && status < 300) {
+        throw const UntisException(-1, 'Invalid JSON response');
+      }
+    }
+    if (status < 200 || status >= 300) {
+      final e = restError(status, decoded);
+      // The REST calendar API answers `{errors: [{code, title}]}`.
+      final errors = decoded is Map
+          ? parseTeacherToolErrors(decoded['errors'])
+          : const <TeacherToolError>[];
+      if (parseRestErrorMessage(decoded) != null || errors.isEmpty) throw e;
+      throw UntisException(e.code, errors.map((x) => x.message).join('; '));
+    }
+    return decoded;
+  }
+
   /// URLs tried in order for a room booking without a lesson (**guessed**;
   /// the official app has no such call): the REST calendar API the
   /// official app edits lesson rooms with (`PATCH view/v1/calendar-entry/

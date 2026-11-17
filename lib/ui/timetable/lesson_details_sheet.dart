@@ -35,6 +35,7 @@ Future<void> showLessonDetails(
   RoomActionCallback? onRoomAction,
   ValueChanged<LessonBlock>? onCreateExam,
   ValueChanged<LessonBlock>? onEditLessonInfo,
+  StaffNotesAccess? staffNotes,
   int? ownTeacherId,
 }) {
   ValueChanged<LessonBlock>? closing(
@@ -76,9 +77,22 @@ Future<void> showLessonDetails(
             },
       onCreateExam: closing(sheetContext, onCreateExam),
       onEditLessonInfo: closing(sheetContext, onEditLessonInfo),
+      // Edited inside the sheet, which stays open.
+      staffNotes: staffNotes,
       ownTeacherId: ownTeacherId,
     ),
   );
+}
+
+/// Loads and saves the notes for teachers of a block (a teacher's own
+/// lessons only).
+class StaffNotesAccess {
+  const StaffNotesAccess({required this.load, required this.save});
+
+  final Future<StaffNotes> Function(LessonBlock block) load;
+
+  /// Returns the notes as saved; throws [UntisException] when refused.
+  final Future<StaffNotes> Function(LessonBlock block, String text) save;
 }
 
 /// Bottom-sheet content: one [LessonDetailsPage] or a pager of them.
@@ -93,6 +107,7 @@ class LessonDetailsSheet extends StatefulWidget {
     this.onRoomAction,
     this.onCreateExam,
     this.onEditLessonInfo,
+    this.staffNotes,
     this.ownTeacherId,
   });
 
@@ -115,6 +130,10 @@ class LessonDetailsSheet extends StatefulWidget {
   /// Teachers with the class register: edits the lesson info everyone sees
   /// on the server (replaces the device-only "Add details").
   final ValueChanged<LessonBlock>? onEditLessonInfo;
+
+  /// Teachers' own timetable: the notes for teachers ("Notizen für
+  /// Lehrkräfte"), which pupils never see.
+  final StaffNotesAccess? staffNotes;
 
   /// Set in a teacher's own timetable: lessons someone else gives say so,
   /// and colleagues' lessons get none of the own-lesson actions.
@@ -147,6 +166,7 @@ class _LessonDetailsSheetState extends State<LessonDetailsSheet> {
           onRoomAction: widget.onRoomAction,
           onCreateExam: widget.onCreateExam,
           onEditLessonInfo: widget.onEditLessonInfo,
+          staffNotes: widget.staffNotes,
           ownTeacherId: widget.ownTeacherId,
         ),
     ];
@@ -188,6 +208,7 @@ class LessonDetailsPage extends ConsumerWidget {
     this.onRoomAction,
     this.onCreateExam,
     this.onEditLessonInfo,
+    this.staffNotes,
     this.ownTeacherId,
   });
 
@@ -198,6 +219,7 @@ class LessonDetailsPage extends ConsumerWidget {
   final RoomActionCallback? onRoomAction;
   final ValueChanged<LessonBlock>? onCreateExam;
   final ValueChanged<LessonBlock>? onEditLessonInfo;
+  final StaffNotesAccess? staffNotes;
 
   /// See [LessonDetailsSheet.ownTeacherId].
   final int? ownTeacherId;
@@ -214,6 +236,9 @@ class LessonDetailsPage extends ConsumerWidget {
     final onRoomAction = colleague ? null : this.onRoomAction;
     final onCreateExam = colleague ? null : this.onCreateExam;
     final onEditLessonInfo = colleague ? null : this.onEditLessonInfo;
+    final staffNotes = colleague || this.block.isCancelled
+        ? null
+        : this.staffNotes;
     // Rooms and exams can only change before the lesson starts (the server
     // seems to refuse both afterwards): the buttons show greyed out then.
     final started = !ref
@@ -260,7 +285,8 @@ class LessonDetailsPage extends ConsumerWidget {
       for (final q in block.periods) ...[
         q.substitutionText,
         q.lessonText,
-        q.infoText,
+        // Teachers' own lessons show it under "Notes for pupils".
+        if (onEditLessonInfo == null) q.infoText,
       ],
       if (p.exam != null) ...[p.exam!.name, p.exam!.text],
     }.where((t) => t.trim().isNotEmpty && t.trim() != title).toList();
@@ -361,6 +387,23 @@ class LessonDetailsPage extends ConsumerWidget {
             onEditLessonInfo: onEditLessonInfo == null
                 ? null
                 : () => onEditLessonInfo(this.block),
+          ),
+        if (onEditLessonInfo != null)
+          _NotesSection(
+            key: const ValueKey('pupil-notes'),
+            title: 'Notes for pupils',
+            text: {
+              for (final q in block.periods)
+                if (q.infoText.trim().isNotEmpty) q.infoText.trim(),
+            }.join('\n'),
+            editKey: const ValueKey('lesson-info-edit'),
+            onEdit: () => onEditLessonInfo(this.block),
+          ),
+        if (staffNotes != null)
+          _StaffNotesSection(
+            key: ValueKey('staff-notes-${this.block.first.id}'),
+            block: this.block,
+            access: staffNotes,
           ),
         _ElementSection(
           'Teachers',
@@ -749,6 +792,7 @@ Future<String?> askLessonDetails(
   String initial = '',
   String dismissLabel = 'Cancel',
   String hint = 'e.g. mündliche Wiederholung, topics, pages',
+  String helper = 'Only for you, not sent to the school.',
 }) => showDialog<String>(
   context: context,
   builder: (_) => _LessonDetailsDialog(
@@ -756,6 +800,7 @@ Future<String?> askLessonDetails(
     initial: initial,
     dismissLabel: dismissLabel,
     hint: hint,
+    helper: helper,
   ),
 );
 
@@ -780,11 +825,13 @@ class _LessonDetailsDialog extends StatefulWidget {
     required this.initial,
     required this.dismissLabel,
     required this.hint,
+    required this.helper,
   });
   final String title;
   final String initial;
   final String dismissLabel;
   final String hint;
+  final String helper;
 
   @override
   State<_LessonDetailsDialog> createState() => _LessonDetailsDialogState();
@@ -814,7 +861,7 @@ class _LessonDetailsDialogState extends State<_LessonDetailsDialog> {
         textCapitalization: TextCapitalization.sentences,
         decoration: InputDecoration(
           hintText: widget.hint,
-          helperText: 'Only for you, not sent to the school.',
+          helperText: widget.helper,
           border: const OutlineInputBorder(),
         ),
       ),
@@ -834,6 +881,194 @@ class _LessonDetailsDialogState extends State<_LessonDetailsDialog> {
   }
 }
 
+/// A titled server note of a teacher's own lesson ("Notes for pupils" /
+/// "Notes for teachers") with its edit button.
+class _NotesSection extends StatelessWidget {
+  const _NotesSection({
+    super.key,
+    required this.title,
+    this.text = '',
+    this.textKey,
+    this.editKey,
+    this.onEdit,
+    this.showEdit = true,
+    this.children = const [],
+  });
+
+  final String title;
+
+  /// Null: not known yet (no text line).
+  final String? text;
+  final Key? textKey;
+  final Key? editKey;
+
+  /// Null greys the button out (e.g. while saving).
+  final VoidCallback? onEdit;
+  final bool showEdit;
+
+  /// Shown below the text (loading, errors, hints).
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodyMedium?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final text = this.text;
+    final empty = text == null || text.isEmpty;
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: theme.textTheme.titleSmall),
+          const SizedBox(height: 4),
+          if (text != null)
+            Text(
+              empty ? 'None' : text,
+              key: textKey,
+              style: empty ? muted : theme.textTheme.bodyMedium,
+            ),
+          ...children,
+          if (showEdit)
+            TextButton.icon(
+              key: editKey,
+              onPressed: onEdit,
+              icon: Icon(empty ? Icons.add : Icons.edit_outlined),
+              label: Text(empty ? 'Add note' : 'Edit note'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Notes for teachers" of a teacher's own lesson: loaded when the sheet
+/// opens, edited and saved in place (the sheet stays open).
+class _StaffNotesSection extends StatefulWidget {
+  const _StaffNotesSection({
+    super.key,
+    required this.block,
+    required this.access,
+  });
+
+  final LessonBlock block;
+  final StaffNotesAccess access;
+
+  @override
+  State<_StaffNotesSection> createState() => _StaffNotesSectionState();
+}
+
+class _StaffNotesSectionState extends State<_StaffNotesSection> {
+  StaffNotes? _notes;
+  String? _loadError;
+  String? _saveError;
+  var _saving = false;
+
+  static String _message(Object e) => e is UntisException ? e.message : '$e';
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    try {
+      final notes = await widget.access.load(widget.block);
+      if (mounted) setState(() => _notes = notes);
+    } catch (e) {
+      if (mounted) setState(() => _loadError = _message(e));
+    }
+  }
+
+  Future<void> _edit() async {
+    final before = _notes?.text ?? '';
+    final text = await askLessonDetails(
+      context,
+      title: before.isEmpty
+          ? 'Add notes for teachers'
+          : 'Edit notes for teachers',
+      initial: before,
+      hint: 'e.g. seating plan, what to watch out for',
+      helper: 'Only teachers see these notes, not pupils or parents.',
+    );
+    if (text == null || text.trim() == before || !mounted) return;
+    setState(() {
+      _saving = true;
+      _saveError = null;
+    });
+    try {
+      final saved = await widget.access.save(widget.block, text.trim());
+      if (mounted) setState(() => _notes = saved);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saveError = 'Could not save the notes: ${_message(e)}');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final small = theme.textTheme.bodySmall;
+    final notes = _notes;
+    final error = _loadError;
+    if (notes == null) {
+      return _NotesSection(
+        title: 'Notes for teachers',
+        showEdit: false,
+        text: null,
+        children: [
+          if (error == null)
+            const Padding(
+              key: ValueKey('staff-notes-loading'),
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: LinearProgressIndicator(),
+            )
+          else
+            Text(
+              "Couldn't load them: $error",
+              key: const ValueKey('staff-notes-error'),
+              style: small?.copyWith(color: theme.colorScheme.error),
+            ),
+        ],
+      );
+    }
+    return _NotesSection(
+      title: 'Notes for teachers',
+      text: notes.text,
+      textKey: const ValueKey('staff-notes-text'),
+      editKey: const ValueKey('staff-notes-edit'),
+      showEdit: notes.editable,
+      onEdit: _saving ? null : _edit,
+      children: [
+        if (_saving)
+          const Padding(
+            key: ValueKey('staff-notes-saving'),
+            padding: EdgeInsets.symmetric(vertical: 4),
+            child: LinearProgressIndicator(),
+          ),
+        if (_saveError case final e?)
+          Text(
+            e,
+            key: const ValueKey('staff-notes-save-error'),
+            style: small?.copyWith(color: theme.colorScheme.error),
+          ),
+        if (!notes.editable)
+          Text(
+            "Your school doesn't let you edit them.",
+            key: const ValueKey('staff-notes-readonly'),
+            style: small?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+      ],
+    );
+  }
+}
+
 /// The user's own additions: lesson details, homework and the custom exam
 /// mark.
 class _UserNoteSection extends ConsumerWidget {
@@ -846,8 +1081,8 @@ class _UserNoteSection extends ConsumerWidget {
   final LessonBlock block;
   final List<String> noteKeys;
 
-  /// Teachers: "Add details" edits the lesson info on the server, which
-  /// everyone sees, instead of a note on this device.
+  /// Teachers edit the lesson info on the server ("Notes for pupils", its
+  /// own section) instead of a details note on this device.
   final VoidCallback? onEditLessonInfo;
 
   /// Teachers with the class register create exams on the server ("Create
@@ -864,7 +1099,6 @@ class _UserNoteSection extends ConsumerWidget {
       homework: p.userHomework,
     );
     final schoolExam = block.periods.any((q) => q.isSchoolExam);
-    final serverInfo = block.first.infoText.trim();
 
     void save(LessonNote n) => saveLessonNote(ref, noteKeys, n);
 
@@ -951,18 +1185,8 @@ class _UserNoteSection extends ConsumerWidget {
             spacing: 8,
             runSpacing: 4,
             children: [
-              if (onEditLessonInfo != null)
-                TextButton.icon(
-                  key: const ValueKey('lesson-info-edit'),
-                  onPressed: onEditLessonInfo,
-                  icon: Icon(
-                    serverInfo.isEmpty ? Icons.add : Icons.edit_outlined,
-                  ),
-                  label: Text(
-                    serverInfo.isEmpty ? 'Add details' : 'Edit details',
-                  ),
-                )
-              else
+              // Teachers: "Notes for pupils" below instead.
+              if (onEditLessonInfo == null)
                 TextButton.icon(
                   key: const ValueKey('lesson-details-edit'),
                   onPressed: editDetails,

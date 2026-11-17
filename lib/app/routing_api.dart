@@ -435,6 +435,36 @@ class RoutingUntisApi
   );
 
   @override
+  Future<StaffNotes> lessonStaffNotes({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+  }) => _tools(host).lessonStaffNotes(
+    host: host,
+    school: school,
+    auth: auth,
+    periodId: periodId,
+  );
+
+  @override
+  Future<StaffNotes?> submitStaffNotes({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+    required String text,
+    bool wholeBlock = false,
+  }) => _tools(host).submitStaffNotes(
+    host: host,
+    school: school,
+    auth: auth,
+    periodId: periodId,
+    text: text,
+    wholeBlock: wholeBlock,
+  );
+
+  @override
   Future<List<ExamType>> examTypes({
     required String host,
     required String school,

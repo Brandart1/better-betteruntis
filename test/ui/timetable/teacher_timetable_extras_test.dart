@@ -556,9 +556,12 @@ void main() {
         'details-book-room',
         'lesson-exam-create',
         'lesson-info-edit',
+        'pupil-notes',
+        'staff-notes-edit',
       ]) {
         expect(find.byKey(ValueKey(k)), findsNothing, reason: k);
       }
+      expect(find.text('Notes for teachers'), findsNothing);
     });
 
     testWidgets('lesson a substitute holds keeps the class register', (

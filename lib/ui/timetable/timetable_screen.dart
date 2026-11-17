@@ -330,6 +330,13 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     });
   }
 
+  /// The periods of [block] whose notes the sheet shows: the ones not
+  /// cancelled, else all.
+  static List<Period> _notesPeriods(LessonBlock block) {
+    final held = block.periods.where((p) => !p.isCancelled).toList();
+    return held.isEmpty ? block.periods : held;
+  }
+
   void _openElement(TimetableTarget t) =>
       (widget.onOpenElement ?? defaultOpenElement)(context, t);
 
@@ -427,7 +434,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                 );
               }
             },
-      // Teachers' lesson details go to the server ("Info zur Stunde"), so
+      // Teachers' notes for pupils go to the server ("Info zur Stunde"), so
       // pupils and colleagues see them too.
       onEditLessonInfo: !ownTeacherTimetable
           ? null
@@ -442,9 +449,10 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
               final text = await askLessonDetails(
                 context,
                 title: before.isEmpty
-                    ? 'Add lesson details'
-                    : 'Edit lesson details',
+                    ? 'Add notes for pupils'
+                    : 'Edit notes for pupils',
                 initial: before,
+                helper: 'Pupils, parents and teachers see these notes.',
               );
               if (text == null || text.trim() == before) return;
               try {
@@ -453,19 +461,31 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                   SnackBar(
                     content: Text(
                       text.trim().isEmpty
-                          ? 'Lesson details removed.'
-                          : 'Lesson details saved — pupils see them too.',
+                          ? 'Notes for pupils removed.'
+                          : 'Notes for pupils saved.',
                     ),
                   ),
                 );
               } on UntisException catch (e) {
                 messenger.showSnackBar(
                   SnackBar(
-                    content: Text('Could not save the details: ${e.message}'),
+                    content: Text('Could not save the notes: ${e.message}'),
                   ),
                 );
               }
             },
+      // Notes for teachers (REST notesStaff): own lessons only, never for
+      // pupils or parents. The non-cancelled periods, like the lesson info.
+      staffNotes: !ownTeacherTimetable
+          ? null
+          : StaffNotesAccess(
+              load: (block) => ref
+                  .read(teacherToolsRepositoryProvider)
+                  .staffNotes(account, _notesPeriods(block)),
+              save: (block, text) => ref
+                  .read(teacherToolsRepositoryProvider)
+                  .setStaffNotes(account, _notesPeriods(block), text),
+            ),
     );
     _refocus();
   }

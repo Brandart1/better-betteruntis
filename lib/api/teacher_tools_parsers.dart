@@ -236,3 +236,40 @@ List<TeacherToolError> parseExamErrors(Object? raw) {
   }
   return errors;
 }
+
+/// Body of the REST write of a lesson's notes for teachers (one field, like
+/// the official app's CalendarPeriod PATCH).
+Map<String, Object?> staffNotesPayload(String text) => {
+  'notesStaff': {'value': text},
+};
+
+/// The notes for teachers of a CalendarPeriod (`GET view/v2/calendar-entry/
+/// {id}/detail`, or the PATCH answer): `notesStaff` as a string or
+/// `{value}` / `{text}`, also inside `{calendarEntries:[…]}` or `{data}`.
+/// `permissions` without WRITE_NOTES_STAFF make them read-only; no
+/// `permissions` list at all leaves them editable. Null when the answer has
+/// neither `notesStaff` nor `permissions`.
+StaffNotes? parseStaffNotes(Object? raw) {
+  bool known(Map<String, Object?> m) =>
+      m.containsKey('notesStaff') || m['permissions'] is List;
+  var j = _map(raw);
+  if (!known(j)) {
+    final data = _map(j['data']);
+    final entries = j['calendarEntries'] ?? data['calendarEntries'];
+    if (known(data)) {
+      j = data;
+    } else if (entries is List && entries.isNotEmpty) {
+      j = _map(entries.first);
+    }
+  }
+  if (!known(j)) return null;
+  final notes = j['notesStaff'];
+  final perms = j['permissions'];
+  final text = notes is Map
+      ? _firstStr(_map(notes), ['value', 'text'])
+      : _str(notes).trim();
+  final editable =
+      perms is! List ||
+      perms.any((p) => '$p'.toUpperCase() == 'WRITE_NOTES_STAFF');
+  return StaffNotes(text: text, editable: editable);
+}

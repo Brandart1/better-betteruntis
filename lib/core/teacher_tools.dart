@@ -69,6 +69,18 @@ class RoomChangeResult {
   bool get ok => errors.isEmpty;
 }
 
+/// A lesson's notes for teachers ("Notizen für Lehrkräfte", REST
+/// `notesStaff`): only teachers see them, unlike the lesson info
+/// ([Period.infoText], "notes for pupils").
+class StaffNotes {
+  const StaffNotes({this.text = '', this.editable = true});
+
+  final String text;
+
+  /// False when the server's `permissions` lack WRITE_NOTES_STAFF.
+  final bool editable;
+}
+
 /// An exam type of the school (master data `examTypes`, if the server has
 /// them).
 class ExamType {
@@ -167,6 +179,28 @@ abstract interface class TeacherToolsApi {
     required String text,
   });
 
+  /// `GET view/v2/calendar-entry/{periodId}/detail`: the notes for teachers
+  /// of a lesson (REST only; **assumed** that the calendar-entry id is the
+  /// period id). Throws [UntisException] when the server refuses.
+  Future<StaffNotes> lessonStaffNotes({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+  });
+
+  /// `PATCH view/v1/calendar-entry/{periodId}` (or `…/block` with
+  /// [wholeBlock]) `{"notesStaff": {"value": text}}`. Returns the notes the
+  /// server sent back, or null when its answer has none.
+  Future<StaffNotes?> submitStaffNotes({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+    required String text,
+    bool wholeBlock = false,
+  });
+
   /// Books room [RoomBookingRequest.roomId] from start to end without a
   /// lesson (**guessed** endpoint, docs/API.md "Room bookings without a
   /// lesson (assumed)"). Errors in a 2xx answer come back in the result;
@@ -246,6 +280,19 @@ abstract interface class TeacherToolsRepository {
   /// of the block to [text] ('' removes it), then refreshes the teacher's own
   /// timetable week. Throws [UntisException] when the server refuses.
   Future<void> setLessonInfo(
+    Account account,
+    List<Period> periods,
+    String text,
+  );
+
+  /// The notes for teachers of the block [periods] (those of its first
+  /// period). Throws [UntisException] when the server refuses.
+  Future<StaffNotes> staffNotes(Account account, List<Period> periods);
+
+  /// Sets the notes for teachers of the block [periods] to [text] ('' removes
+  /// them): one PATCH, for the whole block when it has several periods.
+  /// Returns the notes as saved. Throws [UntisException] when refused.
+  Future<StaffNotes> setStaffNotes(
     Account account,
     List<Period> periods,
     String text,

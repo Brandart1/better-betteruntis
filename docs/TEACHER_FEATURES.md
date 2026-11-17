@@ -83,8 +83,10 @@ Basic package (no class register needed): enter notes for pupils ("Info zur Stun
 - [x] Demo: log in with user `teacher` at the demo school to try it without a real account.
 
 - [x] **Late arrival / leaving early, reason and note** (wish 2026-11-17): in "Absences & lesson topic" each pupil has a clock button → sheet with "Whole lesson", "Arrived now" / "Left now" (only while the lesson runs), From / Until time pickers (clamped to the block), reason (master data `absenceReasons`, "No reason") and note. The row says "Late · arrived 08:20", "Left early · from 09:10" or "Absent 08:10–08:30", plus reason and note. Saving: per period of the block, the part of the times inside it — created with createImmediateAbsence2017 (times as before), then editAbsence2017 for reason / note; existing absences are changed with editAbsence2017 or deleted when no part is left. Demo reasons: Krankheit, Arzttermin, Verspätung, Schulveranstaltung.
+- [x] **Notes per lesson** (own lessons, wish 2026-11-17): "Notes for pupils" = lesson info via `submitPeriodInfo2017` (the former "Add details"); "Notes for teachers" = REST `notesStaff`, loaded with `GET view/v2/calendar-entry/{id}/detail` when the sheet opens and saved with `PATCH view/v1/calendar-entry/{id}` (`/block` for blocks of several periods). Read-only when `permissions` lack WRITE_NOTES_STAFF; never shown to pupils, parents or on colleagues' lessons. Demo: stored per period in memory.
 
 ## To confirm with a real teacher account
+- [ ] Notes for teachers: does the calendar-entry id equal the period id (detail GET answers 200)? Shape of `notesStaff` (string or `{value}`), is `permissions` present? Does PATCH `/block` on the first period update the whole double lesson? Is the bearer token enough (no `?school=`)? What does PATCH answer, and on no right?
 - [ ] Late arrival: does createImmediateAbsence2017 accept times inside the lesson (not just its start/end)? Does editAbsence2017 save times, reason and note (Debug log `editAbsence2017 request body` and its answer)? Does WebUntis show it as a late arrival?
 - [ ] Lesson details: `submitPeriodInfo2017` saves, the text shows in WebUntis/Untis Mobile as "Info zur Stunde", and an empty text removes it
 - [ ] Pupils and existing absences load (getPeriodData2017)
@@ -122,6 +124,16 @@ Basic package (no class register needed): enter notes for pupils ("Info zur Stun
 - [ ] Colleagues' lessons: does the teacher's own getTimetable2017 already deliver the lessons of their classes and subjects given by other teachers (user captures the server answer)? If yes, use those instead of loading class timetables.
 
 ## Ideas (not planned yet)
+Gap list vs. the official app / WebUntis (research 2026-11-17, decompiled Android app Sept 2025 + untis.at; REST paths relative to `/WebUntis/api/rest/`):
+- Sending / replying to messages: `view/v1/messages` (POST), `…/permissions`, `…/recipients/{option}`, drafts `view/v2/messages/drafts`, reply `view/v2/messages/{id}/reply`, sent `view/v1/messages/sent`, read confirmations, revoke. M–L, high.
+- Substitution requests ("Ask teacher"): `v2/view/ask-teacher-requests-view`, `POST v2/periods/{id}/changes/ask-teacher/teacher/accept|decline`. M, high (schools with online substitution planning).
+- Report yourself absent (with a note for the substitute): `view/v1/teacher-absences`, `…/form`, `…/{id}`. M, high.
+- Class teacher dashboard (own class's absences, events): `view/v2/home`. M, high for class teachers.
+- Exemptions (Befreiungen) in the pupil list; class duties (Klassendienste) — likely in getClassregData2017 (guess). S, med / low.
+- Notifications for new substitutions / requests / messages (official: Firebase push; BBU would poll via sync). M–L, high.
+- Grades (Notenbuch): web only, no API in the app → needs an F12 capture. L, med–high.
+- Contact hours: the teacher's own registrations (getOfficeHourRegistrations2017). S, med.
+- Online lesson link per lesson (`WRITE_VIDEO_CALL`), Untis Drive attachments, offline mode. Low.
 - Notes for pupils / notes for teachers per lesson
 - Seating plan
 - Excuse management for class teachers

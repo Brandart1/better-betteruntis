@@ -294,6 +294,48 @@ class TeacherToolsRepositoryImpl implements TeacherToolsRepository {
     });
   }
 
+  @override
+  Future<StaffNotes> staffNotes(Account account, List<Period> periods) {
+    _check(account);
+    return _wrap(() async {
+      if (periods.isEmpty) {
+        throw const UntisException(-1, 'No lesson selected.');
+      }
+      final auth = await accounts.credentials(account.id);
+      return _api.lessonStaffNotes(
+        host: account.host,
+        school: account.school.loginName,
+        auth: auth,
+        periodId: periods.first.id,
+      );
+    });
+  }
+
+  @override
+  Future<StaffNotes> setStaffNotes(
+    Account account,
+    List<Period> periods,
+    String text,
+  ) {
+    _check(account);
+    return _wrap(() async {
+      if (periods.isEmpty) {
+        throw const UntisException(-1, 'No lesson selected.');
+      }
+      final auth = await accounts.credentials(account.id);
+      // Notes for teachers aren't part of the timetable: nothing to refresh.
+      final saved = await _api.submitStaffNotes(
+        host: account.host,
+        school: account.school.loginName,
+        auth: auth,
+        periodId: periods.first.id,
+        text: text.trim(),
+        wholeBlock: periods.length > 1,
+      );
+      return saved ?? StaffNotes(text: text.trim());
+    });
+  }
+
   /// Exam types per account, loaded once per session.
   final _examTypes = <String, List<ExamType>>{};
 

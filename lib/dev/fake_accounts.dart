@@ -1283,6 +1283,12 @@ class FakeUntisApi
   /// Lesson info ("Info zur Stunde") set with submitPeriodInfo, by period.
   final periodInfos = <int, String>{};
 
+  /// Notes for teachers ("Notizen für Lehrkräfte"), by period.
+  final staffNotes = <int, String>{};
+
+  /// Every submitStaffNotes call, for test assertions.
+  final staffNotesCalls = <({int periodId, String text, bool wholeBlock})>[];
+
   /// Exams created in the demo.
   final createdExams = <ExamItem>[];
   var _nextExamId = 8000;
@@ -1396,6 +1402,41 @@ class FakeUntisApi
       periodInfos[periodId] = text;
     }
     return true;
+  }
+
+  @override
+  Future<StaffNotes> lessonStaffNotes({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+  }) async {
+    await _delay();
+    return StaffNotes(text: staffNotes[periodId] ?? '');
+  }
+
+  @override
+  Future<StaffNotes?> submitStaffNotes({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int periodId,
+    required String text,
+    bool wholeBlock = false,
+  }) async {
+    await _delay();
+    staffNotesCalls.add((
+      periodId: periodId,
+      text: text,
+      wholeBlock: wholeBlock,
+    ));
+    // Blocks are read back by their first period, the one sent here.
+    if (text.isEmpty) {
+      staffNotes.remove(periodId);
+    } else {
+      staffNotes[periodId] = text;
+    }
+    return StaffNotes(text: text);
   }
 
   @override
