@@ -203,6 +203,13 @@ Bearer, `/WebUntis/api/rest/`: `GET view/v1/teacher-absences/form` → `{startDa
 ### Web relay methods
 The relay (worker/src/proxy.ts) forwards GET, POST, HEAD, PUT, PATCH and DELETE (bodies for all but GET/HEAD) and the `X-TenantID` header; other methods get 405.
 
+### Messages (writing)
+From the decompiled official app, not yet seen with a real account. Bearer token, `/WebUntis/api/rest/`:
+- `GET view/v1/messages/permissions` → `{permissions:[PARENTS|STUDENTS|TEACHER|STAFF|CUSTOM|REPLY], allowRequestReadConfirmation, canForbidReplies, showSentTab, showDraftsTab, maxFileCount, maxFileSize}`.
+- Recipients: PARENTS/STUDENTS `GET view/v1/messages/recipients/{OPT}` (`{sections:[{sectionType, groups:[{id,title,subtitle,personIds,recipients}]}], persons}`); TEACHER `GET view/v1/messages/recipients/static/persons`; search `GET view/v1/messages/recipients/{OPT}/search?searchText=`; STAFF/CUSTOM `GET` then `POST view/v2/messages/recipients/{OPT}/filter` `{filters, searchText}` → `{recipients}`.
+- Send: multipart, one part `request` (JSON, `application/json; charset=utf-8`; attachments would be `attachments` parts). PARENTS/STUDENTS → `POST view/v2/messages` `{recipientOption, recipientGroupIds:[String], recipientPersonIds:[Long], subject, content (plain text), copyToStudent, requestConfirmation, forbidReply}`; TEACHER/STAFF/CUSTOM → `POST view/v2/messages/users` with `recipientUserIds` and no `recipientOption`. Answer `{numberOfRecipients, numberOfCCRecipients}`.
+- Reply: multipart `POST view/v2/messages/{id}/reply` `request` = `{subject, content}`. Sent box: `GET view/v1/messages/sent` (`{sentMessages}`), `…/sent/{id}`, `…/sent/{id}/request-confirmation-status`. Revoke `POST view/v1/messages/{id}/revoke`; read confirmation `POST view/v1/messages/{id}/read-confirmation`. The inbox list field is `incomeMessages`.
+
 ## Room booking and exams (teachers)
 Teacher accounts with the class register get room actions (⟳ replace, × remove, + add) on lessons of their own timetable, "Book a room" (without a lesson) in the drawer, "Create exam" on lessons (instead of the device-only "Mark as exam") and "Exams" in the drawer (their exam list and "New exam"). Built on branch `teacher` (0.6.0 alphas).
 

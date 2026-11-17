@@ -43,6 +43,11 @@ class InboxMessageDetail {
     required this.sender,
     required this.sentAt,
     this.attachments = const [],
+    this.replyAllowed = false,
+    this.confirmationRequested = false,
+    this.confirmedAt,
+    this.isRevoked = false,
+    this.recipients = const [],
   });
 
   final int id;
@@ -51,6 +56,20 @@ class InboxMessageDetail {
   final String sender;
   final DateTime? sentAt;
   final List<({String name, String url})> attachments;
+
+  /// `isReplyAllowed`: the sender lets recipients answer.
+  final bool replyAllowed;
+
+  /// The sender asked for a read confirmation that is still open
+  /// (`messageRequestConfirmation.allowSendRequestConfirmation`).
+  final bool confirmationRequested;
+
+  /// When the user confirmed reading (null = not confirmed / not asked).
+  final DateTime? confirmedAt;
+  final bool isRevoked;
+
+  /// Display names of the recipients (sent messages only).
+  final List<String> recipients;
 }
 
 /// Where an Info center item the user added themselves comes from: their
@@ -329,7 +348,12 @@ abstract interface class InfoCenterApi {
 
 /// One emission of a cache-first info stream.
 class Cached<T> {
-  const Cached({this.data, this.fetchedAt, this.error, this.refreshing = false});
+  const Cached({
+    this.data,
+    this.fetchedAt,
+    this.error,
+    this.refreshing = false,
+  });
 
   /// Cached or fresh data; null while nothing is known yet.
   final T? data;
@@ -347,12 +371,31 @@ class Cached<T> {
 /// (e.g. pull-to-refresh invalidating the provider) triggers a new refresh;
 /// pass `force: true` to bypass the freshness window.
 abstract interface class InfoCenterRepository {
-  Stream<Cached<List<Message>>> messagesOfDay(Account a, DateTime day, {bool force = false});
+  Stream<Cached<List<Message>>> messagesOfDay(
+    Account a,
+    DateTime day, {
+    bool force = false,
+  });
   Stream<Cached<List<InboxMessage>>> inbox(Account a, {bool force = false});
   Future<InboxMessageDetail> inboxMessage(Account a, int id);
-  Stream<Cached<List<HomeworkItem>>> homework(Account a, DateTime start, DateTime end, {bool force = false});
-  Stream<Cached<List<ExamItem>>> exams(Account a, DateTime start, DateTime end, {bool force = false});
-  Stream<Cached<List<AbsenceItem>>> absences(Account a, DateTime start, DateTime end, {bool force = false});
+  Stream<Cached<List<HomeworkItem>>> homework(
+    Account a,
+    DateTime start,
+    DateTime end, {
+    bool force = false,
+  });
+  Stream<Cached<List<ExamItem>>> exams(
+    Account a,
+    DateTime start,
+    DateTime end, {
+    bool force = false,
+  });
+  Stream<Cached<List<AbsenceItem>>> absences(
+    Account a,
+    DateTime start,
+    DateTime end, {
+    bool force = false,
+  });
 
   /// Reasons and defaults for reporting an absence for [studentId] (a child
   /// of parent account [a]). Never throws for a missing reason list; throws
@@ -373,6 +416,7 @@ abstract interface class InfoCenterRepository {
   /// Deletes absence [id] of the selected child. On success the cached
   /// absences of [a] are dropped. Throws [UntisException].
   Future<void> deleteAbsence(Account a, int id);
+
   /// Office hours of all teachers, or with [onlyMyClass] those of the
   /// account's (or selected child's) class.
   Stream<Cached<List<OfficeHourItem>>> officeHours(

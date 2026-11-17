@@ -4,12 +4,14 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/info.dart';
 import '../../core/interfaces.dart';
+import '../../core/messaging.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../timetable/timetable_utils.dart';
 import 'html_text.dart';
 import 'info_common.dart';
 import 'info_providers.dart';
+import 'message_compose_screen.dart';
 
 /// Day shown in the "Today" section (session-scoped offset from today).
 final motdDayOffsetProvider = NotifierProvider<SessionValue<int>, int>(
@@ -40,6 +42,10 @@ class MessagesTab extends ConsumerWidget {
       if (showInbox) forceRefresh(ref, #inbox, inboxP, inboxQ),
     ]);
 
+    final perms = showInbox
+        ? watchMessagePermissions(ref, account)
+        : MessagePermissions.none;
+
     final motdStatus = InfoStatus.of(motd);
     final inboxStatus = inbox == null ? null : InfoStatus.of(inbox);
     final dayLabel = formatDay(context, day, now);
@@ -56,7 +62,8 @@ class MessagesTab extends ConsumerWidget {
               children: [
                 if (offset != 0)
                   TextButton(
-                    onPressed: () => ref.read(motdDayOffsetProvider.notifier).set(0),
+                    onPressed: () =>
+                        ref.read(motdDayOffsetProvider.notifier).set(0),
                     child: const Text('Today'),
                   ),
                 IconButton(
@@ -84,15 +91,42 @@ class MessagesTab extends ConsumerWidget {
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
             child: Text(
               offset == 0 ? 'No messages today' : 'No messages on this day',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
           build: (list) => [
-            SliverList.list(children: [for (final m in list) MessageOfDayCard(message: m)]),
+            SliverList.list(
+              children: [for (final m in list) MessageOfDayCard(message: m)],
+            ),
           ],
         ),
         if (inbox != null) ...[
-          const SliverToBoxAdapter(child: InfoSectionHeader('Inbox')),
+          SliverToBoxAdapter(
+            child: InfoSectionHeader(
+              'Inbox',
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (perms.hasSentBox)
+                    IconButton(
+                      key: const ValueKey('inbox-sent'),
+                      tooltip: 'Sent messages',
+                      icon: const Icon(Icons.outbox_outlined),
+                      onPressed: () => context.push('/info/messages/sent'),
+                    ),
+                  if (perms.canCompose)
+                    IconButton(
+                      key: const ValueKey('inbox-compose'),
+                      tooltip: 'New message',
+                      icon: const Icon(Icons.edit_outlined),
+                      onPressed: () => context.push('/info/messages/new'),
+                    ),
+                ],
+              ),
+            ),
+          ),
           ..._section<List<InboxMessage>>(
             context,
             value: inbox,
@@ -104,12 +138,18 @@ class MessagesTab extends ConsumerWidget {
             ),
             build: (list) {
               final sorted = [...list]
-                ..sort((a, b) => (b.sentAt ?? DateTime(0)).compareTo(a.sentAt ?? DateTime(0)));
+                ..sort(
+                  (a, b) => (b.sentAt ?? DateTime(0)).compareTo(
+                    a.sentAt ?? DateTime(0),
+                  ),
+                );
               return [
                 SliverList.separated(
                   itemCount: sorted.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1, indent: 56),
-                  itemBuilder: (context, i) => InboxTile(message: sorted[i], now: now),
+                  separatorBuilder: (_, _) =>
+                      const Divider(height: 1, indent: 56),
+                  itemBuilder: (context, i) =>
+                      InboxTile(message: sorted[i], now: now),
                 ),
               ];
             },
@@ -136,15 +176,23 @@ class MessagesTab extends ConsumerWidget {
           SliverToBoxAdapter(
             child: ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-              leading: Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error),
+              leading: Icon(
+                Icons.error_outline,
+                color: Theme.of(context).colorScheme.error,
+              ),
               title: Text(errorText),
               subtitle: Text(describeInfoError(status.error)),
-              trailing: TextButton(onPressed: onRetry, child: const Text('Retry')),
+              trailing: TextButton(
+                onPressed: onRetry,
+                child: const Text('Retry'),
+              ),
             ),
           ),
         ];
       }
-      return const [SliverToBoxAdapter(child: InfoSkeleton(count: 2, shrinkWrap: true))];
+      return const [
+        SliverToBoxAdapter(child: InfoSkeleton(count: 2, shrinkWrap: true)),
+      ];
     }
     if (data.isEmpty) return [SliverToBoxAdapter(child: empty)];
     return build(data);
@@ -252,7 +300,9 @@ class InboxTile extends StatelessWidget {
             CircleAvatar(
               backgroundColor: theme.colorScheme.secondaryContainer,
               child: Text(
-                m.sender.isEmpty ? '?' : m.sender.characters.first.toUpperCase(),
+                m.sender.isEmpty
+                    ? '?'
+                    : m.sender.characters.first.toUpperCase(),
                 style: TextStyle(color: theme.colorScheme.onSecondaryContainer),
               ),
             ),
@@ -267,7 +317,10 @@ class InboxTile extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: theme.colorScheme.primary,
                     shape: BoxShape.circle,
-                    border: Border.all(color: theme.colorScheme.surface, width: 1.5),
+                    border: Border.all(
+                      color: theme.colorScheme.surface,
+                      width: 1.5,
+                    ),
                   ),
                 ),
               ),
@@ -287,13 +340,19 @@ class InboxTile extends StatelessWidget {
           if (m.hasAttachments)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 4),
-              child: Icon(Icons.attach_file, size: 16, semanticLabel: 'Has attachments'),
+              child: Icon(
+                Icons.attach_file,
+                size: 16,
+                semanticLabel: 'Has attachments',
+              ),
             ),
           Text(
             formatRelativeDate(context, m.sentAt, now),
             style: theme.textTheme.labelSmall?.copyWith(
               fontWeight: weight,
-              color: unread ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
+              color: unread
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -324,16 +383,40 @@ class MessageDetailScreen extends ConsumerWidget {
   const MessageDetailScreen({super.key, required this.messageId});
   final int messageId;
 
+  Future<void> _confirmRead(
+    BuildContext context,
+    WidgetRef ref,
+    Account account,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(messagingRepositoryProvider)
+          .confirmRead(account, messageId);
+      ref.invalidate(inboxMessageProvider((account, messageId)));
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Read confirmation sent')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not confirm: ${describeInfoError(e)}')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final account = ref.watch(activeAccountProvider).value;
     final theme = Theme.of(context);
+    final perms = watchMessagePermissions(ref, account);
+    InboxMessageDetail? loaded;
     Widget body;
     if (account == null) {
       body = const Center(child: CircularProgressIndicator());
     } else {
       final p = inboxMessageProvider((account, messageId));
       final detail = ref.watch(p);
+      loaded = detail.value;
       body = switch (detail) {
         AsyncValue(value: final d?) => CenteredScrollView(
           slivers: [
@@ -354,11 +437,50 @@ class MessageDetailScreen extends ConsumerWidget {
                     ),
                     if (d.sentAt != null)
                       Text(
-                        dateFormat(context, 'EEE, d MMM yyyy, HH:mm').format(d.sentAt!),
+                        dateFormat(
+                          context,
+                          'EEE, d MMM yyyy, HH:mm',
+                        ).format(d.sentAt!),
                         style: theme.textTheme.bodySmall,
                       ),
                   ],
                 ),
+                if (d.confirmationRequested)
+                  Card.filled(
+                    key: const ValueKey('message-confirmation-card'),
+                    margin: const EdgeInsets.only(top: 12),
+                    color: theme.colorScheme.secondaryContainer,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'The sender asks you to confirm that you have '
+                            'read this message.',
+                          ),
+                          Align(
+                            alignment: AlignmentDirectional.centerEnd,
+                            child: TextButton(
+                              key: const ValueKey('message-confirm-read'),
+                              onPressed: () =>
+                                  _confirmRead(context, ref, account),
+                              child: const Text('Confirm reading'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else if (d.confirmedAt != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'You confirmed reading on '
+                      '${dateFormat(context, 'd MMM yyyy, HH:mm').format(d.confirmedAt!)}',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
                 const Divider(height: 32),
                 HtmlBody(
                   d.bodyHtml,
@@ -382,6 +504,25 @@ class MessageDetailScreen extends ConsumerWidget {
         _ => const Center(child: CircularProgressIndicator()),
       };
     }
-    return Scaffold(appBar: AppBar(title: const Text('Message')), body: body);
+    final canReply =
+        loaded != null &&
+        perms.canReply &&
+        loaded.replyAllowed &&
+        !loaded.isRevoked;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Message'),
+        actions: [
+          if (canReply)
+            IconButton(
+              key: const ValueKey('message-reply'),
+              tooltip: 'Reply',
+              icon: const Icon(Icons.reply),
+              onPressed: () => context.push('/info/message/$messageId/reply'),
+            ),
+        ],
+      ),
+      body: body,
+    );
   }
 }

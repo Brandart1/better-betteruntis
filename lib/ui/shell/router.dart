@@ -17,7 +17,9 @@ import '../classreg/substitution_requests_screen.dart';
 import '../classreg/teacher_absences_screen.dart';
 import '../classreg/teacher_exams_screen.dart';
 import '../infocenter/info_center_screen.dart';
+import '../infocenter/message_compose_screen.dart';
 import '../infocenter/messages_tab.dart';
+import '../infocenter/sent_messages_screen.dart';
 import '../login/login_form_screen.dart';
 import '../login/login_screen.dart';
 import '../login/id_austria_screen.dart';
@@ -37,6 +39,9 @@ import 'whats_new.dart';
 ///   /info                  info center (messages, homework, exams, …)
 ///   /rooms/book            teachers: book a room without a lesson
 ///   /info/message/:id      one inbox message
+///   /info/message/:id/reply  reply to it
+///   /info/messages/new     write a message
+///   /info/messages/sent    sent messages (and /sent/:id)
 ///   /login, /login/add, /login/form (extra: School?), /login/qr,
 ///   /login/idaustria       how to log in when the school uses ID Austria
 ///   /accounts              manage accounts
@@ -124,6 +129,30 @@ final routerProvider = Provider<GoRouter>((ref) {
             builder: (_, s) => MessageDetailScreen(
               messageId: int.tryParse(s.pathParameters['id'] ?? '') ?? 0,
             ),
+            routes: [
+              GoRoute(
+                path: 'reply',
+                builder: (_, s) => ComposeMessageScreen(
+                  replyTo: int.tryParse(s.pathParameters['id'] ?? '') ?? 0,
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: 'messages/new',
+            builder: (_, _) => const ComposeMessageScreen(),
+          ),
+          GoRoute(
+            path: 'messages/sent',
+            builder: (_, _) => const SentMessagesScreen(),
+            routes: [
+              GoRoute(
+                path: ':id',
+                builder: (_, s) => SentMessageDetailScreen(
+                  messageId: int.tryParse(s.pathParameters['id'] ?? '') ?? 0,
+                ),
+              ),
+            ],
           ),
         ],
       ),

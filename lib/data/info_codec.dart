@@ -109,6 +109,10 @@ final inboxDetailCodec = InfoCodec<InboxMessageDetail>(
     'sender': m.sender,
     'sentAt': _d(m.sentAt),
     'attachments': _encAtt(m.attachments),
+    'replyAllowed': m.replyAllowed,
+    'confirmationRequested': m.confirmationRequested,
+    'confirmedAt': _d(m.confirmedAt),
+    'isRevoked': m.isRevoked,
   },
   (j) {
     final m = (j! as Map).cast<String, Object?>();
@@ -119,6 +123,10 @@ final inboxDetailCodec = InfoCodec<InboxMessageDetail>(
       sender: _s(m['sender']),
       sentAt: _dtOrNull(m['sentAt']),
       attachments: _decAtt(m['attachments']),
+      replyAllowed: m['replyAllowed'] == true,
+      confirmationRequested: m['confirmationRequested'] == true,
+      confirmedAt: _dtOrNull(m['confirmedAt']),
+      isRevoked: m['isRevoked'] == true,
     );
   },
 );

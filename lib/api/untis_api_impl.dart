@@ -14,6 +14,7 @@ import '../core/class_register.dart';
 import '../core/excuses.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
+import '../core/messaging.dart';
 import '../core/models.dart';
 import '../core/teacher_tools.dart';
 import '../core/pupil_photos.dart';
@@ -23,6 +24,7 @@ import 'class_lead_parsers.dart';
 import 'class_register_parsers.dart';
 import 'excuse_parsers.dart';
 import 'json_rpc.dart';
+import 'messaging_parsers.dart';
 import 'parsers.dart';
 import 'rest_teachers.dart';
 import 'substitution_parsers.dart';
@@ -36,7 +38,8 @@ class UntisApiImpl
         ClassAbsencesApi,
         ExcuseApi,
         ClassLeadApi,
-        SubstitutionPlanningApi {
+        SubstitutionPlanningApi,
+        MessagingApi {
   /// [interceptors] are added to the default client (e.g. the web proxy
   /// rewrite); ignored when [dio] is given.
   UntisApiImpl({
@@ -583,6 +586,236 @@ class UntisApiImpl
     ),
     id,
   );
+
+  // ---- Writing messages ------------------------------------------------------
+  // Calls from the decompiled official app (lib/core/messaging.dart); not yet
+  // seen with a real account. Request parts carry no credentials and are
+  // logged.
+
+  /// Multipart body with the JSON part `request` (Retrofit `@Part`, Gson).
+  /// Attachments would be further parts named `attachments` (not supported).
+  static FormData messageForm(Map<String, Object?> request) => FormData()
+    ..files.add(
+      MapEntry(
+        'request',
+        MultipartFile.fromString(
+          jsonEncode(request),
+          contentType: DioMediaType('application', 'json', {
+            'charset': 'utf-8',
+          }),
+        ),
+      ),
+    );
+
+  @override
+  Future<MessagePermissions> messagePermissions({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async => parseMessagePermissions(
+    await _restGet(
+      host,
+      school,
+      auth,
+      'view/v1/messages/permissions',
+      'REST messages/permissions',
+    ),
+  );
+
+  @override
+  Future<List<RecipientGroup>> messageRecipients({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required RecipientOption option,
+  }) async {
+    if (option.searchOnly || option == RecipientOption.reply) return const [];
+    if (option == RecipientOption.teacher) {
+      return parseRecipientPersonGroups(
+        await _restGet(
+          host,
+          school,
+          auth,
+          'view/v1/messages/recipients/static/persons',
+          'REST messages/recipients/static/persons',
+        ),
+      );
+    }
+    final path = 'view/v1/messages/recipients/${option.apiName}';
+    return parseRecipientSections(
+      await _restGet(host, school, auth, path, 'REST $path'),
+    );
+  }
+
+  @override
+  Future<List<MessageRecipient>> searchMessageRecipients({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required RecipientOption option,
+    required String query,
+  }) async {
+    final q = query.trim();
+    if (q.isEmpty) return const [];
+    if (option.searchOnly) {
+      // STAFF / CUSTOM: the filter API; the school's filters are sent back
+      // unchanged with the search text, as the official app does before the
+      // user picks a filter.
+      final base = 'view/v2/messages/recipients/${option.apiName}/filter';
+      final filters = await _restSend(
+        host,
+        school,
+        auth,
+        'GET',
+        base,
+        'REST $base',
+      );
+      final body = {
+        'filters': filters is Map ? (filters['filters'] ?? const []) : const [],
+        'searchText': q,
+      };
+      _recordRequest('REST POST $base', body);
+      return parseMessageRecipients(
+        await _restSend(
+          host,
+          school,
+          auth,
+          'POST',
+          base,
+          'REST POST $base',
+          body: body,
+        ),
+      );
+    }
+    final path =
+        'view/v1/messages/recipients/${option.apiName}/search'
+        '?searchText=${Uri.encodeQueryComponent(q)}';
+    return parseMessageRecipients(
+      await _restGet(
+        host,
+        school,
+        auth,
+        path,
+        'REST messages/recipients/${option.apiName}/search',
+      ),
+    );
+  }
+
+  @override
+  Future<SendResult> sendMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required OutgoingMessage message,
+  }) async {
+    final request = sendMessagePayload(message);
+    final path = sendMessagePath(message.option);
+    _recordRequest('REST POST $path', request);
+    return parseSendResult(
+      await _restSend(
+        host,
+        school,
+        auth,
+        'POST',
+        path,
+        'REST POST $path',
+        form: () => messageForm(request),
+      ),
+    );
+  }
+
+  @override
+  Future<void> replyToMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+    required String subject,
+    required String content,
+  }) async {
+    final request = {'subject': subject.trim(), 'content': content};
+    final path = 'view/v2/messages/$id/reply';
+    _recordRequest('REST POST $path', request);
+    await _restSend(
+      host,
+      school,
+      auth,
+      'POST',
+      path,
+      'REST POST $path',
+      form: () => messageForm(request),
+    );
+  }
+
+  @override
+  Future<List<SentMessage>> sentMessages({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async => parseSentMessages(
+    await _restGet(
+      host,
+      school,
+      auth,
+      'view/v1/messages/sent',
+      'REST messages/sent',
+    ),
+  );
+
+  @override
+  Future<InboxMessageDetail> sentMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) async => parseInboxMessageDetail(
+    await _restGet(
+      host,
+      school,
+      auth,
+      'view/v1/messages/sent/$id',
+      'REST messages/sent/$id',
+    ),
+    id,
+  );
+
+  @override
+  Future<List<ReadConfirmation>> readConfirmations({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) async => parseReadConfirmations(
+    await _restGet(
+      host,
+      school,
+      auth,
+      'view/v1/messages/sent/$id/request-confirmation-status',
+      'REST messages/sent/$id/request-confirmation-status',
+    ),
+  );
+
+  @override
+  Future<void> confirmMessageRead({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) async {
+    final path = 'view/v1/messages/$id/read-confirmation';
+    await _restSend(host, school, auth, 'POST', path, 'REST POST $path');
+  }
+
+  @override
+  Future<void> revokeMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) async {
+    final path = 'view/v1/messages/$id/revoke';
+    await _restSend(host, school, auth, 'POST', path, 'REST POST $path');
+  }
 
   // ---- Reporting absences ----------------------------------------------------
   //
@@ -1722,6 +1955,7 @@ class UntisApiImpl
     String path,
     String label, {
     Object? body,
+    FormData Function()? form,
   }) async {
     final resp = await _bearerRequest(
       host,
@@ -1731,6 +1965,7 @@ class UntisApiImpl
       'https://$host/WebUntis/api/rest/$path',
       label,
       body: body,
+      form: form,
     );
     final status = resp.statusCode ?? 0;
     final text = resp.data ?? '';
@@ -2203,6 +2438,7 @@ class UntisApiImpl
     String url,
     String label, {
     Object? body,
+    FormData Function()? form,
     bool followRedirects = true,
     Map<String, String> headers = const {},
     bool logBody = true,
@@ -2215,14 +2451,19 @@ class UntisApiImpl
       try {
         resp = await _dio.request<String>(
           url,
-          data: body == null ? null : jsonEncode(body),
+          // A FormData can be sent only once: built anew for the retry.
+          data: form != null
+              ? form()
+              : (body == null ? null : jsonEncode(body)),
           options: Options(
             method: method,
             responseType: ResponseType.plain,
             validateStatus: (_) => true,
             followRedirects: followRedirects,
             maxRedirects: followRedirects ? 5 : 0,
-            contentType: body == null ? null : 'application/json',
+            contentType: form == null && body != null
+                ? 'application/json'
+                : null,
             headers: {
               'Accept': 'application/json',
               if (token != null) 'Authorization': 'Bearer $token',

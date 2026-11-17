@@ -16,6 +16,7 @@ import '../core/class_register.dart';
 import '../core/excuses.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
+import '../core/messaging.dart';
 import '../core/models.dart';
 import '../core/pupil_photos.dart';
 import '../core/substitution_planning.dart';
@@ -51,7 +52,8 @@ class FakeUntisApi
         ClassAbsencesApi,
         ExcuseApi,
         ClassLeadApi,
-        SubstitutionPlanningApi {
+        SubstitutionPlanningApi,
+        MessagingApi {
   FakeUntisApi({this.latency = const Duration(milliseconds: 400)});
 
   /// Artificial delay for every call. Use [Duration.zero] in widget tests.
@@ -2216,6 +2218,303 @@ class FakeUntisApi
               ),
             ]
           : const [],
+      // The office's letter can't be answered; the AG asks for a read
+      // confirmation.
+      replyAllowed: m.id != 2,
+      confirmationRequested: m.id == 3 && !confirmedReads.containsKey(3),
+      confirmedAt: confirmedReads[m.id],
+    );
+  }
+
+  // ---- Writing messages demo ------------------------------------------------
+
+  /// Every sendMessage call, for test assertions.
+  final sendMessageCalls = <OutgoingMessage>[];
+
+  /// Every replyToMessage call.
+  final replyCalls = <({int id, String subject, String content})>[];
+
+  /// Inbox messages whose read confirmation was sent.
+  final confirmedReads = <int, DateTime>{};
+
+  /// Every revokeMessage call.
+  final revokeCalls = <int>[];
+
+  /// When set, sendMessage / replyToMessage throw it (error path tests).
+  UntisException? messageSendError;
+
+  /// The demo sent box (newest first); sendMessage adds to it.
+  late final sentBox = <SentMessage>[
+    SentMessage(
+      id: 801,
+      subject: 'Mathe-Schularbeit',
+      preview: 'Die Schularbeit findet am Donnerstag in der 3. Stunde statt.',
+      recipients: const ['9b – Mathematics'],
+      sentAt: DateTime.now().subtract(const Duration(days: 1)),
+      numberOfRecipients: 6,
+      confirmed: 4,
+      confirmationsRequested: 6,
+    ),
+  ];
+  final _sentBodies = <int, String>{};
+  var _nextSentId = 900;
+
+  /// Teachers may send to everyone; everybody else may only reply.
+  @override
+  Future<MessagePermissions> messagePermissions({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    await _delay();
+    if (auth.anonymous) return MessagePermissions.none;
+    if (auth.username.toLowerCase() != 'teacher') {
+      return const MessagePermissions(options: {RecipientOption.reply});
+    }
+    return const MessagePermissions(
+      options: {
+        RecipientOption.parents,
+        RecipientOption.students,
+        RecipientOption.teacher,
+        RecipientOption.staff,
+        RecipientOption.reply,
+      },
+      allowRequestReadConfirmation: true,
+      canForbidReplies: true,
+      showSentTab: true,
+    );
+  }
+
+  static const _demoTeacherRecipients = [
+    MessageRecipient(id: 12, userId: '112', displayName: 'Jonas Schmidt'),
+    MessageRecipient(id: 13, userId: '113', displayName: 'Lea Weber'),
+    MessageRecipient(
+      id: 9,
+      userId: '109',
+      displayName: 'Huber',
+      subtitle: 'HUB',
+    ),
+  ];
+
+  static const _demoStaffRecipients = [
+    MessageRecipient(id: 71, displayName: 'Sekretariat'),
+    MessageRecipient(id: 72, displayName: 'Schulwart Gruber'),
+  ];
+
+  List<RecipientGroup> _demoRecipientGroups(RecipientOption option) {
+    final pupils = [
+      for (final s in demoStudents)
+        MessageRecipient(
+          id: s.id,
+          personId: s.id,
+          displayName: option == RecipientOption.parents
+              ? 'Parents of ${s.firstName} ${s.lastName}'
+              : '${s.firstName} ${s.lastName}',
+          subtitle: '9b',
+        ),
+    ];
+    return switch (option) {
+      RecipientOption.parents || RecipientOption.students => [
+        RecipientGroup(
+          id: 'L-9b-M',
+          title: '9b – Mathematics',
+          section: 'Lessons',
+          members: pupils,
+        ),
+        RecipientGroup(
+          id: 'C-9b',
+          title: '9b',
+          subtitle: 'Your class',
+          section: 'Class teacher',
+          members: pupils,
+        ),
+      ],
+      RecipientOption.teacher => [
+        RecipientGroup(
+          title: 'Class teachers',
+          members: [_demoTeacherRecipients.first],
+        ),
+        const RecipientGroup(
+          title: 'Teachers',
+          members: _demoTeacherRecipients,
+        ),
+      ],
+      _ => const [],
+    };
+  }
+
+  @override
+  Future<List<RecipientGroup>> messageRecipients({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required RecipientOption option,
+  }) async {
+    await _delay();
+    return _demoRecipientGroups(option);
+  }
+
+  @override
+  Future<List<MessageRecipient>> searchMessageRecipients({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required RecipientOption option,
+    required String query,
+  }) async {
+    await _delay();
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return const [];
+    final all = option.searchOnly
+        ? _demoStaffRecipients
+        : {for (final g in _demoRecipientGroups(option)) ...g.members}.toList();
+    return [
+      for (final r in all)
+        if (r.displayName.toLowerCase().contains(q)) r,
+    ];
+  }
+
+  @override
+  Future<SendResult> sendMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required OutgoingMessage message,
+  }) async {
+    await _delay();
+    final error = messageSendError;
+    if (error != null) throw error;
+    sendMessageCalls.add(message);
+    final people = {
+      for (final g in message.groups) ...g.members.map((m) => m.key),
+      for (final r in message.recipients) r.key,
+    };
+    final id = _nextSentId++;
+    _sentBodies[id] = message.content;
+    sentBox.insert(
+      0,
+      SentMessage(
+        id: id,
+        subject: message.subject.trim(),
+        preview: message.content.trim().replaceAll('\n', ' '),
+        recipients: [
+          for (final g in message.groups) g.title,
+          for (final r in message.recipients) r.displayName,
+        ],
+        sentAt: DateTime.now(),
+        numberOfRecipients: people.length,
+        confirmationsRequested: message.requestConfirmation ? people.length : 0,
+      ),
+    );
+    return (
+      recipients: people.length,
+      ccRecipients: message.copyToStudent ? people.length : 0,
+    );
+  }
+
+  @override
+  Future<void> replyToMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+    required String subject,
+    required String content,
+  }) async {
+    await _delay();
+    final error = messageSendError;
+    if (error != null) throw error;
+    replyCalls.add((id: id, subject: subject, content: content));
+  }
+
+  @override
+  Future<List<SentMessage>> sentMessages({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    await _delay();
+    return [...sentBox];
+  }
+
+  @override
+  Future<InboxMessageDetail> sentMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) async {
+    await _delay();
+    final m = sentBox.where((m) => m.id == id).firstOrNull;
+    if (m == null) throw const UntisException(-1, 'NOT_FOUND');
+    final body = _sentBodies[id] ?? m.preview;
+    return InboxMessageDetail(
+      id: m.id,
+      subject: m.subject,
+      bodyHtml: body,
+      sender: 'Anna Müller',
+      sentAt: m.sentAt,
+      isRevoked: m.isRevoked,
+      recipients: m.recipients,
+    );
+  }
+
+  @override
+  Future<List<ReadConfirmation>> readConfirmations({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) async {
+    await _delay();
+    if (id != 801) return const [];
+    final at = DateTime.now().subtract(const Duration(hours: 20));
+    return [
+      for (final (i, s) in demoStudents.indexed)
+        ReadConfirmation(
+          name: '${s.lastName} ${s.firstName}',
+          className: '9b',
+          confirmedBy: i < 4
+              ? [(name: 'Parent of ${s.firstName}', at: at)]
+              : const [],
+        ),
+    ];
+  }
+
+  @override
+  Future<void> confirmMessageRead({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) async {
+    await _delay();
+    confirmedReads[id] = DateTime.now();
+  }
+
+  @override
+  Future<void> revokeMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) async {
+    await _delay();
+    revokeCalls.add(id);
+    final i = sentBox.indexWhere((m) => m.id == id);
+    if (i < 0) throw const UntisException(-1, 'NOT_FOUND');
+    final m = sentBox[i];
+    sentBox[i] = SentMessage(
+      id: m.id,
+      subject: m.subject,
+      preview: m.preview,
+      recipients: m.recipients,
+      sentAt: m.sentAt,
+      numberOfRecipients: m.numberOfRecipients,
+      isRevoked: true,
+      hasAttachments: m.hasAttachments,
+      confirmed: m.confirmed,
+      confirmationsRequested: m.confirmationsRequested,
     );
   }
 

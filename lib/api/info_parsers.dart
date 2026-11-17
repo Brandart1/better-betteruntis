@@ -370,13 +370,19 @@ InboxMessage? _inboxMessage(Map<String, Object?> m) {
   );
 }
 
-/// Merges `incomingMessages` and `readConfirmationMessages` (and a plain
+/// Merges `incomeMessages` (the official app's field; `incomingMessages`
+/// as well) and `readConfirmationMessages` (and a plain
 /// `messages` list, or a top-level list), de-duplicated by id, newest first.
 List<InboxMessage> parseInbox(Object? raw) {
   final j = _map(raw);
   final lists = raw is List
       ? [raw]
-      : [j['incomingMessages'], j['readConfirmationMessages'], j['messages']];
+      : [
+          j['incomeMessages'],
+          j['incomingMessages'],
+          j['readConfirmationMessages'],
+          j['messages'],
+        ];
   final byId = <int, InboxMessage>{};
   for (final l in lists) {
     for (final m in _maps(l)) {
@@ -398,6 +404,8 @@ List<InboxMessage> parseInbox(Object? raw) {
 /// `/messages/{id}`. [fallbackId] is used when the body has no id.
 InboxMessageDetail parseInboxMessageDetail(Object? raw, int fallbackId) {
   final j = _map(raw);
+  final confirmation = _map(j['messageRequestConfirmation']);
+  final confirmedAt = parseRestDateTime(confirmation['confirmationDate']);
   return InboxMessageDetail(
     id: _intOrNull(j['id']) ?? fallbackId,
     subject: _str(j['subject']).trim(),
@@ -406,6 +414,21 @@ InboxMessageDetail parseInboxMessageDetail(Object? raw, int fallbackId) {
     sender: _sender(j),
     sentAt: parseRestDateTime(j['sentDateTime'] ?? j['sentAt'] ?? j['sent']),
     attachments: parseAttachments(j['attachments'] ?? j['storageAttachments']),
+    replyAllowed: _bool(j['isReplyAllowed'] ?? confirmation['isReplyAllowed']),
+    confirmationRequested:
+        _bool(confirmation['allowSendRequestConfirmation']) &&
+        confirmedAt == null,
+    confirmedAt: confirmedAt,
+    isRevoked: _bool(j['isRevoked']),
+    recipients: [
+      for (final k in const [
+        'recipientGroups',
+        'recipients',
+        'recipientPersons',
+      ])
+        for (final r in _maps(j[k]))
+          ?_firstStr(r, const ['displayName', 'title', 'name']),
+    ],
   );
 }
 

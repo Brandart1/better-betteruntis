@@ -7,6 +7,7 @@ import '../core/class_register.dart';
 import '../core/excuses.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
+import '../core/messaging.dart';
 
 import '../core/models.dart';
 import '../core/pupil_photos.dart';
@@ -23,7 +24,8 @@ class RoutingUntisApi
         PupilPhotoApi,
         ExcuseApi,
         ClassLeadApi,
-        SubstitutionPlanningApi {
+        SubstitutionPlanningApi,
+        MessagingApi {
   RoutingUntisApi({required this.real, required this.demo});
 
   final FullUntisApi real;
@@ -691,4 +693,119 @@ class RoutingUntisApi
   }) => _substitution(
     host,
   ).createTeacherAbsence(host: host, school: school, auth: auth, draft: draft);
+
+  MessagingApi _messaging(String host) {
+    final Object a = _for(host);
+    if (a is! MessagingApi) {
+      throw const UntisException(-1, 'Not supported for this account.');
+    }
+    return a;
+  }
+
+  @override
+  Future<MessagePermissions> messagePermissions({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) =>
+      _messaging(host)
+          .messagePermissions(host: host, school: school, auth: auth);
+
+  @override
+  Future<List<RecipientGroup>> messageRecipients({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required RecipientOption option,
+  }) => _messaging(
+    host,
+  ).messageRecipients(host: host, school: school, auth: auth, option: option);
+
+  @override
+  Future<List<MessageRecipient>> searchMessageRecipients({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required RecipientOption option,
+    required String query,
+  }) => _messaging(host).searchMessageRecipients(
+    host: host,
+    school: school,
+    auth: auth,
+    option: option,
+    query: query,
+  );
+
+  @override
+  Future<SendResult> sendMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required OutgoingMessage message,
+  }) => _messaging(host)
+      .sendMessage(host: host, school: school, auth: auth, message: message);
+
+  @override
+  Future<void> replyToMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+    required String subject,
+    required String content,
+  }) => _messaging(host).replyToMessage(
+    host: host,
+    school: school,
+    auth: auth,
+    id: id,
+    subject: subject,
+    content: content,
+  );
+
+  @override
+  Future<List<SentMessage>> sentMessages({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) => _messaging(host).sentMessages(host: host, school: school, auth: auth);
+
+  @override
+  Future<InboxMessageDetail> sentMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) =>
+      _messaging(host)
+          .sentMessage(host: host, school: school, auth: auth, id: id);
+
+  @override
+  Future<List<ReadConfirmation>> readConfirmations({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) =>
+      _messaging(host)
+          .readConfirmations(host: host, school: school, auth: auth, id: id);
+
+  @override
+  Future<void> confirmMessageRead({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) =>
+      _messaging(host)
+          .confirmMessageRead(host: host, school: school, auth: auth, id: id);
+
+  @override
+  Future<void> revokeMessage({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int id,
+  }) =>
+      _messaging(host)
+          .revokeMessage(host: host, school: school, auth: auth, id: id);
 }

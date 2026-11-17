@@ -10,6 +10,7 @@ import '../core/class_register.dart';
 import '../core/excuses.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
+import '../core/messaging.dart';
 import '../core/providers.dart';
 import '../core/pupil_photos.dart';
 import '../core/substitution_planning.dart';
@@ -21,6 +22,7 @@ import 'class_register_repository_impl.dart';
 import 'db/database.dart';
 import 'excuse_repository_impl.dart';
 import 'info_center_repository_impl.dart';
+import 'messaging_repository_impl.dart';
 import 'pupil_photo_repository_impl.dart';
 import 'secret_store.dart';
 import 'substitution_planning_repository_impl.dart';
@@ -114,6 +116,12 @@ List<Override> dataOverrides({
       accounts: ref.watch(accountRepositoryProvider),
       timetables: ref.watch(timetableRepositoryProvider),
       clock: clock,
+    ),
+  ),
+  messagingRepositoryProvider.overrideWith(
+    (ref) => MessagingRepositoryImpl(
+      api: api ?? ref.watch(untisApiProvider),
+      accounts: ref.watch(accountRepositoryProvider),
     ),
   ),
   teacherToolsRepositoryProvider.overrideWith(
