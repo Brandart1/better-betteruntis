@@ -7,8 +7,10 @@ import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/pupil_photos.dart';
+import '../../core/teacher_tools.dart';
 import '../common/large_text.dart';
 import '../timetable/timetable_utils.dart';
+import 'absence_details_sheet.dart';
 import 'absence_summary_screen.dart';
 import 'pupil_avatar.dart';
 import 'substitute_note.dart';
@@ -70,6 +72,18 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
   /// Absent according to the server / as currently set on screen.
   Set<int> _absentBefore = {};
   Set<int> _absent = {};
+
+  /// Times / reason / note per absent pupil where they aren't the whole
+  /// block without reason and note (server / on screen).
+  Map<int, AbsenceDetails> _detailsBefore = {};
+  Map<int, AbsenceDetails> _details = {};
+  Map<int, String> _absenceReasons = const {};
+
+  DateTime get _blockStart => widget.periods
+      .map((p) => p.start)
+      .reduce((a, b) => a.isBefore(b) ? a : b);
+  DateTime get _blockEnd =>
+      widget.periods.map((p) => p.end).reduce((a, b) => a.isAfter(b) ? a : b);
   String _topicBefore = '';
 
   List<ClassRegStudent> _students = const [];
@@ -145,6 +159,27 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
         for (final r in regs)
           for (final a in r.absences) a.studentId,
       };
+      final details = <int, AbsenceDetails>{};
+      for (final s in absent) {
+        final mine = [
+          for (final r in regs) ...r.absences.where((a) => a.studentId == s),
+        ];
+        final d = AbsenceDetails(
+          start: mine
+              .map((a) => a.start)
+              .reduce((a, b) => a.isBefore(b) ? a : b),
+          end: mine.map((a) => a.end).reduce((a, b) => a.isAfter(b) ? a : b),
+          reasonId: mine.map((a) => a.reasonId).nonNulls.firstOrNull,
+          text:
+              mine
+                  .map((a) => a.text.trim())
+                  .where((t) => t.isNotEmpty)
+                  .firstOrNull ??
+              '',
+        );
+        if (_isPlain(d)) continue;
+        details[s] = d;
+      }
       final topic = regs
           .map((r) => r.topic)
           .firstWhere((t) => t.trim().isNotEmpty, orElse: () => '');
@@ -153,6 +188,8 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
         _students = students;
         _absentBefore = absent;
         _absent = {...absent};
+        _detailsBefore = details;
+        _details = {...details};
         _topicBefore = topic;
         _topic.text = topic;
         _events = _blockEvents(d);
@@ -189,8 +226,45 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
   }
 
   Future<void> _loadReasons() async {
+    final a = await _repo.absenceReasons(widget.account);
+    if (mounted && a.isNotEmpty) setState(() => _absenceReasons = a);
     final r = await _repo.eventReasons(widget.account);
     if (mounted && r.isNotEmpty) setState(() => _reasons = r);
+  }
+
+  /// The whole block without reason and note: the default absence.
+  bool _isPlain(AbsenceDetails d) =>
+      !d.start.isAfter(_blockStart) &&
+      !d.end.isBefore(_blockEnd) &&
+      !d.hasReasonOrText;
+
+  /// Changed details of the absent pupils for [ClassRegChanges.details]:
+  /// a pupil set back to the whole lesson gets it explicitly.
+  Map<int, AbsenceDetails> get _changedDetails => {
+    for (final s in _absent)
+      if (_details[s] != _detailsBefore[s])
+        s: _details[s] ?? AbsenceDetails(start: _blockStart, end: _blockEnd),
+  };
+
+  Future<void> _editAbsence(ClassRegStudent s) async {
+    final d = await showAbsenceDetailsSheet(
+      context,
+      pupil: s.displayName,
+      start: _blockStart,
+      end: _blockEnd,
+      now: ref.read(teacherToolsClockProvider)(),
+      reasons: _absenceReasons,
+      initial: _details[s.id],
+    );
+    if (d == null || !mounted) return;
+    setState(() {
+      _absent.add(s.id);
+      if (_isPlain(d)) {
+        _details.remove(s.id);
+      } else {
+        _details[s.id] = d;
+      }
+    });
   }
 
   List<PeriodRegister> get _regs => [
@@ -202,7 +276,8 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
   bool get _dirty =>
       _data != null &&
       (_topic.text.trim() != _topicBefore.trim() ||
-          !_sameSet(_absent, _absentBefore));
+          !_sameSet(_absent, _absentBefore) ||
+          _changedDetails.isNotEmpty);
 
   static bool _sameSet(Set<int> a, Set<int> b) =>
       a.length == b.length && a.containsAll(b);
@@ -221,6 +296,7 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
           topic: topic != _topicBefore.trim() ? topic : null,
           markAbsent: _absent.difference(_absentBefore),
           markPresent: _absentBefore.difference(_absent),
+          details: _changedDetails,
         ),
       );
       if (!mounted) return;
@@ -705,11 +781,33 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
       key: ValueKey('classreg-student-${s.id}'),
       leading: PupilAvatar(account: widget.account, student: s, absent: absent),
       title: Text(s.displayName),
-      subtitle: Text(absent ? 'Absent' : 'Present'),
+      subtitle: Text(
+        absent
+            ? describeAbsence(
+                _details[s.id],
+                _blockStart,
+                _blockEnd,
+                _absenceReasons,
+              )
+            : 'Present',
+      ),
+      trailing: _readOnly
+          ? null
+          : IconButton(
+              key: ValueKey('classreg-absence-${s.id}'),
+              tooltip: 'Late, left early, reason or note',
+              icon: const Icon(Icons.more_time),
+              onPressed: _saving ? null : () => _editAbsence(s),
+            ),
       onTap: _saving || _readOnly
           ? null
           : () => setState(() {
-              absent ? _absent.remove(s.id) : _absent.add(s.id);
+              if (absent) {
+                _absent.remove(s.id);
+                _details.remove(s.id);
+              } else {
+                _absent.add(s.id);
+              }
             }),
       onLongPress: () => showPupilPhotoDialog(context, ref, widget.account, s),
     );

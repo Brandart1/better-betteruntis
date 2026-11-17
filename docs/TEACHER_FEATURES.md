@@ -82,7 +82,10 @@ Basic package (no class register needed): enter notes for pupils ("Info zur Stun
 - [x] **No exams in supervisions**: "Create exam" needs at least one class and no supervision / office hour — not offered for a Gangaufsicht, an Aufsichtsstunde (demo: Fridays 08:00, a substitution with subject "A", no class, no room) or a room booking; the exam editor's period defaults and the subjects of "New exam" skip them too. "Absences & lesson topic" isn't offered for them either, and the Class register list leaves out lessons without a class.
 - [x] Demo: log in with user `teacher` at the demo school to try it without a real account.
 
+- [x] **Late arrival / leaving early, reason and note** (wish 2026-11-17): in "Absences & lesson topic" each pupil has a clock button → sheet with "Whole lesson", "Arrived now" / "Left now" (only while the lesson runs), From / Until time pickers (clamped to the block), reason (master data `absenceReasons`, "No reason") and note. The row says "Late · arrived 08:20", "Left early · from 09:10" or "Absent 08:10–08:30", plus reason and note. Saving: per period of the block, the part of the times inside it — created with createImmediateAbsence2017 (times as before), then editAbsence2017 for reason / note; existing absences are changed with editAbsence2017 or deleted when no part is left. Demo reasons: Krankheit, Arzttermin, Verspätung, Schulveranstaltung.
+
 ## To confirm with a real teacher account
+- [ ] Late arrival: does createImmediateAbsence2017 accept times inside the lesson (not just its start/end)? Does editAbsence2017 save times, reason and note (Debug log `editAbsence2017 request body` and its answer)? Does WebUntis show it as a late arrival?
 - [ ] Lesson details: `submitPeriodInfo2017` saves, the text shows in WebUntis/Untis Mobile as "Info zur Stunde", and an empty text removes it
 - [ ] Pupils and existing absences load (getPeriodData2017)
 - [ ] Marking absent / present again works
@@ -119,8 +122,6 @@ Basic package (no class register needed): enter notes for pupils ("Info zur Stun
 - [ ] Colleagues' lessons: does the teacher's own getTimetable2017 already deliver the lessons of their classes and subjects given by other teachers (user captures the server answer)? If yes, use those instead of loading class timetables.
 
 ## Ideas (not planned yet)
-- Late arrival / leaving early (partial absence with times)
-- Absence reason and note per pupil
 - Notes for pupils / notes for teachers per lesson
 - Seating plan
 - Excuse management for class teachers

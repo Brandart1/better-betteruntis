@@ -61,6 +61,8 @@ class ClassRegAbsence {
     this.excused = false,
     this.excuseStatusId,
     this.excuseStatus = '',
+    this.excuseText = '',
+    this.reasonName = '',
   });
 
   final int id;
@@ -76,6 +78,70 @@ class ClassRegAbsence {
 
   /// Excuse status name as sent inline ('' when not).
   final String excuseStatus;
+
+  /// Text of the excuse (`excuse.text`), '' when none.
+  final String excuseText;
+
+  /// Reason name as sent inline (`absenceReason`), '' when not.
+  final String reasonName;
+
+  /// Same absence with other times, reason or note (editAbsence2017 sends
+  /// the whole absence).
+  ClassRegAbsence copyWith({
+    DateTime? start,
+    DateTime? end,
+    int? Function()? reasonId,
+    String? text,
+  }) => ClassRegAbsence(
+    id: id,
+    studentId: studentId,
+    start: start ?? this.start,
+    end: end ?? this.end,
+    reasonId: reasonId != null ? reasonId() : this.reasonId,
+    text: text ?? this.text,
+    excused: excused,
+    excuseStatusId: excuseStatusId,
+    excuseStatus: excuseStatus,
+    excuseText: excuseText,
+    reasonName: reasonName,
+  );
+}
+
+/// What the teacher set for one pupil's absence in a lesson block: from
+/// [start] to [end] (a late arrival or leaving early is a part of the
+/// block), an optional reason (master data `absenceReasons`) and note.
+class AbsenceDetails {
+  const AbsenceDetails({
+    required this.start,
+    required this.end,
+    this.reasonId,
+    this.text = '',
+  });
+
+  final DateTime start;
+  final DateTime end;
+  final int? reasonId;
+  final String text;
+
+  bool get hasReasonOrText => reasonId != null || text.trim().isNotEmpty;
+
+  /// The part of this absence inside [from]–[to], null when none.
+  ({DateTime start, DateTime end})? clip(DateTime from, DateTime to) {
+    final s = start.isAfter(from) ? start : from;
+    final e = end.isBefore(to) ? end : to;
+    return s.isBefore(e) ? (start: s, end: e) : null;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is AbsenceDetails &&
+      other.start == start &&
+      other.end == end &&
+      other.reasonId == reasonId &&
+      other.text.trim() == text.trim();
+
+  @override
+  int get hashCode => Object.hash(start, end, reasonId, text.trim());
 }
 
 /// Class register data of one lesson (one timetable id).
@@ -135,8 +201,10 @@ abstract interface class ClassRegisterApi {
     required String topic,
   });
 
-  /// Records [studentId] as absent in lesson [ttId] from [start] to [end].
-  Future<void> createAbsence({
+  /// Records [studentId] as absent in lesson [ttId] from [start] to [end]
+  /// (createImmediateAbsence2017). Returns the new absence's id when the
+  /// answer has it.
+  Future<int?> createAbsence({
     required String host,
     required String school,
     required UntisCredentials auth,
@@ -151,6 +219,26 @@ abstract interface class ClassRegisterApi {
     required String school,
     required UntisCredentials auth,
     required int absenceId,
+  });
+
+  /// Changes an absence (times, reason, note, excuse): editAbsence2017 with
+  /// the whole [absence] (from the official app). Throws an
+  /// [UntisException] when the server reports a conflict with another
+  /// absence.
+  Future<void> editAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required ClassRegAbsence absence,
+  });
+
+  /// Absence reasons (master data `absenceReasons`) by id; empty when the
+  /// server has none.
+  Future<Map<int, String>> absenceReasons({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
   });
 
   /// Confirms the attendance check of [ttIds].
@@ -276,6 +364,7 @@ class ClassRegChanges {
     this.topic,
     this.markAbsent = const {},
     this.markPresent = const {},
+    this.details = const {},
   });
 
   /// New topic, or null to leave it unchanged.
@@ -284,6 +373,12 @@ class ClassRegChanges {
   /// Student ids to record as absent / whose absences to delete.
   final Set<int> markAbsent;
   final Set<int> markPresent;
+
+  /// Times, reason and note per absent pupil (new or already absent) where
+  /// they differ from the whole lesson without reason and note. Periods of
+  /// the block outside the times get no absence (an existing one there is
+  /// deleted).
+  final Map<int, AbsenceDetails> details;
 }
 
 /// One of the teacher's own lessons with its class register state.
@@ -334,6 +429,9 @@ abstract interface class ClassRegisterRepository {
 
   /// Entry reasons by id (empty when unknown or not loadable; never throws).
   Future<Map<int, String>> eventReasons(Account account);
+
+  /// Absence reasons by id (empty when unknown or on failure).
+  Future<Map<int, String>> absenceReasons(Account account);
 
   /// Creates [event] in the first period of the block [periods].
   Future<void> createEvent(

@@ -120,7 +120,76 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
       for (final p in periods) {
         final reg = current.periods[p.id];
         final absences = reg?.absences ?? const <ClassRegAbsence>[];
+        // Pupils who are (or become) absent with their own times, reason
+        // or note: their absence in this period is the part of those times
+        // inside it — created, changed or (none left) deleted.
+        for (final MapEntry(key: s, value: d) in changes.details.entries) {
+          if (changes.markPresent.contains(s)) continue;
+          final part = d.clip(p.start, p.end);
+          final mine = absences.where((a) => a.studentId == s).toList();
+          if (part == null) {
+            for (final a in mine) {
+              await _api.deleteAbsence(
+                host: host,
+                school: school,
+                auth: auth,
+                absenceId: a.id,
+              );
+            }
+            continue;
+          }
+          ClassRegAbsence? target = mine.firstOrNull;
+          if (target == null) {
+            final id = await _api.createAbsence(
+              host: host,
+              school: school,
+              auth: auth,
+              ttId: p.id,
+              studentId: s,
+              start: part.start,
+              end: part.end,
+            );
+            if (!d.hasReasonOrText) continue;
+            target = id != null
+                ? ClassRegAbsence(
+                    id: id,
+                    studentId: s,
+                    start: part.start,
+                    end: part.end,
+                  )
+                : await _findAbsence(auth, account, p.id, s);
+            if (target == null) continue;
+          }
+          final changed = target.copyWith(
+            start: part.start,
+            end: part.end,
+            reasonId: () => d.reasonId,
+            text: d.text.trim(),
+          );
+          if (changed.start != target.start ||
+              changed.end != target.end ||
+              changed.reasonId != target.reasonId ||
+              changed.text != target.text.trim()) {
+            await _api.editAbsence(
+              host: host,
+              school: school,
+              auth: auth,
+              ttId: p.id,
+              absence: changed,
+            );
+          }
+          // More than one absence of the pupil in this period: keep one.
+          for (final a in mine.skip(1)) {
+            await _api.deleteAbsence(
+              host: host,
+              school: school,
+              auth: auth,
+              absenceId: a.id,
+            );
+          }
+        }
         for (final s in changes.markAbsent) {
+          if (changes.details.containsKey(s)) continue;
           if (absences.any((a) => a.studentId == s)) continue;
           await _api.createAbsence(
             host: host,
@@ -328,6 +397,45 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
         ps.containsAll(subjects) &&
         pc.length == classes.length &&
         pc.containsAll(classes);
+  }
+
+  /// [studentId]'s absence in [ttId] as the server has it now (when the
+  /// create answer had no id).
+  Future<ClassRegAbsence?> _findAbsence(
+    UntisCredentials auth,
+    Account account,
+    int ttId,
+    int studentId,
+  ) async {
+    final d = await _api.periodData(
+      host: account.host,
+      school: account.school.loginName,
+      auth: auth,
+      ttIds: [ttId],
+    );
+    return d.periods[ttId]?.absences
+        .where((a) => a.studentId == studentId)
+        .firstOrNull;
+  }
+
+  final _absenceReasons = <String, Map<int, String>>{};
+
+  @override
+  Future<Map<int, String>> absenceReasons(Account account) async {
+    final cached = _absenceReasons[account.id];
+    if (cached != null) return cached;
+    try {
+      _check(account);
+      final auth = await accounts.credentials(account.id);
+      final r = await _api.absenceReasons(
+        host: account.host,
+        school: account.school.loginName,
+        auth: auth,
+      );
+      return _absenceReasons[account.id] = r;
+    } catch (_) {
+      return const {};
+    }
   }
 
   @override

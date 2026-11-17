@@ -763,7 +763,7 @@ class UntisApiImpl
   }
 
   @override
-  Future<void> createAbsence({
+  Future<int?> createAbsence({
     required String host,
     required String school,
     required UntisCredentials auth,
@@ -779,10 +779,52 @@ class UntisApiImpl
       'endTime': formatUntisTime(end),
     };
     _recordRequest('createImmediateAbsence2017', params);
-    await _rpc.call(rpcUrl(host, school), 'createImmediateAbsence2017', {
+    final result = await _rpc.call(
+      rpcUrl(host, school),
+      'createImmediateAbsence2017',
+      {...params, 'auth': _rpc.auth(auth)},
+    );
+    return createdAbsenceId(result, studentId);
+  }
+
+  @override
+  Future<void> editAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required ClassRegAbsence absence,
+  }) async {
+    final params = editAbsenceParams(ttId, absence);
+    _recordRequest('editAbsence2017', params);
+    final result = await _rpc.call(rpcUrl(host, school), 'editAbsence2017', {
       ...params,
       'auth': _rpc.auth(auth),
     });
+    final conflicts = absenceConflicts(result);
+    if (conflicts > 0) {
+      throw UntisException(
+        0,
+        'The absence overlaps $conflicts other '
+        '${conflicts == 1 ? 'absence' : 'absences'} of this pupil; '
+        'not saved',
+      );
+    }
+  }
+
+  @override
+  Future<Map<int, String>> absenceReasons({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    final known = _lookups['$host|$school']?.reasons;
+    if (known != null && known.isNotEmpty) return known;
+    return (await absenceLookups(
+      host: host,
+      school: school,
+      auth: auth,
+    )).reasons;
   }
 
   @override

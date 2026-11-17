@@ -2,6 +2,7 @@ import 'package:better_betteruntis/core/class_register.dart';
 import 'package:better_betteruntis/core/interfaces.dart';
 import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/core/providers.dart';
+import 'package:better_betteruntis/core/teacher_tools.dart';
 import 'package:better_betteruntis/data/class_register_repository_impl.dart';
 import 'package:better_betteruntis/dev/fake_accounts.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
@@ -106,6 +107,82 @@ void main() {
     expect(api.registerTopics, isEmpty);
   });
 
+  test(
+    'save: late arrival, leaving early, reason and note per period',
+    () async {
+      final a = teacherAccount();
+      // Double lesson 08:00–08:45, 08:50–09:35.
+      final ps = [
+        lesson(11, DateTime(2026, 11, 10, 8)),
+        lesson(12, DateTime(2026, 11, 10, 8, 50)),
+      ];
+      var data = await repo.load(a, ps);
+      await repo.save(
+        a,
+        ps,
+        data,
+        ClassRegChanges(
+          markAbsent: const {501, 502},
+          details: {
+            // Arrived 09:00: whole first period, second until 09:00.
+            501: AbsenceDetails(
+              start: DateTime(2026, 11, 10, 8),
+              end: DateTime(2026, 11, 10, 9),
+              reasonId: 3,
+              text: 'Bus late',
+            ),
+            // Left at 08:20: only the first period, from 08:20.
+            502: AbsenceDetails(
+              start: DateTime(2026, 11, 10, 8, 20),
+              end: DateTime(2026, 11, 10, 9, 35),
+            ),
+          },
+        ),
+      );
+      data = await repo.load(a, ps);
+      ClassRegAbsence of(int tt, int s) =>
+          data.periods[tt]!.absences.singleWhere((x) => x.studentId == s);
+      expect(of(11, 501).end, DateTime(2026, 11, 10, 8, 45));
+      expect(of(12, 501).start, DateTime(2026, 11, 10, 8, 50));
+      expect(of(12, 501).end, DateTime(2026, 11, 10, 9));
+      expect(of(12, 501).reasonId, 3);
+      expect(of(11, 501).text, 'Bus late');
+      expect(of(11, 502).start, DateTime(2026, 11, 10, 8, 20));
+      expect(of(12, 502).end, DateTime(2026, 11, 10, 9, 35));
+      // No reason / note for 502: created only, never edited.
+      expect(api.editAbsenceCalls.map((c) => c.absence.studentId).toSet(), {
+        501,
+      });
+
+      // Arrived at 08:30 instead: the second period's absence goes, the
+      // first is shortened; the reason stays.
+      api.editAbsenceCalls.clear();
+      await repo.save(
+        a,
+        ps,
+        data,
+        ClassRegChanges(
+          details: {
+            501: AbsenceDetails(
+              start: DateTime(2026, 11, 10, 8),
+              end: DateTime(2026, 11, 10, 8, 30),
+              reasonId: 3,
+              text: 'Bus late',
+            ),
+          },
+        ),
+      );
+      data = await repo.load(a, ps);
+      expect(of(11, 501).end, DateTime(2026, 11, 10, 8, 30));
+      expect(of(11, 501).reasonId, 3);
+      expect(
+        data.periods[12]!.absences.where((x) => x.studentId == 501),
+        isEmpty,
+      );
+      expect(api.editAbsenceCalls.single.ttId, 11);
+    },
+  );
+
   test('lessons: today (upcoming too) and past, not cancelled', () async {
     final all = await repo.lessons(teacherAccount(), days: 7);
     final ids = all.map((l) => l.period.id).toList();
@@ -184,6 +261,58 @@ void main() {
       expect(api.registerTopics[11], 'Algebra');
       expect(api.registerChecked, contains(11));
       expect(api.registerAbsences[11]!.single.studentId, 501);
+    });
+
+    testWidgets('class register: late arrival with reason and note', (t) async {
+      t.view.physicalSize = const Size(800, 2000);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      final p = lesson(11, DateTime(2026, 11, 10, 8));
+      await t.pumpWidget(
+        ProviderScope(
+          overrides: [
+            accountRepositoryProvider.overrideWithValue(accounts),
+            classRegisterRepositoryProvider.overrideWithValue(repo),
+            nameResolverProvider.overrideWith(
+              (ref) => Stream.value(demoNames()),
+            ),
+            teacherToolsClockProvider.overrideWithValue(
+              () => DateTime(2026, 11, 10, 8, 20, 30),
+            ),
+          ],
+          child: MaterialApp(
+            home: ClassRegisterScreen(
+              account: teacherAccount(),
+              periods: [p],
+              title: 'Maths',
+              subtitle: 'Tue 10 Nov',
+            ),
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const ValueKey('classreg-absence-501')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const ValueKey('absence-arrived-now')));
+      await t.tap(find.byKey(const ValueKey('absence-reason')));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Verspätung').last);
+      await t.pumpAndSettle();
+      await t.enterText(find.byKey(const ValueKey('absence-note')), 'Bus');
+      await t.tap(find.byKey(const ValueKey('absence-apply')));
+      await t.pumpAndSettle();
+      expect(
+        find.text('Late · arrived 08:20 · Verspätung · Bus'),
+        findsOneWidget,
+      );
+      await t.tap(find.byKey(const ValueKey('classreg-save')));
+      await t.pumpAndSettle();
+      final abs = api.registerAbsences[11]!.single;
+      expect(abs.studentId, 501);
+      expect(abs.start, p.start);
+      expect(abs.end, DateTime(2026, 11, 10, 8, 20));
+      expect(abs.reasonId, 3);
+      expect(abs.text, 'Bus');
     });
 
     Widget overview(Account account) => ProviderScope(

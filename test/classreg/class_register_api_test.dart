@@ -1,5 +1,6 @@
 import 'package:better_betteruntis/api/class_register_parsers.dart';
 import 'package:better_betteruntis/api/untis_api_impl.dart';
+import 'package:better_betteruntis/core/class_register.dart';
 import 'package:better_betteruntis/core/interfaces.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -65,6 +66,50 @@ void main() {
       expect(parsePeriodData('x').students, isEmpty);
     });
 
+    test('create answer id, edit conflicts, reason 0 = none', () {
+      expect(
+        createdAbsenceId({
+          'absences': [
+            {'id': 4, 'studentId': 8},
+            {'id': 5, 'studentId': 9},
+          ],
+        }, 9),
+        5,
+      );
+      expect(createdAbsenceId(null, 9), isNull);
+      expect(
+        absenceConflicts({
+          'result': {
+            'absences': [],
+            'conflicts': [
+              {'id': 1},
+            ],
+          },
+        }),
+        1,
+      );
+      expect(
+        absenceConflicts({
+          'result': {'conflicts': []},
+        }),
+        0,
+      );
+      final a = parseClassRegAbsence({
+        'id': 1,
+        'studentId': 2,
+        'startDateTime': '2026-11-10T08:00Z',
+        'endDateTime': '2026-11-10T08:20Z',
+        'absenceReasonId': 0,
+        'absenceReason': 'Krank',
+        'excuse': {'excuseStatusId': 2, 'text': 'Note from home'},
+      })!;
+      expect(a.reasonId, isNull);
+      expect(a.reasonName, 'Krank');
+      expect(a.text, '');
+      expect(a.end, DateTime(2026, 11, 10, 8, 20));
+      expect(a.excuseText, 'Note from home');
+    });
+
     test('time format', () {
       expect(formatUntisTime(DateTime(2026, 1, 1, 8, 5)), 'T08:05');
     });
@@ -114,6 +159,33 @@ void main() {
       expect(params()['studentId'], 9);
       expect(params()['startTime'], 'T08:00');
       expect(params()['endTime'], 'T08:45');
+
+      await api.editAbsence(
+        host: 'h',
+        school: 's',
+        auth: creds,
+        ttId: 5,
+        absence: ClassRegAbsence(
+          id: 7,
+          studentId: 9,
+          start: DateTime(2026, 11, 10, 8),
+          end: DateTime(2026, 11, 10, 8, 20),
+          reasonId: 3,
+          text: ' Bus ',
+          excuseStatusId: 2,
+        ),
+      );
+      expect(method(), 'editAbsence2017');
+      expect(params()['absenceId'], 7);
+      expect(params()['periodId'], 5);
+      expect(params()['startDateTime'], '2026-11-10T08:00Z');
+      expect(params()['endDateTime'], '2026-11-10T08:20Z');
+      expect(params()['absenceReasonId'], 3);
+      expect(params()['text'], 'Bus');
+      expect(params()['excuseStatusId'], 2);
+      expect(params()['excuseText'], '');
+      expect(params()['strategy'], 'WRITE');
+      expect(params().containsKey('studentId'), isFalse);
 
       await api.deleteAbsence(
         host: 'h',

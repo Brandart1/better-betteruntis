@@ -973,7 +973,7 @@ class FakeUntisApi
   }
 
   @override
-  Future<void> createAbsence({
+  Future<int?> createAbsence({
     required String host,
     required String school,
     required UntisCredentials auth,
@@ -983,14 +983,40 @@ class FakeUntisApi
     required DateTime end,
   }) async {
     await _delay();
+    final id = _nextAbsenceId++;
     (registerAbsences[ttId] ??= []).add(
-      ClassRegAbsence(
-        id: _nextAbsenceId++,
-        studentId: studentId,
-        start: start,
-        end: end,
-      ),
+      ClassRegAbsence(id: id, studentId: studentId, start: start, end: end),
     );
+    return id;
+  }
+
+  /// Every editAbsence call, for test assertions.
+  final editAbsenceCalls = <({int ttId, ClassRegAbsence absence})>[];
+
+  @override
+  Future<void> editAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required ClassRegAbsence absence,
+  }) async {
+    await _delay();
+    editAbsenceCalls.add((ttId: ttId, absence: absence));
+    for (final list in registerAbsences.values) {
+      final i = list.indexWhere((a) => a.id == absence.id);
+      if (i >= 0) list[i] = absence;
+    }
+  }
+
+  @override
+  Future<Map<int, String>> absenceReasons({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    await _delay();
+    return demoAbsenceReasons;
   }
 
   @override
@@ -1146,6 +1172,13 @@ class FakeUntisApi
     2: 'Material vergessen',
     3: 'Störung des Unterrichts',
     4: 'Lob',
+  };
+
+  static const demoAbsenceReasons = {
+    1: 'Krankheit',
+    2: 'Arzttermin',
+    3: 'Verspätung',
+    4: 'Schulveranstaltung',
   };
 
   static const _demoTopics = [

@@ -25,6 +25,7 @@ Teacher test build (branch `teacher`). Absences, lesson topic, previous topics a
 - New **colours for supervisions and room bookings** (a booked room without a class) in Settings, with preview, fill or border.
 - Teachers: **Create exam** and "Absences & lesson topic" are no longer offered for supervisions, an Aufsichtsstunde or anything else without a class; the exam editor doesn't pick them as periods either.
 - Teachers: once a lesson has started (or is over), the room buttons (⟳ × +) and **Create exam** show greyed out instead of disappearing — the server seems to refuse both then. Try creating an exam on a future lesson.
+- Teachers: **late arrival, leaving early, reason and note** per pupil in "Absences & lesson topic": the clock button next to a pupil sets the part of the lesson they were missing ("Arrived now" / "Left now" while the lesson runs, or any times), an absence reason and a note. Double lessons get the matching part in each period. Uses the official app's call for changing absences; if it fails, please send the Debug log.
 - Web test version for teachers (no sync): https://bbu-teacher-alpha.brandart1.workers.dev
 - Demo school: log in as `teacher` to try the teacher features.
 

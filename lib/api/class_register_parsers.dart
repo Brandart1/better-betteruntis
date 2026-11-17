@@ -6,6 +6,7 @@ library;
 
 import '../core/class_register.dart';
 import 'parsers.dart';
+import 'teacher_tools_parsers.dart';
 
 Map<String, Object?> _map(Object? v) =>
     v is Map ? v.map((k, val) => MapEntry('$k', val)) : const {};
@@ -117,13 +118,23 @@ ClassRegAbsence? parseClassRegAbsence(Map<String, Object?> j) {
     studentId: student,
     start: start,
     end: end,
-    reasonId: _int(j['absenceReasonId'] ?? j['reasonId']),
-    text: _firstStr(j, ['text', 'reason']),
+    // 0 = no reason (the official app sends 0 for none).
+    reasonId: switch (_int(j['absenceReasonId'] ?? j['reasonId'])) {
+      0 => null,
+      final id => id,
+    },
+    text: _str(j['text']),
     excused: _bool(j['excused'] ?? j['isExcused'] ?? excuse['isExcused']),
     excuseStatusId: _int(j['excuseStatusId'] ?? excuse['excuseStatusId']),
     excuseStatus: j['excuseStatus'] is String
         ? _str(j['excuseStatus']).trim()
         : _firstStr(excuse, ['excuseStatus']),
+    excuseText: _str(excuse['text']).trim(),
+    reasonName: j['absenceReason'] is String
+        ? _str(j['absenceReason']).trim()
+        : j['reason'] is String
+        ? _str(j['reason']).trim()
+        : '',
   );
 }
 
@@ -269,3 +280,36 @@ PeriodRegisterData parsePeriodData(Object? raw) {
 /// "T08:00" (Untis' time format).
 String formatUntisTime(DateTime d) =>
     'T${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+/// Id of [studentId]'s absence in a createImmediateAbsence2017 answer
+/// (`{absences:[UMStudentAbsence]}`), null when there is none.
+int? createdAbsenceId(Object? result, int studentId) {
+  final list = result is Map ? result['absences'] : result;
+  for (final a in _maps(list)) {
+    if (_int(a['studentId']) == studentId) return _int(a['id']);
+  }
+  return null;
+}
+
+/// editAbsence2017 params (from the official app's `EditAbsenceRequest`):
+/// times as local `yyyy-MM-ddTHH:mmZ` (literal Z), reason 0 = none, the
+/// excuse kept as it is, strategy WRITE (no merging with other absences).
+Map<String, Object?> editAbsenceParams(int ttId, ClassRegAbsence a) => {
+  'absenceId': a.id,
+  'periodId': ttId,
+  'startDateTime': '${formatUntisDateTime(a.start)}Z',
+  'endDateTime': '${formatUntisDateTime(a.end)}Z',
+  'absenceReasonId': a.reasonId ?? 0,
+  'text': a.text.trim(),
+  'excuseStatusId': a.excuseStatusId ?? 0,
+  'excuseText': a.excuseText.trim(),
+  'strategy': 'WRITE',
+};
+
+/// The conflicts of an editAbsence2017 answer
+/// (`{result:{absences, conflicts:[UMStudentAbsence], …}}`): absences the
+/// change would overlap; the change is not saved then.
+int absenceConflicts(Object? result) {
+  final r = result is Map ? result['result'] ?? result : null;
+  return r is Map ? _maps(r['conflicts']).length : 0;
+}

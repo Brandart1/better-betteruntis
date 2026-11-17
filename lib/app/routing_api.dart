@@ -280,7 +280,7 @@ class RoutingUntisApi
   );
 
   @override
-  Future<void> createAbsence({
+  Future<int?> createAbsence({
     required String host,
     required String school,
     required UntisCredentials auth,
@@ -307,6 +307,28 @@ class RoutingUntisApi
   }) => _for(
     host,
   ).deleteAbsence(host: host, school: school, auth: auth, absenceId: absenceId);
+
+  @override
+  Future<void> editAbsence({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required ClassRegAbsence absence,
+  }) => _for(host).editAbsence(
+    host: host,
+    school: school,
+    auth: auth,
+    ttId: ttId,
+    absence: absence,
+  );
+
+  @override
+  Future<Map<int, String>> absenceReasons({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) => _for(host).absenceReasons(host: host, school: school, auth: auth);
 
   @override
   Future<void> submitAbsencesChecked({
