@@ -148,6 +148,18 @@ class OtaApkUpdater implements ApkUpdater {
   Stream<ApkUpdateEvent> start(ReleaseAsset apk) {
     // The plugin refuses a '/' in the name.
     final name = apk.name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    // Without a digest a failed download (the plugin still writes an HTTP
+    // error body) could be handed to the installer: never install unchecked.
+    if (apk.sha256 == null) {
+      return Stream.value(
+        const ApkUpdateEvent(
+          ApkUpdateStage.failed,
+          message:
+              'This release has no checksum, so it can\'t be installed '
+              'safely from the app. Download it from GitHub instead.',
+        ),
+      );
+    }
     final Stream<OtaEvent> events;
     try {
       events = run(

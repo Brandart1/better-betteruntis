@@ -113,12 +113,26 @@ void main() {
       expect(events.first.progress, 0.1);
     });
 
-    test('without a digest none is passed; odd names are sanitised', () async {
-      final odd = ReleaseAsset(name: 'a/b c.apk', url: asset.url, size: 1);
+    test('odd names are sanitised', () async {
+      final odd = ReleaseAsset(
+        name: 'a/b c.apk',
+        url: asset.url,
+        size: 1,
+        sha256: hex,
+      );
       final sub = updater.start(odd).listen((_) {});
-      expect(args['sha256'], isNull);
+      expect(args['sha256'], hex);
       expect(args['filename'], 'a_b_c.apk');
       await sub.cancel();
+    });
+
+    test('without a digest nothing is downloaded or installed', () async {
+      args.clear();
+      final bare = ReleaseAsset(name: 'a.apk', url: asset.url, size: 1);
+      final events = await updater.start(bare).toList();
+      expect(args, isEmpty);
+      expect(events.single.stage, ApkUpdateStage.failed);
+      expect(events.single.message, contains('no checksum'));
     });
 
     test('checksum error from the plugin ends in a failed event', () async {

@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Calendar sync (Export → Add to calendar). -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
@@ -8,6 +9,12 @@
     <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" />
     <!-- In-app updater: installs the GitHub release APK (ota_update). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- ota_update merges these in; the updater needs none of them (it
+         writes to the app's own files dir). -->
+    <uses-permission android:name="android.permission.INSTALL_PACKAGES" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
     <application
         android:label="BetterBetterUntis"
         android:name="${applicationName}"
