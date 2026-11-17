@@ -8,4 +8,5 @@
 - Alpha builds are now also offered newer alphas of the same version line, not only betas.
 
 ### Known issues
+- v0.5.6-alpha.2 only exists as the update target for testing the new updater from v0.5.6-alpha; it changes nothing else.
 - Test build for the new updater: after Android's install screen the app can't tell whether the installation worked. If you cancel it, tap Close.
