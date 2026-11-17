@@ -1,12 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/apk_update.dart';
 import '../../app/app_update.dart';
+import '../../core/build_channel.dart';
 import '../infocenter/info_providers.dart';
 
 /// Checks once per app start whether a newer release exists on GitHub and,
@@ -36,12 +35,20 @@ class _UpdateCheckerState extends ConsumerState<UpdateChecker> {
   Future<void> _check() async {
     // An APK left over from the last in-app update is no longer needed.
     if (ref.read(inAppUpdateSupportedProvider)) {
-      await ref.read(apkDownloaderProvider).cleanup();
+      await ref.read(apkUpdaterProvider).cleanup();
     }
     final current = await ref.read(appVersionProvider.future);
     if (current == null) return;
     final latest = await ref.read(latestReleaseFetcherProvider)();
-    if (latest == null || !isNewerVersion(latest.tag, current.version)) return;
+    if (latest == null ||
+        !isUpdate(
+          latest.tag,
+          current.version,
+          // Beta and stable builds keep comparing X.Y.Z only.
+          currentTag: buildChannel == 'alpha' ? buildTag : '',
+        )) {
+      return;
+    }
     if (!mounted) return;
     // The navigator may not exist yet on the very first frame.
     var context = widget.navigatorKey.currentContext;
@@ -79,14 +86,16 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
   var _phase = _Phase.idle;
   String? _error;
   double? _progress;
-  CancelToken? _cancel;
+  StreamSubscription<ApkUpdateEvent>? _sub;
+  late final ApkUpdater _updater = ref.read(apkUpdaterProvider);
 
   ReleaseAsset? get _apk =>
       ref.read(inAppUpdateSupportedProvider) ? widget.latest.apk : null;
 
   @override
   void dispose() {
-    _cancel?.cancel();
+    if (_phase == _Phase.downloading) unawaited(_updater.cancel());
+    _sub?.cancel();
     super.dispose();
   }
 
@@ -98,71 +107,45 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
     });
   }
 
-  Future<void> _update() async {
+  void _update() {
     final apk = _apk;
     if (apk == null) return;
-    final installer = ref.read(apkInstallerProvider);
-    final downloader = ref.read(apkDownloaderProvider);
-    try {
-      if (!await installer.canRequestInstalls()) {
-        _set(_Phase.needsPermission);
-        await installer.openInstallSettings();
-        return;
-      }
-    } catch (_) {
-      _set(_Phase.error, error: 'Could not reach the system installer.');
-      return;
-    }
-    final cancel = _cancel = CancelToken();
     setState(() {
       _phase = _Phase.downloading;
       _progress = null;
       _error = null;
     });
-    final File file;
-    try {
-      file = await downloader.download(
-        apk,
-        cancel: cancel,
-        onProgress: (received, total) {
-          if (!mounted || total <= 0) return;
-          setState(() => _progress = (received / total).clamp(0.0, 1.0));
-        },
-      );
-    } on DioException catch (e) {
-      if (CancelToken.isCancel(e)) {
-        _set(_Phase.idle);
-      } else {
-        _set(_Phase.error, error: 'Download failed.');
-      }
-      return;
-    } on ApkUpdateException catch (e) {
-      _set(_Phase.error, error: e.message);
-      return;
-    } catch (_) {
-      _set(_Phase.error, error: 'Download failed.');
-      return;
-    } finally {
-      if (identical(_cancel, cancel)) _cancel = null;
-    }
-    if (!mounted) return;
-    _set(_Phase.installing);
-    final result = await installer.install(file);
-    switch (result.status) {
-      case InstallStatus.success:
-        if (mounted) Navigator.of(context).pop();
-      case InstallStatus.aborted:
-        _set(_Phase.idle);
-      case InstallStatus.notAllowed:
-        _set(_Phase.needsPermission);
-        await installer.openInstallSettings();
-      case InstallStatus.failure:
-        _set(
-          _Phase.error,
-          error:
-              'Installation failed'
-              '${result.message == null ? '' : ': ${result.message}'}.',
+    _sub?.cancel();
+    _sub = _updater
+        .start(apk)
+        .listen(
+          _onEvent,
+          onError: (_) => _fail(),
+          onDone: () {
+            // The stream ends after its last event; one that just stops
+            // while downloading is a failure.
+            if (_phase == _Phase.downloading) _fail();
+          },
         );
+  }
+
+  void _fail() => _set(_Phase.error, error: 'Update failed.');
+
+  void _onEvent(ApkUpdateEvent e) {
+    if (!mounted) return;
+    switch (e.stage) {
+      case ApkUpdateStage.downloading:
+        setState(() => _progress = e.progress);
+      case ApkUpdateStage.installing:
+        _set(_Phase.installing);
+      case ApkUpdateStage.needsPermission:
+        _set(_Phase.needsPermission);
+      case ApkUpdateStage.failed:
+        _set(_Phase.error, error: e.message);
+      case ApkUpdateStage.canceled:
+        _set(_Phase.idle);
+      case ApkUpdateStage.done:
+        Navigator.of(context).pop();
     }
   }
 
@@ -213,14 +196,16 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
             ],
             if (_phase == _Phase.installing)
               const Text(
-                'Installing… Confirm in the system dialog if Android asks.',
+                'Installing… Confirm in the system dialog. If Android says '
+                'this app may not install unknown apps, allow it in the '
+                'settings it offers, then tap Update now again.',
                 key: ValueKey('update-installing'),
               ),
             if (_phase == _Phase.needsPermission)
               const Text(
-                'Allow BetterBetterUntis to install apps in the settings '
-                'that just opened ("Install unknown apps"), then come back '
-                'and tap Update now again.',
+                'Allow BetterBetterUntis to install apps ("Install unknown '
+                'apps" in the settings), then come back and tap Update now '
+                'again.',
                 key: ValueKey('update-needs-permission'),
               ),
             if (_phase == _Phase.error)
@@ -236,7 +221,7 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
           if (_phase == _Phase.downloading)
             TextButton(
               key: const ValueKey('update-cancel'),
-              onPressed: () => _cancel?.cancel(),
+              onPressed: () => unawaited(_updater.cancel()),
               child: const Text('Cancel'),
             )
           else

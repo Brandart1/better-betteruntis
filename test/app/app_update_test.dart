@@ -133,4 +133,76 @@ void main() {
       expect(parseSha256Digest(null), isNull);
     });
   });
+
+  group('alpha updates', () {
+    Map<String, dynamic> rel(String tag, {bool prerelease = false}) => {
+      'tag_name': tag,
+      'prerelease': prerelease,
+      'draft': false,
+      'html_url':
+          'https://github.com/Brandart1/better-betteruntis/releases/tag/$tag',
+      'assets': [
+        {
+          'name': 'better-betteruntis-$tag.apk',
+          'browser_download_url':
+              'https://github.com/Brandart1/better-betteruntis/releases/download/$tag/better-betteruntis-$tag.apk',
+          'size': 10,
+          'digest': 'sha256:${'a' * 64}',
+        },
+      ],
+    };
+
+    test('releaseKey orders alpha < beta < stable, then the alpha number', () {
+      expect(releaseKey('v0.5.6-alpha'), [0, 5, 6, 0, 1]);
+      expect(releaseKey('v0.5.6-alpha.2'), [0, 5, 6, 0, 2]);
+      expect(releaseKey('v0.5.6-beta'), [0, 5, 6, 1, 0]);
+      expect(releaseKey('v0.5.6'), [0, 5, 6, 2, 0]);
+      expect(releaseKey('nonsense'), isNull);
+    });
+
+    test('isUpdate: tags for alpha builds, X.Y.Z otherwise', () {
+      expect(
+        isUpdate('v0.5.6-alpha.2', '0.5.6', currentTag: 'v0.5.6-alpha.1'),
+        isTrue,
+      );
+      expect(
+        isUpdate('v0.5.6-alpha.1', '0.5.6', currentTag: 'v0.5.6-alpha.1'),
+        isFalse,
+      );
+      expect(
+        isUpdate('v0.5.6-beta', '0.5.6', currentTag: 'v0.5.6-alpha.3'),
+        isTrue,
+      );
+      expect(
+        isUpdate('v0.5.5-beta', '0.5.6', currentTag: 'v0.5.6-alpha.1'),
+        isFalse,
+      );
+      // Without a tag (betas, stables) nothing changes.
+      expect(isUpdate('v0.5.6-alpha.2', '0.5.6'), isFalse);
+      expect(isUpdate('v0.5.7-beta', '0.5.6'), isTrue);
+    });
+
+    test('pickAlphaUpdate: newest of the same line, betas of any line', () {
+      final list = [
+        rel('v0.6.0-alpha.9', prerelease: true), // teacher line: skipped
+        rel('v0.5.6-alpha.3', prerelease: true),
+        rel('v0.5.6-alpha.2', prerelease: true),
+        rel('v0.5.5-beta'),
+        {'tag_name': 'v0.5.6-alpha.4', 'draft': true},
+      ];
+      final r = pickAlphaUpdate(list, 'v0.5.6-alpha.2')!;
+      expect(r.tag, 'v0.5.6-alpha.3');
+      expect(r.url.toString(), endsWith('/releases/tag/v0.5.6-alpha.3'));
+      expect(r.apk!.sha256, 'a' * 64);
+      expect(pickAlphaUpdate(list, 'v0.5.6-alpha.3'), isNull);
+      expect(
+        pickAlphaUpdate([...list, rel('v0.6.0-beta')], 'v0.5.6-alpha.3')!.tag,
+        'v0.6.0-beta',
+      );
+    });
+
+    test('beta builds still never see alphas', () {
+      expect(parseRelease(rel('v0.5.6-alpha.3', prerelease: true)), isNull);
+    });
+  });
 }

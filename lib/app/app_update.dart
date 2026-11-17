@@ -110,16 +110,112 @@ Future<ReleaseInfo?> fetchLatestRelease(Dio dio) async {
 /// Turns a GitHub release JSON object into a [ReleaseInfo]. Null for drafts,
 /// pre-releases and alpha tags: `/releases/latest` already skips those, this
 /// is defence in depth so the updater only ever offers betas and stables.
-ReleaseInfo? parseRelease(Map<String, dynamic> data) {
+///
+/// [allowAlpha] (alpha builds only, see [pickAlphaUpdate]) also accepts
+/// pre-releases and alpha tags; their page is the release's own.
+ReleaseInfo? parseRelease(
+  Map<String, dynamic> data, {
+  bool allowAlpha = false,
+}) {
   final tag = data['tag_name'];
   if (tag is! String || tag.isEmpty) return null;
-  if (data['draft'] == true || data['prerelease'] == true) return null;
-  if (tag.toLowerCase().contains('-alpha')) return null;
+  if (data['draft'] == true) return null;
+  final alpha =
+      data['prerelease'] == true || tag.toLowerCase().contains('-alpha');
+  if (alpha && !allowAlpha) return null;
+  final page = data['html_url'];
   return ReleaseInfo(
     tag: tag,
-    url: latestReleasePage,
+    url: alpha && page is String && page.startsWith('$repoUrl/')
+        ? Uri.parse(page)
+        : latestReleasePage,
     apk: _parseApk(data['assets'], tag),
   );
+}
+
+/// All releases, newest first (alpha builds look at alphas too).
+const releasesApi =
+    'https://api.github.com/repos/Brandart1/better-betteruntis/releases?per_page=30';
+
+/// Sort key of a tag: X, Y, Z, then alpha (0) < beta (1) < stable (2), then
+/// the alpha number (`-alpha` = 1). `v0.5.6-alpha.2` → [0, 5, 6, 0, 2].
+List<int>? releaseKey(String tag) {
+  final v = parseVersion(tag);
+  if (v == null) return null;
+  final t = tag.toLowerCase();
+  final alpha = RegExp(r'-alpha(?:\.(\d+))?').firstMatch(t);
+  if (alpha != null) return [...v, 0, int.parse(alpha.group(1) ?? '1')];
+  return [...v, t.contains('-beta') ? 1 : 2, 0];
+}
+
+int _compareKeys(List<int> a, List<int> b) {
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return a[i].compareTo(b[i]);
+  }
+  return 0;
+}
+
+/// Whether [latestTag] is an update for the running app. With the build's
+/// own tag ([currentTag], alpha builds) alphas count: `v0.5.6-alpha.2` is an
+/// update for `v0.5.6-alpha.1`. Otherwise only X.Y.Z of [currentVersion].
+bool isUpdate(
+  String latestTag,
+  String currentVersion, {
+  String currentTag = '',
+}) {
+  final cur = currentTag.isEmpty ? null : releaseKey(currentTag);
+  final lat = releaseKey(latestTag);
+  if (cur == null || lat == null) {
+    return isNewerVersion(latestTag, currentVersion);
+  }
+  return _compareKeys(lat, cur) > 0;
+}
+
+/// The newest release in [releases] (GitHub's list) for an alpha build
+/// tagged [currentTag]: betas and stables, plus alphas of the same X.Y line
+/// (a 0.5 alpha is never offered a 0.6 teacher alpha). Null if none is
+/// newer.
+ReleaseInfo? pickAlphaUpdate(List<Object?> releases, String currentTag) {
+  final cur = releaseKey(currentTag);
+  if (cur == null) return null;
+  ReleaseInfo? best;
+  List<int>? bestKey;
+  for (final r in releases) {
+    if (r is! Map<String, dynamic>) continue;
+    final info = parseRelease(r, allowAlpha: true);
+    if (info == null) continue;
+    final key = releaseKey(info.tag);
+    if (key == null) continue;
+    final sameLine = key[0] == cur[0] && key[1] == cur[1];
+    if (key[3] == 0 && !sameLine) continue;
+    if (_compareKeys(key, cur) <= 0) continue;
+    if (bestKey == null || _compareKeys(key, bestKey) > 0) {
+      best = info;
+      bestKey = key;
+    }
+  }
+  return best;
+}
+
+/// [pickAlphaUpdate] over GitHub's release list. Null on any failure.
+Future<ReleaseInfo?> fetchAlphaUpdate(Dio dio, String currentTag) async {
+  try {
+    final res = await dio.get<List<dynamic>>(
+      releasesApi,
+      options: Options(
+        headers: {
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'better-betteruntis',
+        },
+        sendTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 10),
+      ),
+    );
+    final data = res.data;
+    return data == null ? null : pickAlphaUpdate(data, currentTag);
+  } catch (_) {
+    return null;
+  }
 }
 
 /// The release's APK: `better-betteruntis-<tag>.apk` (see release.yml), else
@@ -168,11 +264,15 @@ final appVersionProvider = FutureProvider<AppVersion?>((ref) async {
 });
 
 /// Latest release lookup. Overridable in tests.
+/// Alpha builds (with their tag baked in) also get newer alphas of their
+/// line; everything else only betas and stables.
 final latestReleaseFetcherProvider = Provider<Future<ReleaseInfo?> Function()>(
-  (ref) =>
-      () => fetchLatestRelease(
-        Dio(BaseOptions(connectTimeout: const Duration(seconds: 10))),
-      ),
+  (ref) => () {
+    final dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 10)));
+    return buildChannel == 'alpha' && buildTag.isNotEmpty
+        ? fetchAlphaUpdate(dio, buildTag)
+        : fetchLatestRelease(dio);
+  },
 );
 
 /// Whether to check for updates at start. Not on the web (the host updates
