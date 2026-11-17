@@ -179,6 +179,14 @@ Other write methods in that build, for later: `submitLessonTopic`, `submitHomeWo
 
 **Homework (teachers), from the official app.** JSON-RPC `submitHomeWork {auth, ttId:<period the homework is given in>, homeWork:{id:<0 new, else server id>, lessonId, startDate:"yyyy-MM-dd" (assigned), endDate:"yyyy-MM-dd" (due), text, remark, completed}}` (trimmed; no attachments) → `{success, submittedHomeWorkId}`; `success:false` is an error. No REST call and no delete call (the official app's delete is local only). Reading: `homeWorks` on timetable periods and (assumed) in getPeriodData2017; `getHomeWork2017 {id, type, startDate, endDate}` → `{homeWorks, lessonsById}`. The period right `WRITE_HOMEWORK` (`can` list) isn't parsed yet. We send the block's first period as `ttId`.
 
+### Excuses (teachers, SAA)
+From the decompiled official app (student absence administration), bearer token, `/WebUntis/api/rest/`:
+- `GET view/v1/classreg/absences/meta` → `{classes, reasons, excuseStatuses:[{id, name, type: OPEN|NOT_EXCUSED|EXCUSED}], defaultExcuseStatusId, defaultReasonId, canEditReason, …}`
+- `POST view/v4/classreg/absences` `{classId, dateRange:{start, end}, dateRangeType, excuseStatusType?}` → `{absences:[SaaAbsenceDto]}` (`{id, duration:{start,end}, reason, excuseStatus:{id,name,type}, excuseText, text, student:{id,name,…}, studentOfAge, editable, deletable, excuseStatusEditable, parent…NotificationStatus}`)
+- `PUT view/v3/classreg/absences` `{saveStrategy:"ABSENCE_WRITE", itemToSave:{id, studentId, duration, reasonId, excuseStatusId, excuseText, text, studentOfAge, parentAutoNotificationStatus, parentManualNotificationStatus}}` → `{modifiedAbsences, attendances, conflicts, separateSaveAllowed}`; non-empty conflicts = not saved.
+- Date-times local with a literal Z (`yyyy-MM-dd'T'HH:mm:00'Z'`). BBU sends both `dateRange` and `dateRangeType`. 403 → "Only class teachers may excuse absences of this class".
+- On HTTP 404 (remembered per school for the session): master data `excuseStatuses` (type guessed from the name), the class absence list (`absences/students?klasseId` / getStudentAbsences2017) and JSON-RPC `submitExcuse2017 {absenceId, excuseStatusId, date:null, text}` → `{absence, errors}`. Unconfirmed with a real teacher account.
+
 ## Room booking and exams (teachers)
 Teacher accounts with the class register get room actions (⟳ replace, × remove, + add) on lessons of their own timetable, "Book a room" (without a lesson) in the drawer, "Create exam" on lessons (instead of the device-only "Mark as exam") and "Exams" in the drawer (their exam list and "New exam"). Built on branch `teacher` (0.6.0 alphas).
 

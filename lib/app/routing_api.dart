@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import '../core/absence_details.dart';
 import '../core/absence_summary.dart';
 import '../core/class_register.dart';
+import '../core/excuses.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 
@@ -13,7 +14,12 @@ import '../core/teacher_tools.dart';
 /// Sends demo accounts (host `*.invalid`) to [demo] and everything else to
 /// [real], so demo profiles live alongside real ones in the same database.
 class RoutingUntisApi
-    implements FullUntisApi, TeacherToolsApi, ClassAbsencesApi, PupilPhotoApi {
+    implements
+        FullUntisApi,
+        TeacherToolsApi,
+        ClassAbsencesApi,
+        PupilPhotoApi,
+        ExcuseApi {
   RoutingUntisApi({required this.real, required this.demo});
 
   final FullUntisApi real;
@@ -547,4 +553,53 @@ class RoutingUntisApi
       imageUrl: imageUrl,
     );
   }
+
+  ExcuseApi _excuses(String host) {
+    final Object a = _for(host);
+    if (a is! ExcuseApi) {
+      throw const UntisException(-1, 'Not supported for this account.');
+    }
+    return a;
+  }
+
+  @override
+  Future<ExcuseMeta> excuseMeta({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) => _excuses(host).excuseMeta(host: host, school: school, auth: auth);
+
+  @override
+  Future<List<ExcuseAbsence>> excuseAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required ExcuseMeta meta,
+    required ExcuseQuery query,
+  }) => _excuses(host).excuseAbsences(
+    host: host,
+    school: school,
+    auth: auth,
+    meta: meta,
+    query: query,
+  );
+
+  @override
+  Future<ExcuseAbsence?> saveExcuse({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required ExcuseMeta meta,
+    required ExcuseAbsence absence,
+    required ExcuseStatus status,
+    required String text,
+  }) => _excuses(host).saveExcuse(
+    host: host,
+    school: school,
+    auth: auth,
+    meta: meta,
+    absence: absence,
+    status: status,
+    text: text,
+  );
 }

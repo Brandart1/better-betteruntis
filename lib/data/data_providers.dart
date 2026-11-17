@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/misc.dart' show Override;
 
 import '../core/absence_summary.dart';
 import '../core/class_register.dart';
+import '../core/excuses.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/providers.dart';
@@ -15,6 +16,7 @@ import 'absence_summary_repository_impl.dart';
 import 'account_repository_impl.dart';
 import 'class_register_repository_impl.dart';
 import 'db/database.dart';
+import 'excuse_repository_impl.dart';
 import 'info_center_repository_impl.dart';
 import 'pupil_photo_repository_impl.dart';
 import 'secret_store.dart';
@@ -79,6 +81,14 @@ List<Override> dataOverrides({
   ),
   absenceSummaryRepositoryProvider.overrideWith(
     (ref) => AbsenceSummaryRepositoryImpl(
+      api: api ?? ref.watch(untisApiProvider),
+      accounts: ref.watch(accountRepositoryProvider),
+      timetables: ref.watch(timetableRepositoryProvider),
+      clock: clock,
+    ),
+  ),
+  excuseRepositoryProvider.overrideWith(
+    (ref) => ExcuseRepositoryImpl(
       api: api ?? ref.watch(untisApiProvider),
       accounts: ref.watch(accountRepositoryProvider),
       timetables: ref.watch(timetableRepositoryProvider),

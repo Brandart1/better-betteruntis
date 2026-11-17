@@ -12,6 +12,7 @@ import 'dart:typed_data';
 import '../core/absence_details.dart';
 import '../core/absence_summary.dart';
 import '../core/class_register.dart';
+import '../core/excuses.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
@@ -41,7 +42,12 @@ import 'fake_pupil_photos.dart';
 /// [maxResults] schools -> [UntisException.tooManyResults]; query `offline`
 /// -> network error.
 class FakeUntisApi
-    implements FullUntisApi, TeacherToolsApi, PupilPhotoApi, ClassAbsencesApi {
+    implements
+        FullUntisApi,
+        TeacherToolsApi,
+        PupilPhotoApi,
+        ClassAbsencesApi,
+        ExcuseApi {
   FakeUntisApi({this.latency = const Duration(milliseconds: 400)});
 
   /// Artificial delay for every call. Use [Duration.zero] in widget tests.
@@ -1201,6 +1207,143 @@ class FakeUntisApi
       }
     }
     return out;
+  }
+
+  // ---- Excuses (SAA) demo -------------------------------------------------
+
+  /// Demo excuse statuses; two of type EXCUSED so the chooser shows.
+  static const demoExcuseStatuses = [
+    ExcuseStatus(id: 3, name: 'offen', type: ExcuseStatusType.open),
+    ExcuseStatus(id: 1, name: 'entschuldigt', type: ExcuseStatusType.excused),
+    ExcuseStatus(
+      id: 4,
+      name: 'ärztliches Attest',
+      type: ExcuseStatusType.excused,
+    ),
+    ExcuseStatus(
+      id: 2,
+      name: 'nicht entschuldigt',
+      type: ExcuseStatusType.notExcused,
+    ),
+  ];
+
+  /// Pupil whose absences the demo teacher may not excuse (read-only).
+  static const demoExcuseLockedStudent = 506;
+
+  /// Every saveExcuse call, for test assertions.
+  final saveExcuseCalls = <({int absenceId, int statusId, String text})>[];
+
+  /// When set, saveExcuse throws it (tests of the error path).
+  UntisException? excuseSaveError;
+
+  @override
+  Future<ExcuseMeta> excuseMeta({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    await _delay();
+    return ExcuseMeta(
+      classes: const [ExcuseClass(id: 1, name: '9b')],
+      statuses: demoExcuseStatuses,
+      reasons: demoLookups.reasons,
+      defaultExcuseStatusId: 3,
+    );
+  }
+
+  ExcuseStatus _excuseStatusOf(ClassRegAbsence a) {
+    for (final s in demoExcuseStatuses) {
+      if (s.id == a.excuseStatusId) return s;
+    }
+    return demoExcuseStatuses[a.excused ? 1 : 0];
+  }
+
+  /// The absences of every demo lesson of class 1 in the range (like
+  /// [classAbsences]), with their excuse.
+  @override
+  Future<List<ExcuseAbsence>> excuseAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required ExcuseMeta meta,
+    required ExcuseQuery query,
+  }) async {
+    await _delay();
+    if (query.classId != 1) return const [];
+    final names = {for (final s in demoStudents) s.id: s.displayName};
+    final out = <ExcuseAbsence>[];
+    for (
+      var day = DateTime(query.start.year, query.start.month, query.start.day);
+      !day.isAfter(query.end);
+      day = DateTime(day.year, day.month, day.day + 1)
+    ) {
+      if (day.weekday > 5) continue;
+      for (var unit = 0; unit < 5; unit++) {
+        if (day.weekday == 5 && unit == 4) continue; // cancelled
+        for (final a in _absencesOf(demoPeriodId(day, unit), seed: true)) {
+          final status = _excuseStatusOf(a);
+          if (query.filter.type != null && status.type != query.filter.type) {
+            continue;
+          }
+          out.add(
+            ExcuseAbsence(
+              id: a.id,
+              studentId: a.studentId,
+              studentName: names[a.studentId] ?? '',
+              start: a.start,
+              end: a.end,
+              reasonId: a.reasonId,
+              reasonName: demoLookups.reasons[a.reasonId] ?? '',
+              text: a.text,
+              status: status,
+              excuseText: a.excuseText,
+              excuseStatusEditable: a.studentId != demoExcuseLockedStudent,
+              raw: {'id': a.id},
+            ),
+          );
+        }
+      }
+    }
+    return out;
+  }
+
+  @override
+  Future<ExcuseAbsence?> saveExcuse({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required ExcuseMeta meta,
+    required ExcuseAbsence absence,
+    required ExcuseStatus status,
+    required String text,
+  }) async {
+    await _delay();
+    final error = excuseSaveError;
+    if (error != null) throw error;
+    saveExcuseCalls.add((
+      absenceId: absence.id,
+      statusId: status.id,
+      text: text.trim(),
+    ));
+    for (final list in registerAbsences.values) {
+      final i = list.indexWhere((a) => a.id == absence.id);
+      if (i < 0) continue;
+      final a = list[i];
+      list[i] = ClassRegAbsence(
+        id: a.id,
+        studentId: a.studentId,
+        start: a.start,
+        end: a.end,
+        reasonId: a.reasonId,
+        text: a.text,
+        excused: status.type == ExcuseStatusType.excused,
+        excuseStatusId: status.id,
+        excuseStatus: status.name,
+        excuseText: text.trim(),
+        reasonName: a.reasonName,
+      );
+    }
+    return absence.withExcuse(status, text.trim());
   }
 
   /// Class register entries created in the demo, by timetable id.

@@ -10,6 +10,7 @@ import 'package:dio/dio.dart';
 import '../core/absence_details.dart';
 import '../core/absence_summary.dart';
 import '../core/class_register.dart';
+import '../core/excuses.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
@@ -17,13 +18,19 @@ import '../core/teacher_tools.dart';
 import '../core/pupil_photos.dart';
 import 'absence_summary_parsers.dart';
 import 'class_register_parsers.dart';
+import 'excuse_parsers.dart';
 import 'json_rpc.dart';
 import 'parsers.dart';
 import 'rest_teachers.dart';
 import 'teacher_tools_parsers.dart';
 
 class UntisApiImpl
-    implements FullUntisApi, PupilPhotoApi, TeacherToolsApi, ClassAbsencesApi {
+    implements
+        FullUntisApi,
+        PupilPhotoApi,
+        TeacherToolsApi,
+        ClassAbsencesApi,
+        ExcuseApi {
   /// [interceptors] are added to the default client (e.g. the web proxy
   /// rewrite); ignored when [dio] is given.
   UntisApiImpl({
@@ -980,6 +987,201 @@ class UntisApiImpl
         '${e.message})',
       );
     }
+  }
+
+  // ---- Excuses (SAA, teachers) -------------------------------------------
+  // The official app's student absence administration (lib/core/excuses.dart):
+  // bearer-token REST under /WebUntis/api/rest/view/…. A school without it
+  // (HTTP 404) falls back to master data statuses, the class absence list
+  // and JSON-RPC submitExcuse2017; remembered per school for the session.
+
+  /// `host|school` whose server answered 404 to an SAA call.
+  final _saaMissing = <String>{};
+
+  /// [UntisException.code] of [_saa] for HTTP 404.
+  static const restNotFound = -8531;
+
+  static const _classTeachersOnly =
+      'Only class teachers may excuse absences of this class';
+
+  /// Bearer REST call returning decoded JSON: 404 -> [restNotFound], 403 ->
+  /// [UntisException.noRight] (class teachers only), else [restError].
+  Future<Object?> _saa(
+    String host,
+    String school,
+    UntisCredentials auth,
+    String method,
+    String path,
+    String label, {
+    Object? body,
+  }) async {
+    final resp = await _bearerRequest(
+      host,
+      school,
+      auth,
+      method,
+      'https://$host/WebUntis/api/rest/$path',
+      label,
+      body: body,
+    );
+    final status = resp.statusCode ?? 0;
+    final text = resp.data ?? '';
+    Object? decoded;
+    try {
+      decoded = text.trim().isEmpty ? null : jsonDecode(text);
+    } on FormatException {
+      if (status >= 200 && status < 300) {
+        throw const UntisException(-1, 'Invalid JSON response');
+      }
+    }
+    if (status == 404) {
+      throw UntisException(restNotFound, 'HTTP 404 ($path)');
+    }
+    if (status == 403) {
+      final msg = parseRestErrorMessage(decoded);
+      throw UntisException(
+        UntisException.noRight,
+        msg == null
+            ? '$_classTeachersOnly (HTTP 403).'
+            : '$_classTeachersOnly ($msg).',
+      );
+    }
+    if (status < 200 || status >= 300) throw restError(status, decoded);
+    return decoded;
+  }
+
+  @override
+  Future<ExcuseMeta> excuseMeta({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    final key = '$host|$school';
+    if (!_saaMissing.contains(key)) {
+      try {
+        return parseExcuseMeta(
+          await _saa(
+            host,
+            school,
+            auth,
+            'GET',
+            'view/v1/classreg/absences/meta',
+            'REST SAA absences/meta',
+          ),
+        );
+      } on UntisException catch (e) {
+        if (e.code != restNotFound) rethrow;
+        _saaMissing.add(key);
+      }
+    }
+    final lookups = await absenceLookups(
+      host: host,
+      school: school,
+      auth: auth,
+    );
+    return excuseMetaFromLookups(lookups.statuses, lookups.reasons);
+  }
+
+  @override
+  Future<List<ExcuseAbsence>> excuseAbsences({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required ExcuseMeta meta,
+    required ExcuseQuery query,
+  }) async {
+    final key = '$host|$school';
+    if (meta.rest && !_saaMissing.contains(key)) {
+      final body = saaListPayload(query);
+      _recordRequest('REST SAA POST absences', body);
+      try {
+        return parseSaaAbsences(
+          await _saa(
+            host,
+            school,
+            auth,
+            'POST',
+            'view/v4/classreg/absences',
+            'REST SAA absences class=${query.classId}',
+            body: body,
+          ),
+          meta,
+        );
+      } on UntisException catch (e) {
+        if (e.code != restNotFound) rethrow;
+        _saaMissing.add(key);
+      }
+    }
+    final records = await classAbsences(
+      host: host,
+      school: school,
+      auth: auth,
+      klasseId: query.classId,
+      start: query.start,
+      end: DateTime(query.end.year, query.end.month, query.end.day, 23, 59),
+    );
+    return [for (final r in records) excuseAbsenceFromRecord(r, meta)];
+  }
+
+  @override
+  Future<ExcuseAbsence?> saveExcuse({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required ExcuseMeta meta,
+    required ExcuseAbsence absence,
+    required ExcuseStatus status,
+    required String text,
+  }) async {
+    final key = '$host|$school';
+    if (absence.raw.isNotEmpty && !_saaMissing.contains(key)) {
+      final body = saaSavePayload(absence, status, text);
+      _recordRequest('REST SAA PUT absences', body);
+      Object? r;
+      try {
+        r = await _saa(
+          host,
+          school,
+          auth,
+          'PUT',
+          'view/v3/classreg/absences',
+          'REST SAA save absence ${absence.id}',
+          body: body,
+        );
+      } on UntisException catch (e) {
+        if (e.code != restNotFound) rethrow;
+        _saaMissing.add(key);
+      }
+      if (!_saaMissing.contains(key)) {
+        final conflicts = saaConflicts(r);
+        if (conflicts > 0) {
+          throw UntisException(
+            -1,
+            'The server reported $conflicts '
+            '${conflicts == 1 ? 'conflict' : 'conflicts'} with other '
+            'absences of this pupil; not saved.',
+          );
+        }
+        return saaModifiedAbsence(r, absence.id, meta);
+      }
+    }
+    final params = submitExcuseParams(absence.id, status, text);
+    _recordRequest('submitExcuse2017', params);
+    final Object? r;
+    try {
+      r = await _rpc.call(rpcUrl(host, school), 'submitExcuse2017', {
+        ...params,
+        'auth': _rpc.auth(auth),
+      });
+    } on UntisException catch (e) {
+      if (e.code != UntisException.noRight) rethrow;
+      throw UntisException(e.code, '$_classTeachersOnly (${e.message}).');
+    }
+    final errors = submitExcuseErrors(r);
+    if (errors.isNotEmpty) {
+      throw UntisException(-1, 'Not saved: ${errors.join('; ')}');
+    }
+    return null;
   }
 
   // ---- Pupil photos (assumed, docs/API.md "Pupil photos") ---------------
