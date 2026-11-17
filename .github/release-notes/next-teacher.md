@@ -27,6 +27,7 @@ Teacher test build (branch `teacher`). Absences, lesson topic, previous topics a
 - Teachers: once a lesson has started (or is over), the room buttons (⟳ × +) and **Create exam** show greyed out instead of disappearing — the server seems to refuse both then. Try creating an exam on a future lesson.
 - Teachers: **late arrival, leaving early, reason and note** per pupil in "Absences & lesson topic": the clock button next to a pupil sets the part of the lesson they were missing ("Arrived now" / "Left now" while the lesson runs, or any times), an absence reason and a note. Double lessons get the matching part in each period. Uses the official app's call for changing absences; if it fails, please send the Debug log.
 - Teachers: lesson details now have **Notes for pupils** (the lesson info, as before) and **Notes for teachers**, which only teachers see and which you can edit right in the lesson sheet.
+- Teachers: **Homework** in "Absences & lesson topic": add and edit the homework you give in a lesson (text, a remark only teachers see, due date — the next lesson of the course by default — and done). Homework can't be deleted in the app; remove it in WebUntis.
 - Web test version for teachers (no sync): https://bbu-teacher-alpha.brandart1.workers.dev
 - Demo school: log in as `teacher` to try the teacher features.
 

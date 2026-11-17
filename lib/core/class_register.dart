@@ -153,9 +153,14 @@ class PeriodRegister {
     this.absences = const [],
     this.topic = '',
     this.events = const [],
+    this.homework = const [],
   });
 
   final int ttId;
+
+  /// Homework (`homeWorks`) the server sent with this lesson; may be empty
+  /// even when there is some (then only the timetable has it).
+  final List<Homework> homework;
 
   /// Class register entries ("Klassenbucheinträge") recorded in this lesson.
   final List<ClassRegEvent> events;
@@ -239,6 +244,18 @@ abstract interface class ClassRegisterApi {
     required String host,
     required String school,
     required UntisCredentials auth,
+  });
+
+  /// Creates (`homework.id` 0) or changes homework of lesson [ttId]:
+  /// submitHomeWork (from the official app). Returns the homework's id
+  /// (`submittedHomeWorkId`) when the answer has it. There is no call to
+  /// delete homework.
+  Future<int?> submitHomework({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required Homework homework,
   });
 
   /// Confirms the attendance check of [ttIds].
@@ -432,6 +449,28 @@ abstract interface class ClassRegisterRepository {
 
   /// Absence reasons by id (empty when unknown or on failure).
   Future<Map<int, String>> absenceReasons(Account account);
+
+  /// Homework of the course given in the block [periods] (assigned on its
+  /// day), from the class register data and the own timetable, by due date.
+  Future<List<Homework>> homework(Account account, List<Period> periods);
+
+  /// Day of the next lesson of the same course after the block [periods]
+  /// (same lesson id, else same subject and classes) within [weeks] weeks
+  /// of the own timetable; null when there is none.
+  Future<DateTime?> nextLessonDay(
+    Account account,
+    List<Period> periods, {
+    int weeks = 4,
+  });
+
+  /// Creates (`id` 0) or changes [homework] given in the block [periods]
+  /// (lesson id and assigned date are taken from the block) and refreshes
+  /// the own timetable weeks it shows in. Returns it with its server id.
+  Future<Homework> saveHomework(
+    Account account,
+    List<Period> periods,
+    Homework homework,
+  );
 
   /// Creates [event] in the first period of the block [periods].
   Future<void> createEvent(

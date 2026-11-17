@@ -134,6 +134,24 @@ class Homework {
   final String text;
   final String remark;
   final bool completed;
+
+  Homework copyWith({
+    int? id,
+    int? lessonId,
+    DateTime? startDate,
+    DateTime? endDate,
+    String? text,
+    String? remark,
+    bool? completed,
+  }) => Homework(
+    id: id ?? this.id,
+    lessonId: lessonId ?? this.lessonId,
+    startDate: startDate ?? this.startDate,
+    endDate: endDate ?? this.endDate,
+    text: text ?? this.text,
+    remark: remark ?? this.remark,
+    completed: completed ?? this.completed,
+  );
 }
 
 class Exam {

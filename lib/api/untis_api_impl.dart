@@ -813,6 +813,24 @@ class UntisApiImpl
   }
 
   @override
+  Future<int?> submitHomework({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required Homework homework,
+  }) async {
+    final params = submitHomeworkParams(ttId, homework);
+    _recordRequest('submitHomeWork', params);
+    final result = await _rpc.call(rpcUrl(host, school), 'submitHomeWork', {
+      ...params,
+      'auth': _rpc.auth(auth),
+    });
+    return submittedHomeworkId(result) ??
+        (homework.id > 0 ? homework.id : null);
+  }
+
+  @override
   Future<Map<int, String>> absenceReasons({
     required String host,
     required String school,

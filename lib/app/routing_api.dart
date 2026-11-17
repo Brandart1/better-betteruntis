@@ -324,6 +324,21 @@ class RoutingUntisApi
   );
 
   @override
+  Future<int?> submitHomework({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required Homework homework,
+  }) => _for(host).submitHomework(
+    host: host,
+    school: school,
+    auth: auth,
+    ttId: ttId,
+    homework: homework,
+  );
+
+  @override
   Future<Map<int, String>> absenceReasons({
     required String host,
     required String school,

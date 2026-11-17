@@ -485,6 +485,170 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
     });
   }
 
+  // ---- Homework ---------------------------------------------------------
+
+  /// The block's first period: homework is given in it.
+  static Period _first(List<Period> periods) =>
+      periods.reduce((a, b) => b.start.isBefore(a.start) ? b : a);
+
+  /// Homework of the block's course assigned on its day.
+  static bool _givenIn(Homework h, Period first) =>
+      (first.lessonId <= 0 || h.lessonId == first.lessonId) &&
+      _sameDay(h.startDate, first.start);
+
+  @override
+  Future<List<Homework>> homework(Account account, List<Period> periods) {
+    _check(account);
+    return _wrapAsync(() async {
+      if (periods.isEmpty) return const <Homework>[];
+      final first = _first(periods);
+      final ids = {for (final p in periods) p.id};
+      final byId = <int, Homework>{
+        for (final h in periods.expand((p) => p.homework)) h.id: h,
+      };
+      // The own timetable as it is now (refreshed after a save): the
+      // periods passed in may be older.
+      try {
+        final target = TimetableTarget(account.elementType, account.elementId);
+        final week = await timetables
+            .watchWeek(account, target, _mondayOf(first.start))
+            .first
+            .timeout(const Duration(seconds: 3));
+        for (final p in week) {
+          if (!ids.contains(p.id)) continue;
+          for (final h in p.homework) {
+            byId[h.id] = h;
+          }
+        }
+      } catch (_) {}
+      // The class register data is the freshest when the server sends it;
+      // without it the timetable's homework still shows.
+      try {
+        final data = await _periodData(account, ids.toList());
+        for (final r in data.periods.values) {
+          for (final h in r.homework) {
+            byId[h.id] = h;
+          }
+        }
+      } on UntisException {
+        if (byId.isEmpty) rethrow;
+      }
+      return [
+        for (final h in byId.values)
+          if (_givenIn(h, first)) h,
+      ]..sort((a, b) => a.endDate.compareTo(b.endDate));
+    });
+  }
+
+  @override
+  Future<DateTime?> nextLessonDay(
+    Account account,
+    List<Period> periods, {
+    int weeks = 4,
+  }) {
+    _check(account);
+    return _wrapAsync(() async {
+      if (periods.isEmpty) return null;
+      final ref = _first(periods);
+      final target = TimetableTarget(account.elementType, account.elementId);
+      final refMonday = _mondayOf(ref.start);
+      // A later lesson the same day (the second half of a split double
+      // lesson) is not a due date.
+      final after = DateTime(
+        ref.start.year,
+        ref.start.month,
+        ref.start.day + 1,
+      );
+      for (var w = 0; w < weeks; w++) {
+        final monday = DateTime(
+          refMonday.year,
+          refMonday.month,
+          refMonday.day + 7 * w,
+        );
+        final List<Period> week;
+        try {
+          week = await timetables
+              .watchWeek(account, target, monday)
+              .first
+              .timeout(const Duration(seconds: 20));
+        } catch (_) {
+          continue;
+        }
+        final next = [
+          for (final p in week)
+            if (!p.start.isBefore(after) &&
+                _isLesson(p) &&
+                (ref.lessonId > 0
+                    ? p.lessonId == ref.lessonId
+                    : _sameSubjectAndClasses(ref, p)))
+              p.start,
+        ];
+        if (next.isEmpty) continue;
+        final d = next.reduce((a, b) => b.isBefore(a) ? b : a);
+        return DateTime(d.year, d.month, d.day);
+      }
+      return null;
+    });
+  }
+
+  @override
+  Future<Homework> saveHomework(
+    Account account,
+    List<Period> periods,
+    Homework homework,
+  ) {
+    _check(account);
+    _checkWritable(account, periods);
+    return _wrapAsync(() async {
+      if (periods.isEmpty) {
+        throw const UntisException(-1, 'No lesson selected.');
+      }
+      if (homework.text.trim().isEmpty) {
+        throw const UntisException(-1, 'Enter the homework.');
+      }
+      final first = _first(periods);
+      final given = DateTime(
+        first.start.year,
+        first.start.month,
+        first.start.day,
+      );
+      final due = DateTime(
+        homework.endDate.year,
+        homework.endDate.month,
+        homework.endDate.day,
+      );
+      if (due.isBefore(given)) {
+        throw const UntisException(
+          -1,
+          'The due date is before the lesson it is given in.',
+        );
+      }
+      final h = homework.copyWith(
+        lessonId: first.lessonId,
+        startDate: given,
+        endDate: due,
+        text: homework.text.trim(),
+        remark: homework.remark.trim(),
+      );
+      final auth = await accounts.credentials(account.id);
+      final id = await _api.submitHomework(
+        host: account.host,
+        school: account.school.loginName,
+        auth: auth,
+        ttId: first.id,
+        homework: h,
+      );
+      // The timetable shows homework on the lessons it is given and due in.
+      final target = TimetableTarget(account.elementType, account.elementId);
+      for (final m in {_mondayOf(given), _mondayOf(due)}) {
+        try {
+          await timetables.refresh(account, target, m);
+        } catch (_) {}
+      }
+      return h.copyWith(id: id ?? h.id);
+    });
+  }
+
   /// Lessons with a class register: not cancelled, no supervision / office
   /// hour, and a class (room bookings and on-call "Aufsichtsstunden"
   /// without a class have none).

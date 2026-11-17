@@ -12,6 +12,7 @@ import '../common/large_text.dart';
 import '../timetable/timetable_utils.dart';
 import 'absence_details_sheet.dart';
 import 'absence_summary_screen.dart';
+import 'homework_editor_screen.dart';
 import 'pupil_avatar.dart';
 import 'substitute_note.dart';
 
@@ -43,7 +44,8 @@ Future<bool> openClassRegister(
 ///
 /// Also shows the topics of the course's previous lessons and the class
 /// register entries ("Klassenbucheinträge") of this and recent lessons of
-/// the course; those load lazily after the screen is up.
+/// the course, and the homework given in this lesson (added / changed on
+/// its own, not with Save); those load lazily after the screen is up.
 class ClassRegisterScreen extends ConsumerStatefulWidget {
   const ClassRegisterScreen({
     super.key,
@@ -96,6 +98,20 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
   Object? _historyError;
   Map<int, String> _reasons = const {};
 
+  /// Homework of the course given in this lesson (null while loading).
+  List<Homework>? _homework;
+  Object? _homeworkError;
+
+  /// Homework saved here, by id: shown even when the server's lists don't
+  /// have it yet.
+  final _savedHomework = <int, Homework>{};
+
+  /// Day of the course's next lesson (default due date), looked up once
+  /// when homework is first added. Failures mean no default (a week later).
+  late final Future<DateTime?> _nextLesson = Future<DateTime?>.sync(
+    () => _repo.nextLessonDay(widget.account, widget.periods),
+  ).catchError((Object _) => null);
+
   /// Only the two newest previous topics are shown until expanded, so the
   /// pupils stay near the top.
   bool _showAllTopics = false;
@@ -128,6 +144,7 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
     super.initState();
     _load();
     _loadHistory();
+    _loadHomework();
     _loadReasons();
   }
 
@@ -223,6 +240,49 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
     } catch (e) {
       if (mounted) setState(() => _historyError = e);
     }
+  }
+
+  Future<void> _loadHomework() async {
+    setState(() => _homeworkError = null);
+    try {
+      final loaded = await _repo.homework(widget.account, widget.periods);
+      final byId = {..._savedHomework, for (final h in loaded) h.id: h};
+      if (mounted) {
+        setState(
+          () =>
+              _homework = byId.values.toList()
+                ..sort((a, b) => a.endDate.compareTo(b.endDate)),
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => _homeworkError = e);
+    }
+  }
+
+  Future<void> _editHomework([Homework? initial]) async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => HomeworkEditorScreen(
+          given: _blockStart,
+          initial: initial,
+          nextLesson: initial == null ? _nextLesson : null,
+          onSubmit: (h) async {
+            final s = await _repo.saveHomework(
+              widget.account,
+              widget.periods,
+              h,
+            );
+            if (s.id > 0) _savedHomework[s.id] = s;
+          },
+        ),
+      ),
+    );
+    if (saved != true || !mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Homework saved')));
+    // Only the homework is reloaded, so unsaved absences / topic stay.
+    await _loadHomework();
   }
 
   Future<void> _loadReasons() async {
@@ -559,6 +619,7 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
           ),
         ),
         for (final s in _students) _studentTile(theme, s),
+        ..._homeworkSection(theme, muted),
         ..._entries(theme, muted),
       ],
     );
@@ -672,6 +733,86 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
       ],
     ),
   );
+
+  // ---- Homework --------------------------------------------------------
+
+  List<Widget> _homeworkSection(ThemeData theme, TextStyle? muted) {
+    final list = _homework;
+    final title = Text('Homework', style: theme.textTheme.titleMedium);
+    final button = FilledButton.tonalIcon(
+      key: const ValueKey('classreg-new-homework'),
+      onPressed: _saving || _readOnly ? null : _editHomework,
+      icon: const Icon(Icons.add),
+      label: const Text('Add homework'),
+    );
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 4),
+        child: isLargeText(context)
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [title, const SizedBox(height: 8), button],
+              )
+            : Row(
+                children: [
+                  Expanded(child: title),
+                  button,
+                ],
+              ),
+      ),
+      if (_homeworkError != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+          child: Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            children: [
+              Text(
+                'Could not load the homework: ${_message(_homeworkError!)}',
+                style: muted?.copyWith(color: theme.colorScheme.error),
+              ),
+              TextButton(
+                key: const ValueKey('classreg-homework-retry'),
+                onPressed: _loadHomework,
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        )
+      else if (list == null)
+        const Padding(
+          key: ValueKey('classreg-homework-loading'),
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: LinearProgressIndicator(),
+        )
+      else if (list.isEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+          child: Text('No homework given in this lesson.', style: muted),
+        )
+      else
+        for (final h in list) _homeworkTile(h),
+    ];
+  }
+
+  Widget _homeworkTile(Homework h) {
+    final lines = [
+      ['Due ${_date(h.endDate)}', if (h.completed) 'done'].join(' · '),
+      if (h.remark.trim().isNotEmpty) 'Remark: ${h.remark.trim()}',
+    ].join('\n');
+    return ListTile(
+      key: ValueKey('classreg-homework-${h.id}'),
+      leading: isLargeText(context)
+          ? null
+          : Icon(h.completed ? Icons.task_alt : Icons.assignment_outlined),
+      title: Text(h.text),
+      subtitle: Text(lines),
+      trailing: isLargeText(context) || _readOnly
+          ? null
+          : const Icon(Icons.edit_outlined, size: 18),
+      onTap: _saving || _readOnly ? null : () => _editHomework(h),
+    );
+  }
 
   // ---- Class register entries ------------------------------------------
 

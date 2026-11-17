@@ -2,6 +2,7 @@ import 'package:better_betteruntis/api/class_register_parsers.dart';
 import 'package:better_betteruntis/api/untis_api_impl.dart';
 import 'package:better_betteruntis/core/class_register.dart';
 import 'package:better_betteruntis/core/interfaces.dart';
+import 'package:better_betteruntis/core/models.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -204,6 +205,103 @@ void main() {
       );
       expect(method(), 'submitAbsencesChecked2017');
       expect(params()['ttIds'], [5, 6]);
+    });
+
+    test('submitHomeWork: request shape and answer', () async {
+      adapter = Adapter(
+        (r) => rpc({'success': true, 'submittedHomeWorkId': 77}),
+      );
+      api = UntisApiImpl(dio: Dio()..httpClientAdapter = adapter);
+      final id = await api.submitHomework(
+        host: 'h',
+        school: 's',
+        auth: creds,
+        ttId: 5,
+        homework: Homework(
+          id: 0,
+          lessonId: 42,
+          startDate: DateTime(2026, 11, 10),
+          endDate: DateTime(2026, 11, 17),
+          text: ' Page 12 ',
+          remark: ' check ',
+        ),
+      );
+      expect(id, 77);
+      expect(method(), 'submitHomeWork');
+      expect(params()['ttId'], 5);
+      expect(params()['auth'], isA<Map>());
+      expect(params()['homeWork'], {
+        'id': 0,
+        'lessonId': 42,
+        'startDate': '2026-11-10',
+        'endDate': '2026-11-17',
+        'text': 'Page 12',
+        'remark': 'check',
+        'completed': false,
+      });
+      final logged = api.debugLog.firstWhere(
+        (e) => e.method == 'submitHomeWork request body',
+      );
+      expect(logged.json, contains('"lessonId":42'));
+      expect(logged.json, isNot(contains('otp')));
+
+      // An edit keeps its id when the answer has none.
+      adapter = Adapter((r) => rpc({'success': true}));
+      api = UntisApiImpl(dio: Dio()..httpClientAdapter = adapter);
+      final h = Homework(
+        id: 9,
+        lessonId: 42,
+        startDate: DateTime(2026, 11, 10),
+        endDate: DateTime(2026, 11, 17),
+        text: 'x',
+        completed: true,
+      );
+      expect(
+        await api.submitHomework(
+          host: 'h',
+          school: 's',
+          auth: creds,
+          ttId: 5,
+          homework: h,
+        ),
+        9,
+      );
+      expect((params()['homeWork'] as Map)['completed'], isTrue);
+      expect((params()['homeWork'] as Map)['id'], 9);
+
+      adapter = Adapter((r) => rpc({'success': false}));
+      api = UntisApiImpl(dio: Dio()..httpClientAdapter = adapter);
+      await expectLater(
+        api.submitHomework(
+          host: 'h',
+          school: 's',
+          auth: creds,
+          ttId: 5,
+          homework: h,
+        ),
+        throwsA(isA<UntisException>()),
+      );
+    });
+
+    test('period data carries homework', () {
+      final d = parsePeriodData({
+        'dataByTTId': {
+          '5': {
+            'homeWorks': [
+              {
+                'id': 3,
+                'lessonId': 42,
+                'startDate': 20261110,
+                'endDate': 20261117,
+                'text': 'Page 12',
+              },
+            ],
+          },
+        },
+      });
+      final h = d.periods[5]!.homework.single;
+      expect(h.id, 3);
+      expect(h.endDate, DateTime(2026, 11, 17));
     });
 
     test('empty id lists send nothing', () async {

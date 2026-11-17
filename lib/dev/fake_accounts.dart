@@ -456,6 +456,7 @@ class FakeUntisApi
                   ),
             substitutionText: substituted ? 'Vertretung' : '',
             infoText: periodInfos[ttId] ?? '',
+            homework: _homeworkOn(p.$1, day),
           ),
         );
       }
@@ -954,6 +955,10 @@ class FakeUntisApi
                     ? 'Substitute: worksheet on percentages'
                     : (_seededTopic(id) ? _demoTopic(id) : '')),
             events: _demoEvents(id),
+            homework: [
+              for (final h in submittedHomework.values)
+                if (h.ttId == id) h.homework,
+            ],
           ),
       },
       students: {for (final s in demoStudents) s.id: s},
@@ -1007,6 +1012,41 @@ class FakeUntisApi
       final i = list.indexWhere((a) => a.id == absence.id);
       if (i >= 0) list[i] = absence;
     }
+  }
+
+  /// Homework saved in the demo by id, with the lesson it was given in.
+  final submittedHomework = <int, ({int ttId, Homework homework})>{};
+
+  /// Every submitHomework call, for test assertions.
+  final submitHomeworkCalls = <({int ttId, Homework homework})>[];
+  var _nextHomeworkId = 9500;
+
+  @override
+  Future<int?> submitHomework({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required int ttId,
+    required Homework homework,
+  }) async {
+    await _delay();
+    submitHomeworkCalls.add((ttId: ttId, homework: homework));
+    final id = homework.id > 0 ? homework.id : _nextHomeworkId++;
+    submittedHomework[id] = (ttId: ttId, homework: homework.copyWith(id: id));
+    return id;
+  }
+
+  /// Demo homework of lesson [lessonId] given or due on [day] (the
+  /// timetable shows it on both lessons).
+  List<Homework> _homeworkOn(int lessonId, DateTime day) {
+    bool same(DateTime d) =>
+        d.year == day.year && d.month == day.month && d.day == day.day;
+    return [
+      for (final e in submittedHomework.values)
+        if (e.homework.lessonId == lessonId &&
+            (same(e.homework.startDate) || same(e.homework.endDate)))
+          e.homework,
+    ];
   }
 
   @override

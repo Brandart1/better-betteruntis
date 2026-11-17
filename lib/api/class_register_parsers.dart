@@ -5,6 +5,8 @@
 library;
 
 import '../core/class_register.dart';
+import '../core/interfaces.dart';
+import '../core/models.dart';
 import 'parsers.dart';
 import 'teacher_tools_parsers.dart';
 
@@ -239,6 +241,10 @@ PeriodRegister parsePeriodRegister(int ttId, Map<String, Object?> j) =>
           .toList(),
       topic: _topic(j['topic'] ?? j['lessonTopic']),
       events: _events(_eventList(j), ttId: _int(j['ttId']) ?? ttId),
+      homework: _maps(j['homeWorks'] ?? j['homeworks'])
+          .map(parseHomework)
+          .whereType<Homework>()
+          .toList(),
     );
 
 /// getPeriodData2017 result:
@@ -264,6 +270,7 @@ PeriodRegisterData parsePeriodData(Object? raw) {
       absences: r.absences,
       topic: r.topic,
       events: [...r.events, ev],
+      homework: r.homework,
     );
   }
   return PeriodRegisterData(
@@ -312,4 +319,32 @@ Map<String, Object?> editAbsenceParams(int ttId, ClassRegAbsence a) => {
 int absenceConflicts(Object? result) {
   final r = result is Map ? result['result'] ?? result : null;
   return r is Map ? _maps(r['conflicts']).length : 0;
+}
+
+/// submitHomeWork params (from the official app): the lesson [ttId] it is
+/// given in and the homework with dates as yyyy-MM-dd, id 0 for new.
+Map<String, Object?> submitHomeworkParams(int ttId, Homework h) => {
+  'ttId': ttId,
+  'homeWork': {
+    'id': h.id,
+    'lessonId': h.lessonId,
+    'startDate': formatDate(h.startDate),
+    'endDate': formatDate(h.endDate),
+    'text': h.text.trim(),
+    'remark': h.remark.trim(),
+    'completed': h.completed,
+  },
+};
+
+/// The id of a submitHomeWork answer (`{success, submittedHomeWorkId}`),
+/// null when it has none. Throws when the server says it was not saved.
+int? submittedHomeworkId(Object? result) {
+  final j = _map(result);
+  if (j['success'] case final ok? when !_bool(ok)) {
+    throw const UntisException(0, 'The server did not save the homework.');
+  }
+  return switch (_int(j['submittedHomeWorkId'] ?? j['id'])) {
+    final id? when id > 0 => id,
+    _ => null,
+  };
 }

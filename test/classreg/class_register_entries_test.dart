@@ -497,6 +497,9 @@ void main() {
         -300,
         scrollable: listScroll,
       );
+      // Built is not enough: it may still be under the app bar.
+      await t.ensureVisible(find.byKey(const ValueKey('classreg-new-entry')));
+      await t.pumpAndSettle();
       await t.tap(find.byKey(const ValueKey('classreg-new-entry')));
       await t.pumpAndSettle();
       expect(find.text('New entry'), findsOneWidget);
