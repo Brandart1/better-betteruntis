@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:better_betteruntis/app/apk_update.dart';
 import 'package:better_betteruntis/app/app_update.dart';
@@ -11,65 +10,31 @@ import 'package:better_betteruntis/ui/infocenter/info_providers.dart';
 import 'package:better_betteruntis/ui/shell/app_drawer.dart';
 import 'package:better_betteruntis/ui/shell/update_check.dart';
 import 'package:better_betteruntis/ui/timetable/timetable_screen.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-class _FakeInstaller implements ApkInstaller {
-  bool allowed = true;
-  final results = <InstallResult>[];
-  final installed = <String>[];
-  int settingsOpened = 0;
-  Completer<InstallResult>? hold;
-
-  @override
-  Future<bool> canRequestInstalls() async => allowed;
-
-  @override
-  Future<void> openInstallSettings() async => settingsOpened++;
-
-  @override
-  Future<InstallResult> install(File apk) {
-    installed.add(apk.path);
-    if (hold != null) return hold!.future;
-    return Future.value(
-      results.isEmpty
-          ? const InstallResult(InstallStatus.success)
-          : results.removeAt(0),
-    );
-  }
-}
-
-/// Never touches disk or network; the test drives progress and completion.
-class _FakeDownloader extends ApkDownloader {
-  _FakeDownloader()
-    : super(dio: Dio(), directory: () async => Directory('/nonexistent'));
-
+/// Never touches the platform; the test drives the events.
+class _FakeUpdater implements ApkUpdater {
   int cleanups = 0;
-  final downloads = <ReleaseAsset>[];
-  Completer<File>? pending;
-  void Function(int, int)? progress;
-  Object? error;
+  int cancels = 0;
+  final started = <ReleaseAsset>[];
+  StreamController<ApkUpdateEvent>? events;
+
+  @override
+  Stream<ApkUpdateEvent> start(ReleaseAsset apk) {
+    started.add(apk);
+    return (events = StreamController<ApkUpdateEvent>()).stream;
+  }
+
+  @override
+  Future<void> cancel() async {
+    cancels++;
+    events?.add(const ApkUpdateEvent(ApkUpdateStage.canceled));
+  }
 
   @override
   Future<void> cleanup() async => cleanups++;
-
-  @override
-  Future<File> download(
-    ReleaseAsset apk, {
-    void Function(int received, int total)? onProgress,
-    CancelToken? cancel,
-  }) {
-    downloads.add(apk);
-    if (error != null) return Future.error(error!);
-    final c = pending = Completer<File>();
-    progress = onProgress;
-    cancel?.whenCancel.then((e) {
-      if (!c.isCompleted) c.completeError(e);
-    });
-    return c.future;
-  }
 }
 
 void main() {
@@ -77,14 +42,12 @@ void main() {
 
   late int fetches;
   late List<Uri> opened;
-  late _FakeInstaller installer;
-  late _FakeDownloader downloader;
+  late _FakeUpdater updater;
 
   setUp(() {
     fetches = 0;
     opened = [];
-    installer = _FakeInstaller();
-    downloader = _FakeDownloader();
+    updater = _FakeUpdater();
   });
 
   Future<void> pump(
@@ -109,8 +72,7 @@ void main() {
             return true;
           }),
           inAppUpdateSupportedProvider.overrideWithValue(inApp),
-          apkInstallerProvider.overrideWithValue(installer),
-          apkDownloaderProvider.overrideWithValue(downloader),
+          apkUpdaterProvider.overrideWithValue(updater),
         ],
         child: MaterialApp(
           navigatorKey: key,
@@ -222,23 +184,38 @@ void main() {
     );
     final now = find.byKey(const ValueKey('update-now'));
 
-    testWidgets('Update now: progress, then install of the download', (
-      tester,
-    ) async {
+    testWidgets('Update now: progress, then installing', (tester) async {
       await pump(tester, latest: withApk);
-      expect(downloader.cleanups, 1, reason: 'old APKs removed at start');
+      expect(updater.cleanups, 1, reason: 'old APKs removed at start');
       expect(find.byKey(const ValueKey('update-open')), findsOneWidget);
       await tester.tap(now);
       await tester.pump();
-      expect(downloader.downloads, [apk]);
+      expect(updater.started, [apk]);
       expect(find.byKey(const ValueKey('update-progress')), findsOneWidget);
-      downloader.progress!(40, 100);
+      updater.events!.add(
+        const ApkUpdateEvent(ApkUpdateStage.downloading, progress: 0.4),
+      );
       await tester.pump();
       expect(find.text('Downloading… 40 %'), findsOneWidget);
 
-      downloader.pending!.complete(File('/cache/updates/x.apk'));
+      updater.events!.add(const ApkUpdateEvent(ApkUpdateStage.installing));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('update-installing')), findsOneWidget);
+      await updater.events!.close();
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('update-installing')),
+        findsOneWidget,
+        reason: 'the stream ending after installing is not an error',
+      );
+    });
+
+    testWidgets('installed: dialog closes', (tester) async {
+      await pump(tester, latest: withApk);
+      await tester.tap(now);
+      await tester.pump();
+      updater.events!.add(const ApkUpdateEvent(ApkUpdateStage.done));
       await tester.pumpAndSettle();
-      expect(installer.installed, ['/cache/updates/x.apk']);
       expect(find.byKey(const ValueKey('update-dialog')), findsNothing);
     });
 
@@ -250,74 +227,54 @@ void main() {
       await tester.pump();
       await tester.tap(find.byKey(const ValueKey('update-cancel')));
       await tester.pumpAndSettle();
+      expect(updater.cancels, 1);
       expect(find.byKey(const ValueKey('update-progress')), findsNothing);
       expect(find.text('Update now'), findsOneWidget);
-      expect(installer.installed, isEmpty);
     });
 
-    testWidgets('waiting for the system installer shows a hint', (
+    testWidgets('not allowed to install: explains, Try again restarts', (
       tester,
     ) async {
-      installer.hold = Completer();
       await pump(tester, latest: withApk);
       await tester.tap(now);
       await tester.pump();
-      downloader.pending!.complete(File('/x.apk'));
-      await tester.pump();
-      await tester.pump();
-      expect(find.byKey(const ValueKey('update-installing')), findsOneWidget);
-      installer.hold!.complete(const InstallResult(InstallStatus.aborted));
+      updater.events!.add(const ApkUpdateEvent(ApkUpdateStage.needsPermission));
       await tester.pumpAndSettle();
-      expect(find.text('Update now'), findsOneWidget, reason: 'aborted');
-    });
-
-    testWidgets('not allowed to install: opens settings and explains', (
-      tester,
-    ) async {
-      installer.allowed = false;
-      await pump(tester, latest: withApk);
-      await tester.tap(now);
-      await tester.pumpAndSettle();
-      expect(installer.settingsOpened, 1);
-      expect(downloader.downloads, isEmpty);
       expect(
         find.byKey(const ValueKey('update-needs-permission')),
         findsOneWidget,
       );
-      // Allowed now: Try again goes through.
-      installer.allowed = true;
       await tester.tap(find.text('Try again'));
       await tester.pump();
-      expect(downloader.downloads, [apk]);
+      expect(updater.started, [apk, apk]);
     });
 
-    testWidgets('download error: message and GitHub fallback', (tester) async {
-      downloader.error = const ApkUpdateException(
-        'The download is damaged (checksum mismatch).',
-      );
+    testWidgets('checksum error: message and GitHub fallback', (tester) async {
       await pump(tester, latest: withApk);
       await tester.tap(now);
+      await tester.pump();
+      updater.events!.add(
+        const ApkUpdateEvent(
+          ApkUpdateStage.failed,
+          message: 'The download is damaged (checksum mismatch).',
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.textContaining('checksum mismatch'), findsOneWidget);
-      expect(installer.installed, isEmpty);
       await tester.tap(find.byKey(const ValueKey('update-open')));
       await tester.pumpAndSettle();
       expect(opened, [latestReleasePage]);
     });
 
-    testWidgets('install failure is reported', (tester) async {
-      installer.results.add(
-        const InstallResult(InstallStatus.failure, 'INSTALL_FAILED_CONFLICT'),
-      );
+    testWidgets('a stream that ends while downloading is a failure', (
+      tester,
+    ) async {
       await pump(tester, latest: withApk);
       await tester.tap(now);
       await tester.pump();
-      downloader.pending!.complete(File('/x.apk'));
+      await updater.events!.close();
       await tester.pumpAndSettle();
-      expect(
-        find.textContaining('Installation failed: INSTALL_FAILED_CONFLICT'),
-        findsOneWidget,
-      );
+      expect(find.byKey(const ValueKey('update-error')), findsOneWidget);
     });
 
     testWidgets('iOS and other platforms keep the plain dialog', (
@@ -325,7 +282,7 @@ void main() {
     ) async {
       await pump(tester, latest: withApk, inApp: false);
       expect(now, findsNothing);
-      expect(downloader.cleanups, 0);
+      expect(updater.cleanups, 0);
       expect(find.text('Open GitHub'), findsOneWidget);
     });
 

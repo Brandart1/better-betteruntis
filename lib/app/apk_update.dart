@@ -1,180 +1,199 @@
-/// Android in-app updater: downloads the release APK from GitHub, verifies it
-/// and hands it to the system installer (PackageInstaller session in
-/// MainActivity.kt). Only betas and stables reach this: see [parseRelease].
+/// Android in-app updater: downloads the release APK from GitHub, verifies
+/// its SHA-256 digest and hands it to the system installer, all done by the
+/// `ota_update` plugin. Only betas and stables reach this: see [parseRelease].
 library;
 
+import 'dart:async';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ota_update/ota_update.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app_update.dart';
 
-/// Download or verification failed; [message] is shown to the user.
-class ApkUpdateException implements Exception {
-  const ApkUpdateException(this.message);
-  final String message;
+/// Where an update is in its life; see [ApkUpdateEvent].
+enum ApkUpdateStage {
+  /// Downloading; [ApkUpdateEvent.progress] is 0..1 or null when unknown.
+  downloading,
 
-  @override
-  String toString() => message;
-}
+  /// Downloaded and verified; the system installer is (being) opened. The
+  /// stream ends here: the app is replaced if the user confirms.
+  installing,
 
-/// Downloads release APKs into `<cache>/updates/`, keeping only the newest.
-class ApkDownloader {
-  ApkDownloader({required this.dio, required this.directory});
+  /// The system refused because this app may not install unknown apps (the
+  /// user must allow it in the settings first).
+  needsPermission,
 
-  final Dio dio;
+  /// Download, verification or installation failed; [ApkUpdateEvent.message]
+  /// is shown to the user.
+  failed,
 
-  /// Where APKs go (the app's cache dir, which the installer can read).
-  final Future<Directory> Function() directory;
+  /// Cancelled by [ApkUpdater.cancel].
+  canceled,
 
-  Future<Directory> _dir() async {
-    final d = await directory();
-    await d.create(recursive: true);
-    return d;
-  }
-
-  /// Deletes every downloaded APK (and partial download).
-  Future<void> cleanup() async {
-    try {
-      final d = await directory();
-      if (!await d.exists()) return;
-      await for (final f in d.list()) {
-        if (f is File) await f.delete();
-      }
-    } catch (_) {
-      // Best effort: a leftover file only costs cache space.
-    }
-  }
-
-  /// Downloads [apk], reporting `(received, total)`. Throws
-  /// [ApkUpdateException] on failure and [DioException] (type cancel) when
-  /// [cancel] fires.
-  Future<File> download(
-    ReleaseAsset apk, {
-    void Function(int received, int total)? onProgress,
-    CancelToken? cancel,
-  }) async {
-    await cleanup();
-    final dir = await _dir();
-    final name = apk.name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-    final file = File('${dir.path}/$name');
-    try {
-      await dio.downloadUri(
-        apk.url,
-        file.path,
-        cancelToken: cancel,
-        deleteOnError: true,
-        onReceiveProgress: (r, t) => onProgress?.call(r, t > 0 ? t : apk.size),
-        options: Options(
-          headers: {'User-Agent': 'better-betteruntis'},
-          receiveTimeout: const Duration(seconds: 60),
-        ),
-      );
-    } on DioException catch (e) {
-      if (CancelToken.isCancel(e)) rethrow;
-      throw const ApkUpdateException(
-        'Download failed. Check your connection and try again.',
-      );
-    }
-    try {
-      await verifyApk(file, apk);
-    } catch (_) {
-      if (await file.exists()) await file.delete();
-      rethrow;
-    }
-    return file;
-  }
-}
-
-/// Checks [file] against the size and (when GitHub provides one) the SHA-256
-/// digest of [apk]. Throws [ApkUpdateException] on a mismatch.
-Future<void> verifyApk(File file, ReleaseAsset apk) async {
-  final length = await file.length();
-  if (length != apk.size) {
-    throw ApkUpdateException(
-      'The download is incomplete ($length of ${apk.size} bytes).',
-    );
-  }
-  final expected = apk.sha256;
-  if (expected == null) return;
-  final actual = (await sha256.bind(file.openRead()).first).toString();
-  if (actual != expected) {
-    throw const ApkUpdateException(
-      'The download is damaged (checksum mismatch).',
-    );
-  }
-}
-
-/// Final outcome of an installation attempt.
-enum InstallStatus {
   /// Installed (rarely seen: updating ourselves restarts the app).
-  success,
-
-  /// The user cancelled the system dialog.
-  aborted,
-
-  /// Installation is not allowed yet: the user must allow this app to
-  /// install unknown apps first.
-  notAllowed,
-
-  /// Any other failure (conflict, incompatible, storage, ...).
-  failure,
+  done,
 }
 
-class InstallResult {
-  const InstallResult(this.status, [this.message]);
-  final InstallStatus status;
+class ApkUpdateEvent {
+  const ApkUpdateEvent(this.stage, {this.progress, this.message});
+  final ApkUpdateStage stage;
+  final double? progress;
   final String? message;
 }
 
-/// The system installer; faked in tests.
-abstract class ApkInstaller {
-  /// Whether this app may install packages (Android 8+: "Install unknown
-  /// apps" for this app).
-  Future<bool> canRequestInstalls();
+/// Downloads and installs a release APK; faked in tests.
+abstract class ApkUpdater {
+  /// Starts the update. The stream emits [ApkUpdateEvent]s and ends after
+  /// the last one (installing, failed, canceled or done).
+  Stream<ApkUpdateEvent> start(ReleaseAsset apk);
 
-  /// Opens the "Install unknown apps" settings page for this app.
-  Future<void> openInstallSettings();
+  /// Stops a running download.
+  Future<void> cancel();
 
-  /// Installs [apk]. Completes once Android reports a final status; the
-  /// confirmation dialog (if any) is shown by the native side.
-  Future<InstallResult> install(File apk);
+  /// Deletes APKs left over from earlier updates.
+  Future<void> cleanup();
 }
 
-/// [ApkInstaller] over the `better_betteruntis/updater` MethodChannel.
-class MethodChannelApkInstaller implements ApkInstaller {
-  const MethodChannelApkInstaller();
+/// Maps an `ota_update` event onto the app's [ApkUpdateEvent].
+ApkUpdateEvent mapOtaEvent(OtaEvent e) {
+  final v = e.value;
+  switch (e.status) {
+    case OtaStatus.DOWNLOADING:
+      final percent = int.tryParse(v ?? '');
+      return ApkUpdateEvent(
+        ApkUpdateStage.downloading,
+        progress: percent == null ? null : (percent / 100).clamp(0.0, 1.0),
+      );
+    case OtaStatus.INSTALLING:
+      return const ApkUpdateEvent(ApkUpdateStage.installing);
+    case OtaStatus.INSTALLATION_DONE:
+      return const ApkUpdateEvent(ApkUpdateStage.done);
+    case OtaStatus.PERMISSION_NOT_GRANTED_ERROR:
+      return const ApkUpdateEvent(ApkUpdateStage.needsPermission);
+    case OtaStatus.CANCELED:
+      return const ApkUpdateEvent(ApkUpdateStage.canceled);
+    case OtaStatus.CHECKSUM_ERROR:
+      return const ApkUpdateEvent(
+        ApkUpdateStage.failed,
+        message: 'The download is damaged (checksum mismatch).',
+      );
+    case OtaStatus.DOWNLOAD_ERROR:
+      return const ApkUpdateEvent(
+        ApkUpdateStage.failed,
+        message: 'Download failed. Check your connection and try again.',
+      );
+    case OtaStatus.ALREADY_RUNNING_ERROR:
+      return const ApkUpdateEvent(
+        ApkUpdateStage.failed,
+        message: 'An update is already running.',
+      );
+    case OtaStatus.INSTALLATION_ERROR:
+      return ApkUpdateEvent(
+        ApkUpdateStage.failed,
+        message: 'Installation failed${v == null ? '' : ': $v'}.',
+      );
+    case OtaStatus.INTERNAL_ERROR:
+      return ApkUpdateEvent(
+        ApkUpdateStage.failed,
+        message: 'Update failed${v == null ? '' : ': $v'}.',
+      );
+  }
+}
 
-  static const _channel = MethodChannel('better_betteruntis/updater');
+/// Starts an `ota_update` run; replaceable in tests.
+typedef OtaRunner = Stream<OtaEvent> Function({
+  required String url,
+  required String filename,
+  required String? sha256,
+  required Map<String, String> headers,
+});
+
+Stream<OtaEvent> _runOta({
+  required String url,
+  required String filename,
+  required String? sha256,
+  required Map<String, String> headers,
+}) => OtaUpdate().execute(
+  url,
+  destinationFilename: filename,
+  sha256checksum: sha256,
+  headers: headers,
+);
+
+Future<void> _defaultCancel() => OtaUpdate().cancel();
+
+/// The plugin downloads to `<files>/ota_update/`; older app versions used
+/// `<cache>/updates/`.
+Future<List<Directory>> _defaultLeftovers() async => [
+  Directory('${(await getApplicationSupportDirectory()).path}/ota_update'),
+  Directory('${(await getTemporaryDirectory()).path}/updates'),
+];
+
+/// [ApkUpdater] over the `ota_update` plugin (Android only).
+class OtaApkUpdater implements ApkUpdater {
+  const OtaApkUpdater({
+    this.run = _runOta,
+    this.cancelOta = _defaultCancel,
+    this.leftoverDirectories = _defaultLeftovers,
+  });
+
+  final OtaRunner run;
+  final Future<void> Function() cancelOta;
+  final Future<List<Directory>> Function() leftoverDirectories;
 
   @override
-  Future<bool> canRequestInstalls() async =>
-      await _channel.invokeMethod<bool>('canRequestInstalls') ?? false;
-
-  @override
-  Future<void> openInstallSettings() =>
-      _channel.invokeMethod<void>('openInstallSettings');
-
-  @override
-  Future<InstallResult> install(File apk) async {
+  Stream<ApkUpdateEvent> start(ReleaseAsset apk) {
+    // The plugin refuses a '/' in the name.
+    final name = apk.name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    final Stream<OtaEvent> events;
     try {
-      final res = await _channel.invokeMapMethod<String, Object?>('install', {
-        'path': apk.path,
-      });
-      final message = res?['message'] as String?;
-      return switch (res?['status']) {
-        'success' => InstallResult(InstallStatus.success, message),
-        'aborted' => InstallResult(InstallStatus.aborted, message),
-        'notAllowed' => InstallResult(InstallStatus.notAllowed, message),
-        _ => InstallResult(InstallStatus.failure, message),
-      };
-    } on PlatformException catch (e) {
-      return InstallResult(InstallStatus.failure, e.message ?? e.code);
+      events = run(
+        url: apk.url.toString(),
+        filename: name,
+        // The plugin verifies the digest after the download and does not
+        // install on a mismatch.
+        sha256: apk.sha256,
+        headers: const {'User-Agent': 'better-betteruntis'},
+      );
+    } catch (e) {
+      return Stream.value(
+        ApkUpdateEvent(ApkUpdateStage.failed, message: 'Update failed: $e.'),
+      );
+    }
+    return events
+        .map(mapOtaEvent)
+        .transform(
+          StreamTransformer.fromHandlers(
+            handleError: (e, st, sink) => sink.add(
+              ApkUpdateEvent(
+                ApkUpdateStage.failed,
+                message: 'Update failed: $e.',
+              ),
+            ),
+          ),
+        );
+  }
+
+  @override
+  Future<void> cancel() async {
+    try {
+      await cancelOta();
+    } catch (_) {
+      // Nothing running.
+    }
+  }
+
+  @override
+  Future<void> cleanup() async {
+    try {
+      for (final d in await leftoverDirectories()) {
+        if (await d.exists()) await d.delete(recursive: true);
+      }
+    } catch (_) {
+      // Best effort: a leftover file only costs storage.
     }
   }
 }
@@ -184,14 +203,4 @@ final inAppUpdateSupportedProvider = Provider<bool>(
   (ref) => !kIsWeb && defaultTargetPlatform == TargetPlatform.android,
 );
 
-final apkInstallerProvider = Provider<ApkInstaller>(
-  (ref) => const MethodChannelApkInstaller(),
-);
-
-final apkDownloaderProvider = Provider<ApkDownloader>(
-  (ref) => ApkDownloader(
-    dio: Dio(BaseOptions(connectTimeout: const Duration(seconds: 15))),
-    directory: () async =>
-        Directory('${(await getTemporaryDirectory()).path}/updates'),
-  ),
-);
+final apkUpdaterProvider = Provider<ApkUpdater>((ref) => OtaApkUpdater());
