@@ -39,6 +39,7 @@ Teacher test build (branch `teacher`). Absences, lesson topic, previous topics a
 - Demo school: log in as `teacher` to try the teacher features.
 
 ### Fixed
+- Custom homework, exams and lesson notes: the hint under the text field (e.g. "Only for you, not sent to the school.") wraps onto a second line on small screens instead of being cut off with "…".
 - Teachers: your own timetable shows the class (and room) of each lesson again instead of your own name.
 - Teachers: removing the notes for pupils no longer removes the notes for teachers too.
 - Teachers: if the school server refuses a request for its rate limit, it is repeated after a short wait, and the lesson screen asks for its data only once.
