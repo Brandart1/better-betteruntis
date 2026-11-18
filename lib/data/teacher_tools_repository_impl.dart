@@ -368,8 +368,16 @@ class TeacherToolsRepositoryImpl implements TeacherToolsRepository {
     try {
       _check(account);
       final auth = await accounts.credentials(account.id);
-      // The official app's master data has no exam types: an exam's type is
-      // a plain string, so offer those of the exams we can load.
+      // The school's types with their ids (the website sends the id; the
+      // Untis Platform call may refuse a teacher's token) …
+      final official = await _api.examTypes(
+        host: account.host,
+        school: account.school.loginName,
+        auth: auth,
+      );
+      if (official.isNotEmpty) return _examTypes[account.id] = official;
+      // … else the type names of the exams we can load (the official app's
+      // master data has none: an exam's type is a plain string there).
       final types = await _typesFromExams(account, auth);
       if (types.isEmpty) return const [];
       return _examTypes[account.id] = types;

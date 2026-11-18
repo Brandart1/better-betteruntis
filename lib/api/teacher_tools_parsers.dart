@@ -228,8 +228,15 @@ Map<String, Object?> examPayload(NewExam e) {
   final end = _localSeconds(e.end);
   return {
     'examId': -1,
+    // Like the website: the id with the names (seen 2026-11-18).
     'examType': e.examTypeId != null
-        ? {'id': e.examTypeId}
+        ? {
+            'id': e.examTypeId,
+            if (e.examType.trim().isNotEmpty) ...{
+              'shortName': e.examType.trim(),
+              'longName': e.examType.trim(),
+            },
+          }
         : {
             'id': -1,
             'shortName': e.examType.trim(),

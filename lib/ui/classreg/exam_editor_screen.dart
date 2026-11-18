@@ -275,6 +275,18 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
 
   String get _typeName => _type.text.trim();
 
+  int? get _typeId {
+    final typed = _typeName.toLowerCase();
+    for (final t in _types) {
+      if (t.id > 0 &&
+          (t.displayName.toLowerCase() == typed ||
+              t.name.toLowerCase() == typed)) {
+        return t.id;
+      }
+    }
+    return null;
+  }
+
   bool _canSend(List<TimeUnit> units) =>
       !_sending &&
       _span(units) != null &&
@@ -415,7 +427,9 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
       await _repo.createExam(
         widget.account,
         NewExam(
-          // An exam's type is a plain string: no id.
+          // The school's id when the typed name is one of its types (only
+          // ids from the server are positive), else just the name.
+          examTypeId: _typeId,
           examType: _typeName,
           name: _name.text.trim(),
           text: _text.text.trim(),

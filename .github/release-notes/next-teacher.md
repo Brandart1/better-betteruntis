@@ -39,6 +39,7 @@ Teacher test build (branch `teacher`). Absences, lesson topic, previous topics a
 - Demo school: log in as `teacher` to try the teacher features.
 
 ### Fixed
+- Teachers: **Create exam** offers the school's own exam types again when the server gives them to the app, and then sends the type's id like the WebUntis website does (the server may refuse an exam with only a type name). Otherwise the types of existing exams are offered as before.
 - Custom homework, exams and lesson notes: the hint under the text field (e.g. "Only for you, not sent to the school.") wraps onto a second line on small screens instead of being cut off with "…".
 - Teachers: your own timetable shows the class (and room) of each lesson again instead of your own name.
 - Teachers: removing the notes for pupils no longer removes the notes for teachers too.

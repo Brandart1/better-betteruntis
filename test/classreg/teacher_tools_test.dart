@@ -331,6 +331,20 @@ void main() {
         },
       ]);
       expect((p['examType'] as Map)['shortName'], 'Test');
+      // With a known type id: the id plus the names, like the website.
+      final withId = examPayload(
+        NewExam(
+          examTypeId: 2,
+          examType: 'Test',
+          start: DateTime(2026, 11, 10, 9, 40),
+          end: DateTime(2026, 11, 10, 10, 30),
+        ),
+      );
+      expect(withId['examType'], {
+        'id': 2,
+        'shortName': 'Test',
+        'longName': 'Test',
+      });
       expect(
         parseCreatedExamId({
           'data': {'id': 5},
@@ -549,20 +563,38 @@ void main() {
       );
     });
 
-    test('exam types: one getUserData2017 call, then remembered', () async {
-      handler = (_) => rpc({
-        'masterData': {
-          'examTypes': [
-            {'id': 1, 'name': 'SA'},
-          ],
-        },
-      });
+    test('exam types: the extern exam-types call, then remembered', () async {
+      handler = (r) {
+        if (r.json?['method'] == 'getAuthToken') return rpc({'token': 'jwt'});
+        expect(r.uri.path, '/WebUntis/api/rest/extern/v1/exam-types');
+        return (
+          status: 200,
+          body: jsonEncode({
+            'examTypes': [
+              {'id': 2, 'name': 'Test', 'longName': 'Test', 'inWriting': true},
+            ],
+          }),
+          headers: const <String, List<String>>{},
+        );
+      };
       final t = await api.examTypes(host: 'h', school: 's', auth: creds);
-      expect(t.single.name, 'SA');
-      expect(method(), 'getUserData2017');
+      expect(t.single.id, 2);
+      expect(t.single.name, 'Test');
       final n = adapter.requests.length;
       await api.examTypes(host: 'h', school: 's', auth: creds);
       expect(adapter.requests.length, n);
+    });
+
+    test('exam types: a refused extern call gives none, no error', () async {
+      handler = (r) {
+        if (r.json?['method'] == 'getAuthToken') return rpc({'token': 'jwt'});
+        return (
+          status: 403,
+          body: '<html>Access denied</html>',
+          headers: const <String, List<String>>{},
+        );
+      };
+      expect(await api.examTypes(host: 'h', school: 's', auth: creds), isEmpty);
     });
 
     test(
@@ -895,10 +927,10 @@ void main() {
     });
 
     test('exam types never throw', () async {
-      // From the school's exams (no master data key): plain names.
+      // The school's own types (extern exam-types call) with their ids.
       final types = await repo.examTypes(teacherAccount());
       expect(types, isNotEmpty);
-      expect(types.every((t) => t.id < 0 && t.name.isNotEmpty), isTrue);
+      expect(types.every((t) => t.id > 0 && t.name.isNotEmpty), isTrue);
       expect(await repo.examTypes(demoAccount()), isEmpty);
     });
 
@@ -1247,7 +1279,8 @@ void main() {
       await t.pumpAndSettle();
       expect(created, isTrue);
       final e = api.createExamCalls.single;
-      expect(e.examTypeId, isNull);
+      // Typed name = one of the school's types: its id is sent too.
+      expect(e.examTypeId, 1);
       expect(e.examType, 'Schularbeit');
       expect(e.name, 'Fractions');
       expect(e.start, DateTime(2026, 11, 10, 9, 40));

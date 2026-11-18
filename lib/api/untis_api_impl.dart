@@ -2113,7 +2113,16 @@ class UntisApiImpl
   /// Exam types per `host|school`, loaded once per session.
   final _examTypes = <String, List<ExamType>>{};
 
-  /// Master data `examTypes` of one getUserData2017 call (assumed key).
+  /// The documented Untis Platform call for exam types
+  /// (developer.untis.com, openapi-extern-exam-api.yaml): `{examTypes: [{id,
+  /// name, longName, inWriting, …}]}`. It is meant for partner apps; whether
+  /// a teacher's own token is accepted is **not known** (tried 2026-11-18).
+  static String examTypesUrl(String host) =>
+      'https://$host/WebUntis/api/rest/extern/v1/exam-types';
+
+  /// The school's exam types with their real ids, or an empty list when the
+  /// server doesn't give them to this account (the caller then offers the
+  /// type names of existing exams). Never throws.
   @override
   Future<List<ExamType>> examTypes({
     required String host,
@@ -2123,15 +2132,23 @@ class UntisApiImpl
     final key = '$host|$school';
     final known = _examTypes[key];
     if (known != null) return known;
-    final result = await _rpc.call(rpcUrl(host, school), 'getUserData2017', {
-      'elementId': 0,
-      'deviceOs': isIos ? 'IOS' : 'AND',
-      'deviceOsVersion': '',
-      'auth': _rpc.auth(auth),
-    });
-    return _examTypes[key] = parseExamTypes(
-      result is Map ? result['masterData'] : null,
-    );
+    try {
+      final resp = await _bearerRequest(
+        host,
+        school,
+        auth,
+        'GET',
+        examTypesUrl(host),
+        'REST extern exam-types',
+        followRedirects: false,
+      );
+      if (resp.statusCode != 200) return _examTypes[key] = const [];
+      final types = parseExamTypes(jsonDecode(resp.data ?? ''));
+      return _examTypes[key] = types;
+    } catch (_) {
+      // Refused, not JSON or offline: ask again next session.
+      return const [];
+    }
   }
 
   /// URLs tried in order for creating an exam (assumed): the classic web
