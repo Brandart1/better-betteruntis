@@ -28,8 +28,8 @@ class ClassRegStudent {
   final String lastName;
   final int? klasseId;
 
-  /// Photo URL sent with the pupil, if any (see `PupilPhotoApi` in
-  /// pupil_photos.dart).
+  /// Photo URL sent with the pupil, if any (key unknown, see
+  /// `PupilPhotoApi` in pupil_photos.dart).
   final String? imageUrl;
 
   /// Up to two initials ("Bauer Lena" -> "LB"), '' when there are none.
@@ -274,11 +274,8 @@ abstract interface class ClassRegisterApi {
     required UntisCredentials auth,
   });
 
-  /// Creates a class register entry of pupil [studentId] in lesson [ttId]
-  /// (JSON-RPC `submitClassRegEvents`, one call per pupil, so [studentId] is
-  /// required by the real API). The implementations also take optional
-  /// [start] is the entry's date and time (default now); [eventId] edits
-  /// an existing entry instead of creating one.
+  /// Creates a class register entry in lesson [ttId], for [studentId] or
+  /// (null) the whole class. **Assumed** call, see docs/API.md.
   Future<void> createClassRegEvent({
     required String host,
     required String school,
@@ -287,8 +284,6 @@ abstract interface class ClassRegisterApi {
     int? studentId,
     int? eventReasonId,
     required String text,
-    DateTime? start,
-    int? eventId,
   });
 }
 

@@ -37,8 +37,6 @@ typedef Answer = ({int status, List<int> body, String type});
 class ImageAdapter implements HttpClientAdapter {
   ImageAdapter(this.images);
   final Answer Function(Uri uri, Map<String, dynamic> headers) images;
-  Object? userData;
-  final rpcMethods = <String>[];
   final gets = <Uri>[];
   final headers = <Map<String, dynamic>>[];
 
@@ -48,22 +46,13 @@ class ImageAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
-    final sent = <int>[];
-    await for (final c in requestStream ?? const Stream<Uint8List>.empty()) {
-      sent.addAll(c);
-    }
+    await requestStream?.drain<void>();
     if (o.uri.path.endsWith('jsonrpc_intern.do')) {
-      final method = sent.isEmpty ? '' : utf8.decode(sent);
-      rpcMethods.add(
-        method.contains('getUserData2017') ? 'getUserData2017' : '',
-      );
       return ResponseBody.fromString(
         jsonEncode({
           'id': '1',
           'jsonrpc': '2.0',
-          'result': method.contains('getUserData2017')
-              ? userData
-              : {'token': 'jwt'},
+          'result': {'token': 'jwt'},
         }),
         200,
         headers: {
@@ -97,17 +86,17 @@ void main() {
         studentImageUrl({'imageUrl': 'https://x.webuntis.com/a.jpg'}),
         'https://x.webuntis.com/a.jpg',
       );
+      expect(studentImageUrl({'photo': '/WebUntis/img/5'}), '/WebUntis/img/5');
       expect(
-        studentImageUrl({'imageUrl': '/WebUntis/img/5'}),
-        '/WebUntis/img/5',
+        studentImageUrl({
+          'image': {'url': '/WebUntis/img/6'},
+        }),
+        '/WebUntis/img/6',
       );
-      // Guessed keys are no longer read.
-      expect(studentImageUrl({'photo': '/WebUntis/img/5'}), isNull);
-      expect(studentImageUrl({'photoUrl': 'https://x/a.jpg'}), isNull);
       expect(studentImageUrl({'imageUrl': null}), isNull);
-      expect(studentImageUrl({'imageUrl': 12}), isNull);
-      expect(studentImageUrl({'imageUrl': 'data:image/png;base64,xx'}), isNull);
-      expect(studentImageUrl({'imageUrl': '//evil.com/a'}), isNull);
+      expect(studentImageUrl({'image': 12}), isNull);
+      expect(studentImageUrl({'image': 'data:image/png;base64,xx'}), isNull);
+      expect(studentImageUrl({'image': '//evil.com/a'}), isNull);
       expect(studentImageUrl({'imageUrl': 'ftp://x/a'}), isNull);
       final s = parseClassRegStudent({
         'id': 1,
@@ -117,6 +106,20 @@ void main() {
       })!;
       expect(s.imageUrl, '/p/1');
       expect(s.initials, 'LB');
+    });
+
+    test('referencedStudents shape lists keys, never values', () {
+      final shape = referencedStudentsShape({
+        'referencedStudents': [
+          {'id': 1, 'firstName': 'Lena', 'imageUrl': '/p/1'},
+          {'id': 2, 'lastName': 'Koch'},
+        ],
+      });
+      expect(shape['count'], 2);
+      expect(shape['keys'], ['firstName', 'id', 'imageUrl', 'lastName']);
+      expect(shape['withImageUrl'], 1);
+      expect(jsonEncode(shape), isNot(contains('Lena')));
+      expect(referencedStudentsShape(null)['count'], 0);
     });
 
     test('initials', () {
@@ -182,53 +185,60 @@ void main() {
           imageUrl: url,
         );
 
-    test('no imageUrl in the master data: no photo, no guessing', () async {
-      final adapter = ImageAdapter((_, _) => image())
-        ..userData = {
-          'masterData': {
-            'students': [
-              {'id': 9},
-            ],
-          },
-        };
-      final api = UntisApiImpl(dio: Dio()..httpClientAdapter = adapter);
-      expect(await photo(api, 501), isNull);
-      expect(adapter.gets, isEmpty);
-    });
-
-    test('masterData.students[].imageUrl is loaded, with the bearer', () async {
-      final adapter = ImageAdapter((_, _) => image())
-        ..userData = {
-          'masterData': {
-            'students': [
-              {'id': 501, 'imageUrl': '/WebUntis/img/501.jpg'},
-              {'id': 502, 'imageUrl': 'https://cdn.example.com/502.jpg'},
-            ],
-          },
-        };
+    test('probes the guesses in order and keeps the one that works', () async {
+      final adapter = ImageAdapter(
+        (u, _) => u.path.contains('/portrait/') ? image() : notFound(),
+      );
       final api = UntisApiImpl(dio: Dio()..httpClientAdapter = adapter);
       expect(await photo(api, 501), jpegLike);
-      expect(
-        adapter.gets.single.toString(),
-        'https://$host/WebUntis/img/501.jpg',
-      );
+      expect(adapter.gets.map((u) => u.path), [
+        '/WebUntis/api/rest/view/v1/students/501/image',
+        '/WebUntis/api/portrait/students/501',
+      ]);
       expect(adapter.headers.first['Authorization'], 'Bearer jwt');
       expect(adapter.headers.first['Accept'], 'image/*');
-      // Master data is read once; another host never gets the token.
+      adapter.gets.clear();
       expect(await photo(api, 502), jpegLike);
-      expect(
-        adapter.rpcMethods.where((m) => m == 'getUserData2017'),
-        hasLength(1),
-      );
-      expect(adapter.headers.last['Authorization'], isNull);
-      // Log: status, type and size, no bytes.
+      expect(adapter.gets.map((u) => u.path), [
+        '/WebUntis/api/portrait/students/502',
+      ]);
+      // Log: status, type and size, no bytes and no ids.
       final log = api.debugLog
           .where((e) => e.method.startsWith('pupil photo'))
           .toList();
-      final first = jsonDecode(log.first.json) as Map;
-      expect(first['bytes'], jpegLike.length);
-      expect(first['contentType'], 'image/jpeg');
-      expect(first['url'], 'https://$host/WebUntis/img/501.jpg');
+      expect(log, hasLength(3));
+      final last = jsonDecode(log.last.json) as Map;
+      expect(last['bytes'], jpegLike.length);
+      expect(last['contentType'], 'image/jpeg');
+      expect(last['url'], 'https://$host/WebUntis/api/portrait/students/<id>');
+      expect(log.last.method, 'pupil photo #1 [HTTP 200]');
+    });
+
+    test('gives up after two pupils without any image', () async {
+      final adapter = ImageAdapter((_, _) => notFound());
+      final api = UntisApiImpl(dio: Dio()..httpClientAdapter = adapter);
+      expect(await photo(api, 1), isNull);
+      expect(await photo(api, 2), isNull);
+      final n = adapter.gets.length;
+      expect(n, UntisApiImpl.pupilPhotoPaths.length * 2);
+      expect(await photo(api, 3), isNull);
+      expect(adapter.gets.length, n);
+      expect(
+        api.debugLog.map((e) => e.method),
+        contains('pupil photo: no source'),
+      );
+    });
+
+    test('parallel requests probe only once', () async {
+      final adapter = ImageAdapter(
+        (u, _) => u.path.contains('/rest/view/') ? image() : notFound(),
+      );
+      final api = UntisApiImpl(dio: Dio()..httpClientAdapter = adapter);
+      final all = await Future.wait([
+        for (var i = 1; i <= 5; i++) photo(api, i),
+      ]);
+      expect(all.every((b) => b != null), isTrue);
+      expect(adapter.gets.length, 5);
     });
 
     test('an image URL from the pupil is used as is', () async {
@@ -242,6 +252,22 @@ void main() {
       // Another host never gets the token.
       await photo(api, 7, url: 'https://cdn.example.com/7.jpg');
       expect(adapter.headers.last['Authorization'], isNull);
+    });
+
+    test('getPeriodData2017 logs the pupil keys', () async {
+      final adapter = _RpcAdapter({
+        'dataByTTId': {},
+        'referencedStudents': [
+          {'id': 1, 'firstName': 'Lena', 'lastName': 'Bauer'},
+        ],
+      });
+      final api = UntisApiImpl(dio: Dio()..httpClientAdapter = adapter);
+      await api.periodData(host: host, school: 's', auth: creds, ttIds: [1]);
+      final e = api.debugLog.firstWhere(
+        (e) => e.method == 'getPeriodData2017 referencedStudents keys',
+      );
+      expect(jsonDecode(e.json)['keys'], ['firstName', 'id', 'lastName']);
+      expect(e.json, isNot(contains('Lena')));
     });
   });
 
@@ -450,4 +476,28 @@ class _Fixed implements PupilPhotoRepository {
   @override
   Future<Uint8List?> photo(Account account, ClassRegStudent student) async =>
       bytes;
+}
+
+class _RpcAdapter implements HttpClientAdapter {
+  _RpcAdapter(this.result);
+  final Object? result;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions o,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    await requestStream?.drain<void>();
+    return ResponseBody.fromString(
+      jsonEncode({'id': '1', 'jsonrpc': '2.0', 'result': result}),
+      200,
+      headers: {
+        Headers.contentTypeHeader: ['application/json'],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
 }

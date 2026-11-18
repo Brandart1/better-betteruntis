@@ -1,6 +1,6 @@
 ## New in this release
 
-Teacher test build (branch `teacher`). Absences, lesson topic, previous topics and class register entries are confirmed with real teacher accounts. Room booking and creating exams are still guesses at the server calls (the official app can't do either); most other teacher calls now follow the official Untis app 6.8.1 — if something fails, please send the entries from the Debug screen.
+Teacher test build (branch `teacher`). Absences, lesson topic, previous topics and class register entries are confirmed with real teacher accounts. Room booking, exams, absence summaries and pupil photos are new and their server calls are still guesses — if something fails, please send the entries from the Debug screen.
 
 ### New
 - Your own homework on a lesson, like your own exams; both also appear in the Info center marked “Custom”.
@@ -46,19 +46,12 @@ Teacher test build (branch `teacher`). Absences, lesson topic, previous topics a
 - Teachers: creating an exam now sends what the WebUntis website sends.
 - Teachers: changing a lesson's room back to the planned room now works (the app sent the planned room instead of the current one).
 
-- Teachers: adding or removing a **room** of a lesson now uses the same call as the official Untis app (the whole room list is sent), so the change should no longer snap back after a while.
-- Teachers: **class register entries** are now saved with the official app's call (one entry per pupil for the whole class), dated at the lesson.
-- Teachers: **Absence summary → All subjects** now loads the class's absences the way the official app does.
-- Teachers: **pupil photos** come from the school's pupil list only, without trying other addresses first.
-- Teachers: **Create exam**: type the exam type freely or tap one your school already uses (the app guessed a type list the server doesn't have).
-- **Messages**: the list of whom you may write to, recipient groups and the search in custom filters now read the server's real field names (groups were sent without their id before).
-- Teachers: **Report absence** now sends the school like the official app.
-
 ### Changed
 - Messages are displayed with a well-tested HTML library instead of the app's own parser: headings, tables and nested lists look right now. Images in messages still aren't loaded (privacy); their description is shown instead.
 - "What's new" and release notes use a standard Markdown library; two-factor login codes come from a standard TOTP library (same codes as before).
 - Android: in-app updates are much faster (ota_update library instead of own installer code). Only downloads with a matching checksum get installed; Android asks for "Install unknown apps" itself when needed. Alpha builds are also offered newer alphas of their own version line.
+- Teachers: the previous test build's changes to the server calls (rooms, class register entries, photos, exam types, messages, substitution menu) are undone again — the app was noticeably slower with them.
 - The version info at the bottom of the menu shows the alpha number ("alpha.3" instead of "alpha").
-- Teachers: **Substitution requests** and **My absences** show only when your school offers them, as in the official app (WebUntis decides); the Settings switch “Online substitution planning” is gone. Notifications for requests follow that too.
+- Teachers: **Substitution requests** and **My absences** only show when Settings → **Online substitution planning** is on (off by default — many schools arrange substitutions by phone). Notifications for requests are off by default too.
 - Timetables show changes of the timetable's own class, teacher or room: e.g. a teacher sees who substitutes them in their own timetable, a room's timetable shows a lesson moved to another room, and lessons shared by several classes list all of them.
 - Includes everything from v0.5.2-beta (web version, optional encrypted sync, "What's new", keyboard navigation, Android in-app updater, large-text fixes).

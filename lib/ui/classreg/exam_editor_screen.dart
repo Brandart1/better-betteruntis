@@ -69,7 +69,7 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
 
   List<ExamType> _types = const [];
   bool _typesLoaded = false;
-  final _type = TextEditingController();
+  int? _typeId;
 
   List<ClassRegStudent>? _students;
   bool _loadingStudents = false;
@@ -128,7 +128,6 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
   @override
   void dispose() {
     _name.dispose();
-    _type.dispose();
     _text.dispose();
     super.dispose();
   }
@@ -273,7 +272,12 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
     return (start: at(units[from].start), end: at(units[to].end));
   }
 
-  String get _typeName => _type.text.trim();
+  String get _typeName =>
+      _types
+          .where((t) => t.id == _typeId)
+          .map((t) => t.displayName)
+          .firstOrNull ??
+      '';
 
   bool _canSend(List<TimeUnit> units) =>
       !_sending &&
@@ -415,7 +419,8 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
       await _repo.createExam(
         widget.account,
         NewExam(
-          // An exam's type is a plain string: no id.
+          // Negative ids: names taken from existing exams, no server id.
+          examTypeId: (_typeId ?? 0) > 0 ? _typeId : null,
           examType: _typeName,
           name: _name.text.trim(),
           text: _text.text.trim(),
@@ -472,49 +477,31 @@ class _ExamEditorScreenState extends ConsumerState<ExamEditorScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  key: const ValueKey('exam-type'),
-                  controller: _type,
-                  enabled: !_sending,
-                  textCapitalization: TextCapitalization.sentences,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    labelText: 'Exam type',
-                    hintText: 'e.g. Schularbeit',
-                    prefixIcon: const Icon(Icons.category_outlined),
-                    border: const OutlineInputBorder(),
-                    helperText: !_typesLoaded
-                        ? 'Loading known exam types…'
-                        : (_types.isEmpty
-                              ? 'Type the exam type; none known yet.'
-                              : null),
-                  ),
-                ),
-                if (_types.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: [
-                        for (final t in _types)
-                          ChoiceChip(
-                            key: ValueKey('exam-type-${t.id}'),
-                            label: Text(t.displayName),
-                            selected: _typeName == t.displayName,
-                            onSelected: _sending
-                                ? null
-                                : (_) => setState(
-                                    () => _type.text = t.displayName,
-                                  ),
-                          ),
-                      ],
-                    ),
+            child: DropdownButtonFormField<int>(
+              key: const ValueKey('exam-type'),
+              initialValue: _typeId,
+              isExpanded: true,
+              items: [
+                for (final t in _types)
+                  DropdownMenuItem(
+                    key: ValueKey('exam-type-${t.id}'),
+                    value: t.id,
+                    child: Text(t.displayName, overflow: TextOverflow.ellipsis),
                   ),
               ],
+              onChanged: _sending || _types.isEmpty
+                  ? null
+                  : (v) => setState(() => _typeId = v),
+              decoration: InputDecoration(
+                labelText: 'Exam type',
+                prefixIcon: const Icon(Icons.category_outlined),
+                border: const OutlineInputBorder(),
+                helperText: !_typesLoaded
+                    ? 'Loading exam types…'
+                    : (_types.isEmpty
+                          ? 'The server sent no exam types.'
+                          : null),
+              ),
             ),
           ),
           Padding(

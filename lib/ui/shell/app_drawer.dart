@@ -68,9 +68,7 @@ class AppDrawer extends StatelessWidget {
                 (a) => a.value != null && leadsClass(a.value!),
               ),
             );
-            final offer =
-                ref.watch(substitutionAvailabilityProvider).value ??
-                SubstitutionAvailability.none;
+            final substitutions = ref.watch(onlineSubstitutionPlanningProvider);
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -102,7 +100,7 @@ class AppDrawer extends StatelessWidget {
                   subtitle: const Text("Excuse your class's absences"),
                   onTap: () => go('/excuses'),
                 ),
-                if (offer.substitutionRequests)
+                if (substitutions) ...[
                   ListTile(
                     key: const ValueKey('drawer-substitution-requests'),
                     leading: const Icon(Icons.swap_horiz),
@@ -110,7 +108,6 @@ class AppDrawer extends StatelessWidget {
                     subtitle: const Text('Accept or decline covering a lesson'),
                     onTap: () => go('/substitution-requests'),
                   ),
-                if (offer.teacherAbsences)
                   ListTile(
                     key: const ValueKey('drawer-teacher-absences'),
                     leading: const Icon(Icons.event_busy_outlined),
@@ -118,6 +115,7 @@ class AppDrawer extends StatelessWidget {
                     subtitle: const Text('Report yourself absent'),
                     onTap: () => go('/teacher-absences'),
                   ),
+                ],
                 ListTile(
                   key: const ValueKey('drawer-book-room'),
                   leading: const Icon(Icons.meeting_room_outlined),

@@ -142,56 +142,6 @@ void main() {
       expect(parseMessagePermissions('junk').canReply, isFalse);
     });
 
-    test('6.8.1 shapes: recipientOptions, groupId, users', () {
-      final p = parseMessagePermissions({
-        'recipientOptions': ['STUDENTS', 'PARENTS', 'CUSTOM', 'STAFF'],
-        'allowRequestReadConfirmation': true,
-        'canForbidReplies': true,
-        'maxFileCount': 5,
-        'maxFileSize': 1000,
-        'recipientSearchMaxResult': 50,
-        'showDraftsTab': true,
-        'showSentTab': true,
-      });
-      expect(p.options, containsAll([RecipientOption.parents]));
-      expect(p.options, hasLength(4));
-      expect(p.canForbidReplies, isTrue);
-      final g = parseRecipientSections({
-        'persons': [
-          {'id': 1, 'personId': 501, 'displayName': 'Bauer Lena'},
-        ],
-        'sections': [
-          {
-            'sectionType': 'NORMAL_LESSONS',
-            'groups': [
-              {
-                'groupId': 'G7',
-                'title': '9b M',
-                'subtitle': 'Mathematics',
-                'details': 'x',
-                'personIds': [501],
-              },
-            ],
-          },
-        ],
-      });
-      expect(g.single.id, 'G7');
-      expect(g.single.members.single.displayName, 'Bauer Lena');
-      final users = parseMessageRecipients({
-        'users': [
-          {'id': 3, 'displayName': 'Huber'},
-        ],
-      });
-      expect(users.single.displayName, 'Huber');
-    });
-
-    test('send form: request part has no filename, JSON content type', () {
-      final f = UntisApiImpl.messageForm({'a': 1});
-      final part = f.files.single.value;
-      expect(part.filename, isNull);
-      expect(part.contentType.toString(), contains('application/json'));
-    });
-
     test('recipient sections: groups with members or personIds', () {
       final groups = parseRecipientSections({
         'sections': [

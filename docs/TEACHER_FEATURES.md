@@ -94,16 +94,15 @@ Basic package (no class register needed): enter notes for pupils ("Info zur Stun
 - [x] **Notifications** (all accounts): local notifications for changes in the own timetable (substitutions, cancellations, room/teacher changes, today + N school days) and new inbox messages; per account in Settings → Notifications; one notification per account and kind, each change once, first run quiet; Android background check via WorkManager (~45 min), iOS on start/resume, web in-app snackbar; pluggable `ChangeSource` (lib/core/change_sources.dart). Teachers also get new open substitution requests (lessons not started yet; switch "Substitution requests", default on; tap opens the requests screen; a school without online substitution planning is silently skipped).
 
 ## To confirm with a real teacher account
-Since +142 many calls follow the decompiled official app 6.8.1 (notes: /root/untis-decompiled/notes/api-6.8.1.md). If +142 breaks something, revert to `6c7fab5`.
 Results of the test with a real teacher on 2026-11-17 (+134 reacts to them):
-- [ ] Rooms + / ×: the change shows, then the old room comes back after a while. +142 switched to the official 6.8.1 call `PATCH view/v1/calendar-entry/{id}` (`/block` for double lessons) with the complete room list `{rooms:{value:[…]}}`; submitRoomChange2017 only as fallback on 404/405. To test: does the change stick now? (Debug log `REST PATCH calendar-entry rooms`.) Also proves calendar-entry id == period id.
+- [ ] Rooms + / ×: the change shows, then the old room comes back after a while. Debug log of `submitRoomChange2017` and the next `getTimetable2017` needed; next idea: the calendar PATCH `{rooms:{value:[…]}}`.
 - [x] Own timetable showed the teacher instead of the class → fixed (cards use the own teacher target).
 - [ ] Homework in the lesson details: "is custom homework for teachers" — unclear what exactly; ask.
 - [x] Class register hit the server's rate limit → requests paced (3 per host, 120 ms apart), HTTP 429 repeated after `Retry-After`, duplicate getPeriodData2017 calls of one screen shared, history looks back 4 weeks instead of 6.
 - [x] Removing the notes for pupils (`submitPeriodInfo2017` with an empty text) also removed the notes for teachers → pupils' notes are now written with the REST `PATCH view/v1/calendar-entry/{id}` `{notesAll:{value}}` (JSON-RPC only as fallback on 404/405). To confirm that this keeps the teachers' notes.
 - [ ] Create exam: generic HTTP 403. F12 capture of the website's body (examId -1, `{id}` objects, `examStart` `yyyy-MM-ddTHH:mm:00`, `examDuration`, invigilators…) → our body now has that shape. Still missing: the URL and method of that request.
 - [x] Absence summary "All subjects": "invalid user role" for a teacher who isn't the class teacher → clear message; Lesson and Subject still work.
-- [x] Substitution requests / My absences: that school arranges substitutions by phone → since +142 shown only when WebUntis `view/v2/home` has the cells `SUBSTITUTION_REQUESTS` / `TEACHER_ABSENCES` (as in the official app); the Settings toggle is gone. To test: both stay hidden at that school.
+- [x] Substitution requests / My absences: that school arranges substitutions by phone → hidden unless Settings → "Online substitution planning" is on (off by default); request notifications off by default.
 - [ ] Book a room: finding free rooms works, booking doesn't. The website books through a multi-step form (Spring Web Flow, form-encoded, `_csrf`, `_finish`, `subjectId`, `bookingDepartmentId` ("area"), `activityTypeId`, `teacherId`, `_classIds`, `email`, …) plus a JSON service `jsonBookingService` (`getBookableRooms`, `changeBookingDate`, `isValidBookingId`). URL of the form post and of the JSON service needed.
 
 - [ ] Substitution host: does `substitution.webuntis.com` accept the WebUntis JWT with `X-TenantID`? What do schools without online planning answer? Is `periodConflict.id` the right id for accept / decline; answer when already taken? Date-times local with literal Z or real UTC (flip `parseSpDateTime`)? Does the absence list show a new report at once? Do form / create work without `?school=`, and what's the create answer? Does it all work through the web relay?
@@ -121,14 +120,15 @@ Results of the test with a real teacher on 2026-11-17 (+134 reacts to them):
 - [ ] Previous topics: same course is found (does `lessonId` stay the same across weeks?) and the topics match WebUntis
 - [ ] getPeriodData2017 contains class register entries — under which key and with which fields (Debug log)
 - [ ] `eventReasons` in the master data (names shown in "New entry")
-- [ ] Creating an entry: `createClassRegEvent2017` doesn't exist; +142 uses the official `submitClassRegEvents {ttId, event:{id, element:{type:5,id}, date, startTime:"THH:mm", text, reasonId}}`, one call per pupil. No server delete exists. To test: does an entry show in WebUntis?
+- [ ] Creating an entry: does `createClassRegEvent2017` exist, and with which params? (send the Debug log with `createClassRegEvent2017 request body` and the answer)
 - [ ] Is there a call for all entries of a class (to show entries of other teachers' lessons)?
 - [ ] Class register overview (missing attendance / topic) matches WebUntis' list of open class register entries
 
-- [x] Pupil photos: source settled by the 6.8.1 decompile: getUserData2017 `masterData.students[].imageUrl` (+142, probing removed). To test: do they load?
+- [ ] Pupil photos: which keys do the pupils in getPeriodData2017 carry (Debug log `getPeriodData2017 referencedStudents keys`)? Is one a photo URL?
+- [ ] Pupil photos: does any guessed endpoint answer with an image (Debug log `pupil photo probe #N [HTTP …]`)? If not: a browser F12 capture of the photo request in WebUntis' class register (URL and response type only)
 - [ ] Pupil photos on the web alpha: does the bearer token suffice (the relay sends no cookies)?
 
-- [ ] Absence summaries, all subjects: +142 uses `getClassregData2017 {klasseId, startDate, endDate}` like the official app (the REST guess and the klasseId fallback don't exist). To test with a class teacher.
+- [ ] Absence summaries, all subjects: does `GET /WebUntis/api/classreg/absences/students?…&studentId=-1&klasseId=<id>` answer for a teacher (Debug log `REST classreg absences/students klasseId=…`), and do the entries carry `studentId`? Else does the fallback getStudentAbsences2017 with `klasseId` work? Only class teachers may be allowed to see a class's absences.
 - [ ] Absence summaries: does getPeriodData2017 send an excuse status per absence (`excused`, `excuseStatusId`, `excuse{…}`)? Without it every absence counts as "open". Is there a separate late-arrival flag?
 - [ ] Substitutions: does a lesson a substitute held appear in the original teacher's timetable (teacher element `orgId` = own id, `id` = the substitute) and is it **not** flagged CANCELLED? Does getPeriodData2017 return its data to the original teacher?
 - [x] Room booking: getRoomChangeData2017 / submitRoomChange2017 work for the teacher (2026-11-16); going back to the planned room failed while we sent the planned room as `orgRoomId`.
@@ -136,7 +136,7 @@ Results of the test with a real teacher on 2026-11-17 (+134 reacts to them):
 - [ ] Rooms of a lesson: does + (add, `orgRoomId: 0`) add a second room, and × (remove, `roomId: 0`) remove one? If not: the answers in the Debug log. (The official app's newer calendar API does it with `PATCH /WebUntis/api/rest/view/v1/calendar-entry/{id}` `{rooms:{value:[…all room ids…]}}` — the next thing to try.)
 - [ ] Book a room (menu): which endpoint does WebUntis' browser use for a room booking without a lesson (F12 capture of "Raumbuchung"/"Buchungen": URL, method, JSON body)? Our guesses `POST /WebUntis/api/rest/view/v1/calendar-entry`, then `POST /WebUntis/api/bookings` (Debug log `REST POST … request body` and the answers).
 - [ ] Free rooms in Browse: does getAvailableRooms2017 answer for pupils / parents too, or only teachers? Is the date-time format right (`2026-11-16T08:00Z` like the official app, local time)?
-- [x] Exams: there is no exam-type master data (6.8.1); the type is a free string → +142 free text plus types from existing exams.
+- [ ] Exams: master data key for exam types (`examTypes`?) — check the getUserData2017 response in the Debug log
 - [ ] Exams: which endpoint does WebUntis' browser use to create an exam (F12 capture of "Prüfung anlegen": URL, method, JSON body)? Our guess `POST /WebUntis/api/exams` (then `api/classreg/exams`), body in Debug log `REST exams request body`
 - [ ] Exams: does a created exam show in the timetable (period `exam`) and in getExams2017 for teacher / class / pupils?
 - [ ] Exams menu: are the subjects from the own timetable the right "authorised" ones, or is there a server list of a teacher's lessons (Unterrichte)?

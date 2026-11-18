@@ -711,12 +711,6 @@ class _FakeSubstitutionRepo implements SubstitutionPlanningRepository {
   Object? error;
 
   @override
-  Future<SubstitutionAvailability> availability(
-    Account account, {
-    bool refresh = false,
-  }) async => const SubstitutionAvailability(substitutionRequests: true);
-
-  @override
   Future<List<SubstitutionRequest>> requests(Account account) async {
     if (error case final e?) throw e;
     return list;

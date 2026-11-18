@@ -23,7 +23,6 @@ class SubstitutionPlanningRepositoryImpl
   final DateTime Function() clock;
 
   final _forms = <String, TeacherAbsenceForm>{};
-  final _availability = <String, SubstitutionAvailability>{};
 
   /// At most this many own timetable weeks are refreshed after reporting a
   /// long absence (the rest loads when browsed).
@@ -142,32 +141,6 @@ class SubstitutionPlanningRepositoryImpl
       school: account.school.loginName,
       auth: auth,
     );
-  }
-
-  @override
-  Future<SubstitutionAvailability> availability(
-    Account account, {
-    bool refresh = false,
-  }) async {
-    if (!hasClassRegister(account)) return SubstitutionAvailability.none;
-    final cached = _availability[account.id];
-    if (cached != null && !refresh) return cached;
-    try {
-      final auth = await accounts.credentials(account.id);
-      return _availability[account.id] = await _api.homeAvailability(
-        host: account.host,
-        school: account.school.loginName,
-        auth: auth,
-      );
-    } on UntisException catch (e) {
-      // 404: the school has no home view, a definite answer (cached).
-      if (e.code == -8532) {
-        return _availability[account.id] = SubstitutionAvailability.none;
-      }
-      return SubstitutionAvailability.none;
-    } catch (_) {
-      return SubstitutionAvailability.none;
-    }
   }
 
   @override

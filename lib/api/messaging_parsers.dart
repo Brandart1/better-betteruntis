@@ -44,8 +44,7 @@ String _first(Map<String, Object?> j, List<String> keys) {
 /// `MessagePermissionsResponse`. Unknown options are ignored.
 MessagePermissions parseMessagePermissions(Object? raw) {
   final j = _map(raw);
-  // `recipientOptions` in 6.8.1; `permissions` kept as fallback.
-  final list = j['recipientOptions'] ?? j['permissions'];
+  final list = j['permissions'];
   return MessagePermissions(
     options: {
       for (final p in list is List ? list : const []) ?RecipientOption.parse(p),
@@ -73,9 +72,7 @@ MessageRecipient? parseMessageRecipient(Object? raw) {
 
 List<MessageRecipient> parseMessageRecipients(Object? raw) {
   final j = _map(raw);
-  final list = raw is List
-      ? raw
-      : (j['users'] ?? j['recipients'] ?? j['persons']);
+  final list = raw is List ? raw : (j['recipients'] ?? j['persons']);
   return [
     for (final r in list is List ? list : const []) ?parseMessageRecipient(r),
   ];
@@ -114,7 +111,7 @@ List<RecipientGroup> parseRecipientSections(Object? raw) {
       final title = _first(g, const ['title', 'name']);
       out.add(
         RecipientGroup(
-          id: _nonBlank(g['groupId']) ?? _nonBlank(g['id']),
+          id: _nonBlank(g['id']),
           title: title.isEmpty ? 'Group' : title,
           subtitle: _first(g, const ['subtitle', 'details']),
           section: section,

@@ -62,9 +62,20 @@ ClassRegStudent? parseClassRegStudent(Map<String, Object?> j) {
   );
 }
 
-/// Keys a pupil's photo URL comes in: `imageUrl` (getUserData2017
-/// `masterData.students[]`, loaded as given by the official app).
-const studentImageKeys = ['imageUrl'];
+/// Keys a pupil's photo URL might come in. None seen in a real
+/// getPeriodData2017 answer yet; `imageUrl` is what the WebUntis REST API
+/// uses for persons (`api/rest/view/v1/app/data`, messenger).
+const studentImageKeys = [
+  'imageUrl',
+  'imageURL',
+  'image',
+  'photoUrl',
+  'photo',
+  'pictureUrl',
+  'picture',
+  'avatarUrl',
+  'portraitUrl',
+];
 
 /// The photo URL of a pupil object, or null. Only URLs (absolute http(s) or
 /// a server path starting with `/`) count; inline data and ids don't.
@@ -82,6 +93,17 @@ String? studentImageUrl(Map<String, Object?> j) {
     }
   }
   return null;
+}
+
+/// For the Debug log: every key the pupils of a getPeriodData2017 answer
+/// carry (sorted, no values) and how many have a photo URL.
+Map<String, Object?> referencedStudentsShape(Object? raw) {
+  final students = _maps(_map(raw)['referencedStudents']).toList();
+  return {
+    'count': students.length,
+    'keys': {for (final s in students) ...s.keys}.toList()..sort(),
+    'withImageUrl': students.where((s) => studentImageUrl(s) != null).length,
+  };
 }
 
 ClassRegAbsence? parseClassRegAbsence(Map<String, Object?> j) {
@@ -118,10 +140,8 @@ ClassRegAbsence? parseClassRegAbsence(Map<String, Object?> j) {
   );
 }
 
-/// A class register entry ("Klassenbucheintrag"). Official shape
-/// (getPeriodData2017 / getClassregData2017 `classRegEvents`): `{id,
-/// elementType, elementId, eventReasonId, dateTime, text}`; the older
-/// guessed keys are still read (`id`/`eventId`, `studentId`/`student{id,…}`,
+/// A class register entry ("Klassenbucheintrag"). No real response seen:
+/// every key is a guess (`id`/`eventId`, `studentId`/`student{id,…}`,
 /// `eventReasonId`/`reasonId`/`eventReason{id,name}`, `text`/`remark`, a
 /// date in `dateTime`/`startDateTime`/`date`/…). Null when it carries
 /// nothing to show.
@@ -138,16 +158,7 @@ ClassRegEvent? parseClassRegEvent(Map<String, Object?> j, {int? ttId}) {
     if (studentName.startsWith('#')) studentName = '';
   }
   final studentIds = j['studentIds'];
-  // Official shape: `elementType`/`elementId` (STUDENT = a pupil).
-  final elementId = _int(j['elementId']);
-  final elementStudent =
-      j.containsKey('elementType') &&
-          ElementType.parse(j['elementType']) == ElementType.student &&
-          (elementId ?? 0) > 0
-      ? elementId
-      : null;
   final studentId =
-      elementStudent ??
       _int(j['studentId'] ?? studentMap['id']) ??
       (studentIds is List && studentIds.length == 1
           ? _int(studentIds.first)
@@ -337,24 +348,3 @@ int? submittedHomeworkId(Object? result) {
     _ => null,
   };
 }
-
-/// submitClassRegEvents params (besides `auth`) for one pupil: `id` 0 =
-/// new entry, else edits that entry. `startTime` is "THH:mm".
-Map<String, Object?> submitClassRegEventParams({
-  required int ttId,
-  required int studentId,
-  required DateTime start,
-  required String text,
-  int? reasonId,
-  int? eventId,
-}) => {
-  'ttId': ttId,
-  'event': {
-    'id': eventId ?? 0,
-    'element': {'type': ElementType.student.code, 'id': studentId},
-    'date': formatDate(start),
-    'startTime': formatUntisTime(start),
-    'text': text.trim(),
-    'reasonId': reasonId ?? 0,
-  },
-};

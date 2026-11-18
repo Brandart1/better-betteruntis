@@ -59,20 +59,12 @@ class FreeRooms {
 
 /// The server's answer to a room change.
 class RoomChangeResult {
-  const RoomChangeResult({
-    this.errors = const [],
-    this.periodCount = 0,
-    this.roomIds,
-  });
+  const RoomChangeResult({this.errors = const [], this.periodCount = 0});
 
   final List<TeacherToolError> errors;
 
   /// How many updated periods the server sent back.
   final int periodCount;
-
-  /// The lesson's rooms as the server answered a REST room change (null
-  /// when the answer had none, or for submitRoomChange2017).
-  final List<int>? roomIds;
 
   bool get ok => errors.isEmpty;
 }
@@ -89,9 +81,8 @@ class StaffNotes {
   final bool editable;
 }
 
-/// An exam type choice. The official app has no master-data exam types: an
-/// exam's type is a plain string, so the choices are the distinct types of
-/// the exams loaded (negative ids, only the name matters).
+/// An exam type of the school (master data `examTypes`, if the server has
+/// them).
 class ExamType {
   const ExamType({required this.id, required this.name, this.longName = ''});
 
@@ -234,26 +225,6 @@ abstract interface class TeacherToolsApi {
     required String school,
     required UntisCredentials auth,
     required NewExam exam,
-  });
-}
-
-/// The REST room change of the official app, kept apart from
-/// [TeacherToolsApi] so the routing wrapper can add it later; the repository
-/// uses it when the api implements it and falls back to
-/// [TeacherToolsApi.submitRoomChange] otherwise.
-abstract interface class RoomPatchApi {
-  /// `PATCH view/v1/calendar-entry/{periodId}` (or `…/block` with
-  /// [wholeBlock]) `{"rooms": {"value": roomIds}}`: [roomIds] is the
-  /// **complete** list of rooms the lesson shall have. Returns null when the
-  /// server doesn't know the call (404/405: older servers) so the caller can
-  /// fall back to submitRoomChange2017; throws [UntisException] otherwise.
-  Future<RoomChangeResult?> patchLessonRooms({
-    required String host,
-    required String school,
-    required UntisCredentials auth,
-    required int periodId,
-    required List<int> roomIds,
-    bool wholeBlock = false,
   });
 }
 
@@ -444,32 +415,6 @@ class RoomEdit {
 
   @override
   int get hashCode => Object.hash(kind, orgRoomId, roomId);
-
-  /// The complete room list the lesson shall have after this edit, from the
-  /// room ids it has [current]ly (REST calendar PATCH): add appends, remove
-  /// drops, replace swaps in place.
-  List<int> apply(List<int> current) {
-    final out = <int>[
-      for (final id in current)
-        if (!(kind == RoomEditKind.remove && id == orgRoomId)) id,
-    ];
-    switch (kind) {
-      case RoomEditKind.add:
-        if (!out.contains(roomId)) out.add(roomId);
-      case RoomEditKind.replace:
-        final i = out.indexOf(orgRoomId);
-        if (i < 0) {
-          if (!out.contains(roomId)) out.add(roomId);
-        } else if (out.contains(roomId)) {
-          out.removeAt(i);
-        } else {
-          out[i] = roomId;
-        }
-      case RoomEditKind.remove:
-        break;
-    }
-    return out;
-  }
 
   @override
   String toString() => 'RoomEdit.${kind.name}($orgRoomId → $roomId)';

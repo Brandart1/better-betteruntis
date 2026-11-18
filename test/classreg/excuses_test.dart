@@ -332,7 +332,7 @@ void main() {
             },
           });
         }
-        if (m == 'getClassregData2017') {
+        if (m == 'getStudentAbsences2017') {
           return rpc({
             'absences': [
               {

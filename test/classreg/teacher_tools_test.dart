@@ -153,28 +153,6 @@ class RejectingRoomApi extends FakeUntisApi {
   );
 }
 
-/// A fake api with the REST room change; records the PATCH calls.
-class PatchRoomApi extends FakeUntisApi implements RoomPatchApi {
-  PatchRoomApi({this.missing = false}) : super(latency: Duration.zero);
-
-  final bool missing;
-  final calls = <({int periodId, List<int> roomIds, bool wholeBlock})>[];
-
-  @override
-  Future<RoomChangeResult?> patchLessonRooms({
-    required String host,
-    required String school,
-    required UntisCredentials auth,
-    required int periodId,
-    required List<int> roomIds,
-    bool wholeBlock = false,
-  }) async {
-    if (missing) return null;
-    calls.add((periodId: periodId, roomIds: roomIds, wholeBlock: wholeBlock));
-    return RoomChangeResult(periodCount: 1, roomIds: roomIds);
-  }
-}
-
 class FailingExamApi extends FakeUntisApi {
   FailingExamApi() : super(latency: Duration.zero);
 
@@ -425,63 +403,6 @@ void main() {
       expect(entry.json, isNot(contains('otp')));
     });
 
-    test('rooms: REST PATCH with the complete list, block variant', () async {
-      handler = (r) {
-        if (r.json?['method'] == 'getAuthToken') return rpc({'token': 'jwt'});
-        return ok({
-          'rooms': [
-            {'id': 31, 'status': 'REGULAR'},
-            {'id': 34, 'status': 'ADDED'},
-            {'id': 40, 'status': 'REMOVED'},
-          ],
-        });
-      };
-      final r = await api.patchLessonRooms(
-        host: 'h',
-        school: 's',
-        auth: creds,
-        periodId: 7,
-        roomIds: [31, 34],
-        wholeBlock: true,
-      );
-      final patch = adapter.requests.last;
-      expect(patch.method, 'PATCH');
-      expect(
-        patch.uri.path,
-        '/WebUntis/api/rest/view/v1/calendar-entry/7/block',
-      );
-      expect(patch.json, {
-        'rooms': {
-          'value': [31, 34],
-        },
-      });
-      expect(r!.ok, isTrue);
-      expect(r.roomIds, [31, 34]);
-      expect(
-        api.debugLog.any(
-          (e) => e.method.contains('calendar-entry/7/block request body'),
-        ),
-        isTrue,
-      );
-    });
-
-    test('rooms: null on 404 so the caller falls back', () async {
-      handler = (r) {
-        if (r.json?['method'] == 'getAuthToken') return rpc({'token': 'jwt'});
-        return (status: 404, body: '', headers: const {});
-      };
-      expect(
-        await api.patchLessonRooms(
-          host: 'h',
-          school: 's',
-          auth: creds,
-          periodId: 7,
-          roomIds: [34],
-        ),
-        isNull,
-      );
-    });
-
     test('notes for pupils: REST notesAll PATCH, only that field', () async {
       handler = (r) {
         if (r.json?['method'] == 'getAuthToken') return rpc({'token': 'jwt'});
@@ -723,79 +644,6 @@ void main() {
       expect(wrong.errors.single.code, 'ROOM_NOT_IN_PERIOD');
     });
 
-    test('room change: REST PATCH with the full list', () async {
-      final a = teacherAccount();
-      final patch = PatchRoomApi();
-      final r = build(patch);
-      final p = await maths(patch);
-      expect([for (final e in currentRoomsOf(p)) e.id], [31]);
-      await r.changeRoom(a, [p], orgRoomId: 0, roomId: 34);
-      await r.changeRoom(a, [p], orgRoomId: 31, roomId: 35);
-      await r.changeRoom(a, [p], orgRoomId: 31, roomId: 0);
-      expect(
-        [for (final c in patch.calls) c.roomIds],
-        [
-          [31, 34],
-          [35],
-          <int>[],
-        ],
-      );
-      expect(patch.calls.first.periodId, p.id);
-      expect(patch.calls.first.wholeBlock, isFalse);
-      // Nothing went through submitRoomChange2017.
-      expect(patch.roomChangeCalls, isEmpty);
-      final two = await r.changeRoom(a, [p, p], orgRoomId: 31, roomId: 35);
-      expect(two.ok, isTrue);
-      expect(patch.calls.last.wholeBlock, isTrue);
-    });
-
-    test(
-      'room change: submitRoomChange2017 when the PATCH is missing',
-      () async {
-        final r = build(PatchRoomApi(missing: true));
-        final p = await maths(api);
-        final res = await r.changeRoom(
-          teacherAccount(),
-          [p],
-          orgRoomId: 31,
-          roomId: 34,
-        );
-        expect(res.ok, isTrue);
-        expect(api.roomChangeCalls.single.roomId, 34);
-      },
-    );
-
-    test('RoomEdit.apply: add, remove, replace in place', () {
-      expect(const RoomEdit.add(5).apply([1, 2]), [1, 2, 5]);
-      expect(const RoomEdit.add(2).apply([1, 2]), [1, 2]);
-      expect(const RoomEdit.remove(1).apply([1, 2]), [2]);
-      expect(const RoomEdit.replace(1, 5).apply([1, 2]), [5, 2]);
-      expect(const RoomEdit.replace(1, 2).apply([1, 2]), [2]);
-    });
-
-    test('parseCalendarRooms: ids, objects, REMOVED, nesting', () {
-      expect(
-        parseCalendarRooms({
-          'rooms': [1, 2],
-        }),
-        [1, 2],
-      );
-      expect(
-        parseCalendarRooms({
-          'calendarEntries': [
-            {
-              'rooms': [
-                {'id': 3, 'status': 'REMOVED'},
-                {'id': 4},
-              ],
-            },
-          ],
-        }),
-        [4],
-      );
-      expect(parseCalendarRooms({'notesAll': ''}), isNull);
-    });
-
     test('lesson info goes to the server and shows in the timetable', () async {
       final a = teacherAccount();
       final p = await maths(api);
@@ -895,10 +743,10 @@ void main() {
     });
 
     test('exam types never throw', () async {
-      // From the school's exams (no master data key): plain names.
-      final types = await repo.examTypes(teacherAccount());
-      expect(types, isNotEmpty);
-      expect(types.every((t) => t.id < 0 && t.name.isNotEmpty), isTrue);
+      expect(
+        await repo.examTypes(teacherAccount()),
+        FakeUntisApi.demoExamTypes,
+      );
       expect(await repo.examTypes(demoAccount()), isEmpty);
     });
 
@@ -1226,8 +1074,9 @@ void main() {
       final send = find.byKey(const ValueKey('exam-send'));
       expect(t.widget<FilledButton>(send).onPressed, isNull);
 
-      // Free text.
-      await t.enterText(find.byKey(const ValueKey('exam-type')), 'Schularbeit');
+      await t.tap(find.byKey(const ValueKey('exam-type')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const ValueKey('exam-type-1')).last);
       await t.pumpAndSettle();
       await t.enterText(find.byKey(const ValueKey('exam-name')), 'Fractions');
       // Extend to the next period.
@@ -1247,7 +1096,7 @@ void main() {
       await t.pumpAndSettle();
       expect(created, isTrue);
       final e = api.createExamCalls.single;
-      expect(e.examTypeId, isNull);
+      expect(e.examTypeId, 1);
       expect(e.examType, 'Schularbeit');
       expect(e.name, 'Fractions');
       expect(e.start, DateTime(2026, 11, 10, 9, 40));
@@ -1292,16 +1141,10 @@ void main() {
       );
       // Tuesday's maths lesson is unit 3 (index 2).
       expect(find.text('09:40 – 10:25'), findsOneWidget);
-      // Pick one of the known types (from the school's exams).
-      await t.tap(find.widgetWithText(ChoiceChip, 'Test'));
+      await t.tap(find.byKey(const ValueKey('exam-type')));
       await t.pumpAndSettle();
-      expect(
-        t
-            .widget<TextField>(find.byKey(const ValueKey('exam-type')))
-            .controller!
-            .text,
-        'Test',
-      );
+      await t.tap(find.byKey(const ValueKey('exam-type-2')).last);
+      await t.pumpAndSettle();
       final send = find.byKey(const ValueKey('exam-send'));
       await t.ensureVisible(send);
       await t.tap(send);

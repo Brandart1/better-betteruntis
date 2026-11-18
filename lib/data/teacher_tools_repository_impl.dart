@@ -248,29 +248,7 @@ class TeacherToolsRepositoryImpl implements TeacherToolsRepository {
         throw const UntisException(-1, 'No lesson selected.');
       }
       final auth = await accounts.credentials(account.id);
-      RoomChangeResult? result;
-      final Object a = api;
-      if (a is RoomPatchApi) {
-        // The official app's way: PATCH the complete room list (one call,
-        // for the whole block when it has several periods).
-        final edit = roomId == 0
-            ? RoomEdit.remove(orgRoomId)
-            : orgRoomId == 0
-            ? RoomEdit.add(roomId)
-            : RoomEdit.replace(orgRoomId, roomId);
-        result = await a.patchLessonRooms(
-          host: account.host,
-          school: account.school.loginName,
-          auth: auth,
-          periodId: periods.first.id,
-          roomIds: edit.apply([
-            for (final r in currentRoomsOf(periods.first)) r.id,
-          ]),
-          wholeBlock: periods.length > 1,
-        );
-      }
-      // Older servers without the REST calendar API: JSON-RPC.
-      result ??= await _api.submitRoomChange(
+      final result = await _api.submitRoomChange(
         host: account.host,
         school: account.school.loginName,
         auth: auth,
@@ -368,9 +346,15 @@ class TeacherToolsRepositoryImpl implements TeacherToolsRepository {
     try {
       _check(account);
       final auth = await accounts.credentials(account.id);
-      // The official app's master data has no exam types: an exam's type is
-      // a plain string, so offer those of the exams we can load.
-      final types = await _typesFromExams(account, auth);
+      var types = const <ExamType>[];
+      try {
+        types = await _api.examTypes(
+          host: account.host,
+          school: account.school.loginName,
+          auth: auth,
+        );
+      } catch (_) {}
+      if (types.isEmpty) types = await _typesFromExams(account, auth);
       if (types.isEmpty) return const [];
       return _examTypes[account.id] = types;
     } catch (_) {

@@ -490,33 +490,15 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
       }
       final first = periods.reduce((a, b) => b.start.isBefore(a.start) ? b : a);
       final auth = await accounts.credentials(account.id);
-      // The server stores entries per pupil: an entry for the whole class
-      // becomes one entry per pupil of the lesson.
-      var studentIds = [?event.studentId];
-      if (event.studentId == null) {
-        final d = await _api.periodData(
-          host: account.host,
-          school: account.school.loginName,
-          auth: auth,
-          ttIds: [first.id],
-        );
-        studentIds = d.periods[first.id]?.studentIds ?? const [];
-        if (studentIds.isEmpty) {
-          throw const UntisException(-1, 'No pupils found for this lesson.');
-        }
-      }
-      for (final id in studentIds) {
-        await _api.createClassRegEvent(
-          host: account.host,
-          school: account.school.loginName,
-          auth: auth,
-          ttId: first.id,
-          studentId: id,
-          eventReasonId: event.reasonId,
-          text: event.text.trim(),
-          start: first.start,
-        );
-      }
+      await _api.createClassRegEvent(
+        host: account.host,
+        school: account.school.loginName,
+        auth: auth,
+        ttId: first.id,
+        studentId: event.studentId,
+        eventReasonId: event.reasonId,
+        text: event.text.trim(),
+      );
     });
   }
 

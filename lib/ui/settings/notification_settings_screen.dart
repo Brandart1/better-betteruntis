@@ -133,11 +133,7 @@ class _NotificationSettingsScreenState
                 : null,
           ),
           if (hasClassRegister(account) &&
-              (ref
-                      .watch(substitutionAvailabilityProvider)
-                      .value
-                      ?.substitutionRequests ??
-                  false))
+              ref.watch(onlineSubstitutionPlanningProvider))
             AdaptiveSwitchTile(
               key: const ValueKey('notifications-substitution-requests'),
               title: const Text('Substitution requests'),

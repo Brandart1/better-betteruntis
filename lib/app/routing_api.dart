@@ -20,7 +20,6 @@ class RoutingUntisApi
     implements
         FullUntisApi,
         TeacherToolsApi,
-        RoomPatchApi,
         ClassAbsencesApi,
         PupilPhotoApi,
         ExcuseApi,
@@ -384,8 +383,6 @@ class RoutingUntisApi
     int? studentId,
     int? eventReasonId,
     required String text,
-    DateTime? start,
-    int? eventId,
   }) => _for(host).createClassRegEvent(
     host: host,
     school: school,
@@ -394,8 +391,6 @@ class RoutingUntisApi
     studentId: studentId,
     eventReasonId: eventReasonId,
     text: text,
-    start: start,
-    eventId: eventId,
   );
 
   // ---- Teacher tools (room changes, exams) --------------------------------
@@ -450,29 +445,6 @@ class RoutingUntisApi
     orgRoomId: orgRoomId,
     roomId: roomId,
   );
-
-  /// Null for the demo / older APIs: the repository then falls back to
-  /// [submitRoomChange].
-  @override
-  Future<RoomChangeResult?> patchLessonRooms({
-    required String host,
-    required String school,
-    required UntisCredentials auth,
-    required int periodId,
-    required List<int> roomIds,
-    bool wholeBlock = false,
-  }) async {
-    final Object a = _for(host);
-    if (a is! RoomPatchApi) return null;
-    return a.patchLessonRooms(
-      host: host,
-      school: school,
-      auth: auth,
-      periodId: periodId,
-      roomIds: roomIds,
-      wholeBlock: wholeBlock,
-    );
-  }
 
   @override
   Future<bool> submitPeriodInfo({
@@ -702,15 +674,6 @@ class RoutingUntisApi
   }) =>
       _substitution(host)
           .teacherAbsences(host: host, school: school, auth: auth);
-
-  @override
-  Future<SubstitutionAvailability> homeAvailability({
-    required String host,
-    required String school,
-    required UntisCredentials auth,
-  }) =>
-      _substitution(host)
-          .homeAvailability(host: host, school: school, auth: auth);
 
   @override
   Future<TeacherAbsenceForm> teacherAbsenceForm({

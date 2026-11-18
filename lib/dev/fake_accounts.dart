@@ -1580,19 +1580,6 @@ class FakeUntisApi
   }
 
   @override
-  Future<SubstitutionAvailability> homeAvailability({
-    required String host,
-    required String school,
-    required UntisCredentials auth,
-  }) async {
-    await _delay();
-    return const SubstitutionAvailability(
-      teacherAbsences: true,
-      substitutionRequests: true,
-    );
-  }
-
-  @override
   Future<TeacherAbsenceForm> teacherAbsenceForm({
     required String host,
     required String school,
@@ -1701,20 +1688,16 @@ class FakeUntisApi
     int? studentId,
     int? eventReasonId,
     required String text,
-    DateTime? start,
-    int? eventId,
   }) async {
     await _delay();
-    final list = registerEvents[ttId] ??= [];
-    if (eventId != null) list.removeWhere((e) => e.id == eventId);
-    list.add(
+    (registerEvents[ttId] ??= []).add(
       ClassRegEvent(
-        id: eventId ?? _nextEventId++,
+        id: _nextEventId++,
         ttId: ttId,
         studentId: studentId,
         reasonId: eventReasonId,
         text: text,
-        date: start ?? DateTime.now(),
+        date: DateTime.now(),
       ),
     );
   }

@@ -14,10 +14,9 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'class_register.dart';
 import 'interfaces.dart';
 import 'models.dart';
-import 'providers.dart';
+import 'settings.dart';
 
 /// State of a substitution request (`SubstitutionRequestDto.state`).
 enum SubstitutionRequestState {
@@ -213,15 +212,6 @@ abstract interface class SubstitutionPlanningApi {
     required UntisCredentials auth,
   });
 
-  /// The home cells the server shows this teacher (`GET view/v2/home`).
-  /// An HTTP 404 throws an [UntisException] (the school has no such
-  /// view).
-  Future<SubstitutionAvailability> homeAvailability({
-    required String host,
-    required String school,
-    required UntisCredentials auth,
-  });
-
   /// Reports [draft]; returns the server's id when it sends one.
   Future<int?> createTeacherAbsence({
     required String host,
@@ -251,15 +241,6 @@ abstract interface class SubstitutionPlanningRepository {
   /// Cached per account for the session.
   Future<TeacherAbsenceForm> form(Account account);
 
-  /// What the server offers [account] (home cells), cached per account for
-  /// the session; [refresh] fetches anew. Never throws: a failed or 404
-  /// answer is [SubstitutionAvailability.none] (not cached when the network
-  /// failed).
-  Future<SubstitutionAvailability> availability(
-    Account account, {
-    bool refresh = false,
-  });
-
   /// Reports an absence of the account's teacher; the own timetable weeks
   /// it covers are refreshed.
   Future<void> reportAbsence(
@@ -278,45 +259,44 @@ final substitutionPlanningRepositoryProvider =
       ),
     );
 
-/// What the server offers this teacher, decided by the home cells of
-/// `GET view/v2/home` (types `TEACHER_ABSENCES` and `SUBSTITUTION_REQUESTS`).
-/// Many schools arrange substitutions by phone: then neither is offered.
-class SubstitutionAvailability {
-  const SubstitutionAvailability({
-    this.teacherAbsences = false,
-    this.substitutionRequests = false,
-  });
+/// Whether the school plans substitutions online (Settings, teachers; off by
+/// default). Many schools arrange substitutions by phone with the admin: then
+/// "Substitution requests" and "My absences" stay hidden from the menu and
+/// no notifications for requests are checked.
+final onlineSubstitutionPlanningProvider =
+    NotifierProvider<OnlineSubstitutionPlanningSetting, bool>(
+      OnlineSubstitutionPlanningSetting.new,
+    );
 
-  /// Nothing offered (also the answer when the call fails).
-  static const none = SubstitutionAvailability();
-
-  /// "My absences".
-  final bool teacherAbsences;
-
-  /// "Substitution requests".
-  final bool substitutionRequests;
+class OnlineSubstitutionPlanningSetting extends Notifier<bool> {
+  static const storeKey = 'onlineSubstitutionPlanning';
+  bool _changed = false;
 
   @override
-  bool operator ==(Object other) =>
-      other is SubstitutionAvailability &&
-      other.teacherAbsences == teacherAbsences &&
-      other.substitutionRequests == substitutionRequests;
+  bool build() {
+    final store = ref.watch(settingsStoreProvider);
+    final cached = store.peek(storeKey);
+    if (cached is bool) return cached;
+    unawaited(_load(store));
+    return false;
+  }
 
-  @override
-  int get hashCode => Object.hash(teacherAbsences, substitutionRequests);
+  Future<void> _load(SettingsStore store) async {
+    try {
+      final raw = await store.read(storeKey);
+      if (!ref.mounted || _changed || raw is! bool) return;
+      state = raw;
+    } catch (_) {
+      // Unreadable: keep the default.
+    }
+  }
+
+  void set(bool value) {
+    _changed = true;
+    if (value == state) return;
+    state = value;
+    unawaited(
+      ref.read(settingsStoreProvider).write(storeKey, value).catchError((_) {}),
+    );
+  }
 }
-
-/// Availability of the active account; [SubstitutionAvailability.none] for
-/// pupils, parents and while loading. Auto-disposed so a failed fetch is
-/// retried the next time the menu needs it (the repository caches successes
-/// for the session).
-final substitutionAvailabilityProvider =
-    FutureProvider.autoDispose<SubstitutionAvailability>((ref) async {
-      final account = ref.watch(activeAccountProvider).value;
-      if (account == null || !hasClassRegister(account)) {
-        return SubstitutionAvailability.none;
-      }
-      return ref
-          .watch(substitutionPlanningRepositoryProvider)
-          .availability(account);
-    });
