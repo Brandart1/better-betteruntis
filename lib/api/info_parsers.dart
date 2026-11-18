@@ -140,7 +140,15 @@ AbsenceLookups parseAbsenceLookups(Object? masterData) {
     return out;
   }
 
+  final images = <int, String>{};
+  for (final s in _maps(j['students'])) {
+    final id = _intOrNull(s['id']);
+    final url = _firstStr(s, const ['imageUrl']);
+    if (id != null && url != null) images[id] = url;
+  }
+
   return AbsenceLookups(
+    studentImages: images,
     reasons: names(j['absenceReasons']),
     statuses: names(j['excuseStatuses']),
     eventReasons: names(j['eventReasons']),

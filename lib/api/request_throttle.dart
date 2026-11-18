@@ -1,11 +1,15 @@
-/// Paces requests to the school's server and retries refused ones.
+/// Limits parallel requests to the school's server and retries refused ones.
 ///
 /// A real teacher account hit the server's rate limit in the class register
-/// (2026-11-17): one screen loads the lesson, the history, homework, reasons
-/// and pupil photos at once. This interceptor lets at most [maxParallel]
-/// requests per host run at a time, keeps [minGap] between their starts, and
-/// repeats a request the server answered with HTTP 429 (or 503 with a
-/// `Retry-After`) up to [maxRetries] times after waiting.
+/// (2026-11-17). This interceptor lets at most [maxParallel] requests per
+/// host run at a time and repeats a request the server answered with HTTP
+/// 429 (or 503 with a `Retry-After`) up to [maxRetries] times after waiting.
+///
+/// Requests started inside [inBackground] (lib/core/request_priority.dart;
+/// pupil photos, colleagues' lessons, refreshing cached weeks) wait behind
+/// everything else and never take more than [maxBackground] slots, so what the user
+/// is looking at is never stuck behind them (the +134 throttle queued all
+/// requests in one line, which made every screen slow).
 library;
 
 import 'dart:async';
@@ -13,11 +17,14 @@ import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 
+import '../core/request_priority.dart';
+
 class RequestThrottle extends Interceptor {
   RequestThrottle(
     this._dio, {
-    this.maxParallel = 3,
-    this.minGap = const Duration(milliseconds: 120),
+    this.maxParallel = 6,
+    this.maxBackground = 3,
+    this.minGap = Duration.zero,
     this.maxRetries = 2,
     Future<void> Function(Duration)? sleep,
     DateTime Function()? now,
@@ -26,6 +33,9 @@ class RequestThrottle extends Interceptor {
 
   final Dio _dio;
   final int maxParallel;
+
+  /// Most background requests running at once per host (of [maxParallel]).
+  final int maxBackground;
   final Duration minGap;
   final int maxRetries;
   final Future<void> Function(Duration) _sleep;
@@ -48,30 +58,29 @@ class RequestThrottle extends Interceptor {
     RequestInterceptorHandler handler,
   ) async {
     final h = _host(options);
-    if (h.running >= maxParallel) {
+    final bg = isBackgroundRequest;
+    if (!h.canStart(bg, maxParallel, maxBackground)) {
       final turn = Completer<void>();
-      h.queue.add(turn);
-      await turn.future; // The finishing request handed over its slot.
+      (bg ? h.backgroundQueue : h.queue).add(turn);
+      await turn.future; // _pump started it (counted it already).
     } else {
-      h.running++;
+      h.start(bg);
     }
+    options.extra[_slotKey] = bg ? 'background' : 'foreground';
     final gap = h.lastStart == null
         ? Duration.zero
         : minGap - _now().difference(h.lastStart!);
     if (gap > Duration.zero) await _sleep(gap);
     h.lastStart = _now();
-    options.extra[_slotKey] = true;
     handler.next(options);
   }
 
   void _release(RequestOptions o) {
-    if (o.extra.remove(_slotKey) != true) return;
+    final slot = o.extra.remove(_slotKey);
+    if (slot == null) return;
     final h = _host(o);
-    if (h.queue.isNotEmpty) {
-      h.queue.removeAt(0).complete();
-    } else {
-      h.running--;
-    }
+    h.finish(slot == 'background');
+    h.pump(maxParallel, maxBackground);
   }
 
   @override
@@ -119,6 +128,37 @@ class RequestThrottle extends Interceptor {
 
 class _Host {
   var running = 0;
+  var runningBackground = 0;
   final queue = <Completer<void>>[];
+  final backgroundQueue = <Completer<void>>[];
   DateTime? lastStart;
+
+  bool canStart(bool background, int max, int maxBackground) {
+    if (running >= max) return false;
+    if (!background) return true;
+    // Foreground waiting goes first; background keeps slots free.
+    return queue.isEmpty && runningBackground < maxBackground;
+  }
+
+  void start(bool background) {
+    running++;
+    if (background) runningBackground++;
+  }
+
+  void finish(bool background) {
+    running--;
+    if (background) runningBackground--;
+  }
+
+  /// Starts waiting requests while slots are free, foreground first.
+  void pump(int max, int maxBackground) {
+    while (queue.isNotEmpty && running < max) {
+      start(false);
+      queue.removeAt(0).complete();
+    }
+    while (backgroundQueue.isNotEmpty && canStart(true, max, maxBackground)) {
+      start(true);
+      backgroundQueue.removeAt(0).complete();
+    }
+  }
 }

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:better_betteruntis/api/request_throttle.dart';
 import 'package:better_betteruntis/core/interfaces.dart';
+import 'package:better_betteruntis/core/request_priority.dart';
 import 'package:better_betteruntis/data/absence_summary_repository_impl.dart'
     show isClassListRefusal;
 import 'package:dio/dio.dart';
@@ -48,12 +49,13 @@ ResponseBody _body(
 
 void main() {
   final waits = <Duration>[];
-  Dio dio(_Server server, {int maxParallel = 3}) {
+  Dio dio(_Server server, {int maxParallel = 3, int maxBackground = 3}) {
     final d = Dio()..httpClientAdapter = server;
     d.interceptors.add(
       RequestThrottle(
         d,
         maxParallel: maxParallel,
+        maxBackground: maxBackground,
         minGap: Duration.zero,
         sleep: (w) async => waits.add(w),
       ),
@@ -122,6 +124,33 @@ void main() {
     await Future.wait(all);
     expect(server.calls, 6);
     expect(server.maxRunning, 2);
+  });
+
+  test('background requests keep slots free and wait behind foreground ones', () async {
+    final gate = Completer<void>();
+    final order = <String>[];
+    final server = _Server((o, n) async {
+      order.add(o.uri.path);
+      await gate.future;
+      return _body(200);
+    });
+    final d = dio(server, maxParallel: 3, maxBackground: 2);
+    final bg = inBackground(
+      () => [for (var i = 0; i < 4; i++) d.get<String>('https://h/bg$i')],
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    // Only maxBackground of them run: one slot stays free.
+    expect(server.running, 2);
+    final fg = [for (var i = 0; i < 2; i++) d.get<String>('https://h/fg$i')];
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    // The free slot goes to the first foreground request at once.
+    expect(server.running, 3);
+    expect(order.last, '/fg0');
+    gate.complete();
+    await Future.wait([...bg, ...fg]);
+    expect(server.maxRunning, 3);
+    // The second foreground request started before the waiting background ones.
+    expect(order.indexOf('/fg1'), lessThan(order.indexOf('/bg2')));
   });
 
   test('a refused class list ("invalid user role") is recognised', () {

@@ -7,6 +7,7 @@ import 'package:drift/drift.dart';
 
 import '../core/interfaces.dart';
 import '../core/models.dart';
+import '../core/request_priority.dart';
 import 'db/database.dart';
 import 'aggregated_timetable.dart';
 import 'master_data_store.dart';
@@ -74,6 +75,9 @@ class TimetableRepositoryImpl implements TimetableRepository {
   ) {
     final monday = mondayOf(weekStart);
     final key = _key(account.id, target, monday);
+    // The caller's zone: inside inBackground the refresh
+    // stays at background priority (onListen runs in the listener's zone).
+    final zone = Zone.current;
     StreamSubscription<CachedWeekRow?>? sub;
     late final StreamController<List<Period>> out;
     out = StreamController<List<Period>>(
@@ -92,19 +96,23 @@ class TimetableRepositoryImpl implements TimetableRepository {
             final stale =
                 row == null || clock().difference(_fetchedAt[key]!) > maxAge;
             if (!stale) return;
-            refresh(account, target, monday).then(
-              (_) {
-                _lastError = null;
-                _errors.add(null);
-              },
-              onError: (Object e, StackTrace s) {
-                final ex = _wrap(e);
-                _lastError = ex;
-                _errors.add(ex);
-                // Without cached data there is nothing to show: surface it.
-                if (row == null && !out.isClosed) out.addError(ex, s);
-              },
-            );
+            // With cached data on screen the refresh is background work:
+            // it must not hold up requests the user is waiting for.
+            Future<void> run() => refresh(account, target, monday);
+            (row != null ? zone.run(() => inBackground(run)) : zone.run(run))
+                .then(
+                  (_) {
+                    _lastError = null;
+                    _errors.add(null);
+                  },
+                  onError: (Object e, StackTrace s) {
+                    final ex = _wrap(e);
+                    _lastError = ex;
+                    _errors.add(ex);
+                    // Without cached data there is nothing to show: surface it.
+                    if (row == null && !out.isClosed) out.addError(ex, s);
+                  },
+                );
           },
           onError: out.addError,
         );
@@ -314,10 +322,12 @@ class TimetableRepositoryImpl implements TimetableRepository {
     if (run == null) {
       final r = run = _ScanRun();
       _scans[key] = r;
-      r.future = _doScan(account, monday, r).then((scan) {
-        _lastScans[key] = scan;
-        return scan;
-      }).whenComplete(() => _scans.remove(key));
+      r.future = _doScan(account, monday, r)
+          .then((scan) {
+            _lastScans[key] = scan;
+            return scan;
+          })
+          .whenComplete(() => _scans.remove(key));
     }
     if (onProgress != null) {
       run.listeners.add(onProgress);
@@ -326,7 +336,11 @@ class TimetableRepositoryImpl implements TimetableRepository {
     return run.future;
   }
 
-  Future<ClassScan> _doScan(Account account, DateTime monday, _ScanRun run) async {
+  Future<ClassScan> _doScan(
+    Account account,
+    DateTime monday,
+    _ScanRun run,
+  ) async {
     final names = await _master.loadResolver(account.id);
     var classes = names.elementsOf(ElementType.klasse);
     if (classes.isEmpty) {
@@ -338,7 +352,9 @@ class TimetableRepositoryImpl implements TimetableRepository {
 
     Object? firstError;
     StackTrace? firstStack;
-    final results = await runLimited(classes, aggregationConcurrency, (c) async {
+    final results = await runLimited(classes, aggregationConcurrency, (
+      c,
+    ) async {
       try {
         return await _classWeek(account, c.id, monday);
       } catch (e, s) {

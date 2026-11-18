@@ -197,3 +197,18 @@ int? createdTeacherAbsenceId(Object? raw) {
   final id = _int(_map(raw)['id']);
   return id == null || id <= 0 ? null : id;
 }
+
+/// `GET view/v2/home` (`HomeTabDto`): `sections[].cells[].type`, the type
+/// being the upper snake key of `HomeTabCellType` (`TEACHER_ABSENCES`,
+/// `SUBSTITUTION_REQUESTS`, ...). The server decides by these cells whether
+/// the teacher sees "My absences" / "Substitution requests".
+SubstitutionAvailability parseHomeAvailability(Object? raw) {
+  final types = {
+    for (final s in _maps(_map(raw)['sections']))
+      for (final c in _maps(s['cells'])) '${c['type']}'.trim().toUpperCase(),
+  };
+  return SubstitutionAvailability(
+    teacherAbsences: types.contains('TEACHER_ABSENCES'),
+    substitutionRequests: types.contains('SUBSTITUTION_REQUESTS'),
+  );
+}

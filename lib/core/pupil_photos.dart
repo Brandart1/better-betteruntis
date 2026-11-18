@@ -1,8 +1,7 @@
 /// Pupil photos in the teacher's class register ("Absences & lesson topic").
 ///
-/// How the server delivers them is **not known yet** (docs/API.md "Pupil
-/// photos (assumed)"): the API tries an image URL sent with the pupil, then
-/// a few guessed endpoints, and logs what it got. Photos are personal data:
+/// The URL is `imageUrl` of the pupil in the master data (getUserData2017
+/// `masterData.students[]`), loaded as given. Photos are personal data:
 /// they are kept in memory for the session only ([PupilPhotoRepository]),
 /// never on disk and never synced.
 library;
@@ -20,8 +19,8 @@ import 'settings.dart';
 /// Optional API capability: a pupil's photo.
 abstract interface class PupilPhotoApi {
   /// The photo of pupil [studentId] (image bytes), or null when the server
-  /// has none / no photo source works. [imageUrl] is the image URL sent
-  /// with the pupil (getPeriodData2017 `referencedStudents`), when any.
+  /// has none. [imageUrl] is the pupil's image URL when known; else the
+  /// master data `students[].imageUrl` is used.
   Future<Uint8List?> pupilPhoto({
     required String host,
     required String school,

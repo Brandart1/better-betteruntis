@@ -5,6 +5,7 @@ import '../core/class_register.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
 import '../core/pupil_photos.dart';
+import '../core/request_priority.dart';
 
 /// [PupilPhotoRepository] on top of [PupilPhotoApi]: photos (and "has no
 /// photo") are kept in memory per account and pupil for the session, never
@@ -55,12 +56,15 @@ class PupilPhotoRepositoryImpl implements PupilPhotoRepository {
     }
     try {
       final auth = await accounts.credentials(account.id);
-      final img = await a.pupilPhoto(
-        host: account.host,
-        school: account.school.loginName,
-        auth: auth,
-        studentId: student.id,
-        imageUrl: student.imageUrl,
+      // Background priority: the class register's own data goes first.
+      final img = await inBackground(
+        () => a.pupilPhoto(
+          host: account.host,
+          school: account.school.loginName,
+          auth: auth,
+          studentId: student.id,
+          imageUrl: student.imageUrl,
+        ),
       );
       _loaded[key] = img;
       return img;

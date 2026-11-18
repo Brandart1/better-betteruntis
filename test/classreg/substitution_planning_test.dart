@@ -406,6 +406,49 @@ void main() {
       );
     });
 
+    test('home cells decide availability (REST, ?school=)', () async {
+      var status = 200;
+      handler = (r) {
+        if (isToken(r)) return rpc({'token': 'jwt'});
+        if (r.uri.path == '/WebUntis/api/rest/view/v2/home') {
+          return status == 200
+              ? ok({
+                  'schoolName': 'x',
+                  'sections': [
+                    {
+                      'cells': [
+                        {'type': 'MY_EVENTS'},
+                        {'type': 'TEACHER_ABSENCES', 'badge': null},
+                      ],
+                    },
+                    {
+                      'cells': [
+                        {'type': 'FUTURE_THING'},
+                      ],
+                    },
+                  ],
+                })
+              : (status: status, body: '', headers: const {});
+        }
+        return (status: 500, body: '', headers: const {});
+      };
+      final a = await api.homeAvailability(
+        host: host,
+        school: 's s',
+        auth: creds,
+      );
+      expect(a.teacherAbsences, isTrue);
+      expect(a.substitutionRequests, isFalse);
+      final req = adapter.requests.last;
+      expect(req.uri.queryParameters['school'], 's s');
+      expect(req.headers.containsKey('X-TenantID'), isFalse);
+      status = 404;
+      await expectLater(
+        api.homeAvailability(host: host, school: 's', auth: creds),
+        throwsA(isA<UntisException>()),
+      );
+    });
+
     test('absence form and create go to WebUntis REST', () async {
       handler = (r) {
         if (isToken(r)) return rpc({'token': 'jwt'});
@@ -429,6 +472,7 @@ void main() {
         auth: creds,
       );
       expect(form.reasons.single.name, 'Krankheit');
+      expect(adapter.requests.last.uri.queryParameters['school'], 's');
       expect(adapter.requests.last.headers.containsKey('X-TenantID'), isFalse);
       final draft = TeacherAbsenceDraft(
         teacherId: 11,
@@ -444,6 +488,7 @@ void main() {
         draft: draft,
       );
       expect(id, 4711);
+      expect(adapter.requests.last.uri.queryParameters['school'], 's');
       final post = adapter.requests.last;
       expect(post.headers['Authorization'], 'Bearer jwt');
       expect(post.json, teacherAbsencePayload(draft));
@@ -514,6 +559,16 @@ void main() {
       );
       final again = await repo.requests(a);
       expect(again.every((r) => !r.isPending), isTrue);
+    });
+
+    test('availability: demo offers both, pupils none, cached', () async {
+      final a = teacherAccount();
+      final o = await repo.availability(a);
+      expect(o.teacherAbsences && o.substitutionRequests, isTrue);
+      expect(
+        await repo.availability(demoAccount()),
+        SubstitutionAvailability.none,
+      );
     });
 
     test('report an absence: own teacher id, weeks refreshed', () async {

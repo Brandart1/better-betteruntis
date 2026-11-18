@@ -87,6 +87,8 @@ class FailingCreateApi extends FakeUntisApi {
     int? studentId,
     int? eventReasonId,
     required String text,
+    DateTime? start,
+    int? eventId,
   }) async => throw const UntisException(-32601, 'Method not found');
 }
 
@@ -203,7 +205,7 @@ void main() {
             .cast<String, Object?>();
     String method() => adapter.requests.last.json!['method'] as String;
 
-    test('createClassRegEvent2017: params, logged body without auth', () async {
+    test('submitClassRegEvents: params, logged body without auth', () async {
       await api.createClassRegEvent(
         host: 'h',
         school: 's',
@@ -212,30 +214,117 @@ void main() {
         studentId: 9,
         eventReasonId: 3,
         text: 'Homework missing',
+        start: DateTime(2026, 11, 17, 8, 15),
       );
-      expect(method(), 'createClassRegEvent2017');
-      expect(params()['periodId'], 5);
-      expect(params()['studentId'], 9);
-      expect(params()['eventReasonId'], 3);
-      expect(params()['text'], 'Homework missing');
+      expect(method(), 'submitClassRegEvents');
+      expect(params()['ttId'], 5);
+      expect(params()['event'], {
+        'id': 0,
+        'element': {'type': 5, 'id': 9},
+        'date': '2026-11-17',
+        'startTime': 'T08:15',
+        'text': 'Homework missing',
+        'reasonId': 3,
+      });
       expect(params()['auth'], isA<Map>());
       final entry = api.debugLog.firstWhere(
-        (e) => e.method == 'createClassRegEvent2017 request body',
+        (e) => e.method == 'submitClassRegEvents request body',
       );
-      expect(entry.json, contains('"periodId":5'));
+      expect(entry.json, contains('"ttId":5'));
       expect(entry.json, isNot(contains('otp')));
 
-      // Whole class, no reason: those keys are left out.
+      // No reason -> 0; editing sends the entry's id.
       await api.createClassRegEvent(
         host: 'h',
         school: 's',
         auth: creds,
         ttId: 6,
-        text: 'Loud',
+        studentId: 9,
+        text: ' Loud ',
+        start: DateTime(2026, 11, 17, 9, 5),
+        eventId: 77,
       );
-      expect(params().containsKey('studentId'), isFalse);
-      expect(params().containsKey('eventReasonId'), isFalse);
+      final ev = params()['event'] as Map;
+      expect(ev['id'], 77);
+      expect(ev['reasonId'], 0);
+      expect(ev['text'], 'Loud');
+      expect(ev['startTime'], 'T09:05');
     });
+
+    test('an entry needs a pupil at API level', () async {
+      expect(
+        api.createClassRegEvent(
+          host: 'h',
+          school: 's',
+          auth: creds,
+          ttId: 6,
+          text: 'Loud',
+        ),
+        throwsA(isA<UntisException>()),
+      );
+    });
+
+    test('classRegEvents: elementType/elementId are the pupil', () {
+      final e = parseClassRegEvent({
+        'id': 4,
+        'elementType': 5,
+        'elementId': 9,
+        'eventReasonId': 3,
+        'dateTime': '2026-11-17T08:15:00Z',
+        'text': 'x',
+      })!;
+      expect(e.studentId, 9);
+      expect(e.reasonId, 3);
+      final c = parseClassRegEvent({
+        'id': 5,
+        'elementType': 'CLASS',
+        'elementId': 2,
+        'text': 'y',
+      })!;
+      expect(c.studentId, isNull);
+    });
+
+    test(
+      'class absences: getClassregData2017, names from referencedStudents',
+      () async {
+        final a2 = Adapter(
+          (r) => rpc({
+            'absences': [
+              {
+                'id': 1,
+                'studentId': 9,
+                'klasseId': 2,
+                'startDateTime': '2026-11-16T08:00:00Z',
+                'endDateTime': '2026-11-16T09:00:00Z',
+                'excused': true,
+              },
+            ],
+            'classRegEvents': [],
+            'referencedStudents': [
+              {'id': 9, 'firstName': 'Lena', 'lastName': 'Bauer'},
+            ],
+          }),
+        );
+        final api2 = UntisApiImpl(dio: Dio()..httpClientAdapter = a2);
+        final list = await api2.classAbsences(
+          host: 'h',
+          school: 's',
+          auth: creds,
+          klasseId: 2,
+          start: DateTime(2026, 11, 1),
+          end: DateTime(2026, 11, 30),
+        );
+        final req = a2.requests.last.json!;
+        expect(req['method'], 'getClassregData2017');
+        final p = ((req['params'] as List).single as Map);
+        expect(p['klasseId'], 2);
+        expect(p['startDate'], '2026-11-01');
+        expect(p['endDate'], '2026-11-30');
+        expect(a2.requests.where((r) => r.method == 'GET'), isEmpty);
+        expect(list.single.studentId, 9);
+        expect(list.single.studentName, 'Bauer Lena');
+      },
+    );
 
     test('event reasons: one getUserData2017 call, then remembered', () async {
       final r = await api.eventReasons(host: 'h', school: 's', auth: creds);

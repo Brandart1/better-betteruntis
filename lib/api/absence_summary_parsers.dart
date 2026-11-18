@@ -1,6 +1,6 @@
 /// Parser for class absence lists (teacher absence summaries, all-subjects
-/// scope). No real teacher answer has been seen yet (docs/API.md "Absence
-/// summaries (teachers)"), so keys are accepted tolerantly: the classic
+/// scope): the getClassregData2017 answer `{absences:[UMStudentAbsence],
+/// referencedStudents}`. Keys are still accepted tolerantly: the classic
 /// `GET /WebUntis/api/classreg/absences/students` shape (`{data:{absences:
 /// [{id, studentId?, studentName, startDate, startTime, endDate, endTime,
 /// isExcused, excuseStatus, reason, text, excuse:{…}}]}}`, seen for parents)
@@ -74,7 +74,10 @@ Iterable<Map<String, Object?>> _items(Object? raw) {
   );
 }
 
-ClassAbsenceRecord? parseClassAbsenceRecord(Map<String, Object?> j) {
+ClassAbsenceRecord? parseClassAbsenceRecord(
+  Map<String, Object?> j, {
+  Map<int, String> students = const {},
+}) {
   final id = _int(j['id'] ?? j['absenceId']);
   final start = _at(j, 'start');
   if (id == null || start == null) return null;
@@ -94,6 +97,7 @@ ClassAbsenceRecord? parseClassAbsenceRecord(Map<String, Object?> j) {
     }
   }
   final studentId = _int(j['studentId'] ?? student['id']);
+  if (name.isEmpty && studentId != null) name = students[studentId] ?? '';
   final excuse = _map(j['excuse']);
   final excused =
       _boolOrNull(j['isExcused'] ?? j['excused'] ?? excuse['isExcused']) ??
@@ -132,6 +136,21 @@ ClassAbsenceRecord? parseClassAbsenceRecord(Map<String, Object?> j) {
 }
 
 /// All absences of a class answer; entries without id or start are dropped.
-List<ClassAbsenceRecord> parseClassAbsenceRecords(Object? raw) => [
-  for (final e in _items(raw)) ?parseClassAbsenceRecord(e),
-];
+///
+/// getClassregData2017 carries no pupil names on the absences; they come
+/// from `referencedStudents` (by `studentId`).
+List<ClassAbsenceRecord> parseClassAbsenceRecords(Object? raw) {
+  final names = <int, String>{};
+  for (final s in _maps(_map(raw)['referencedStudents'])) {
+    final id = _int(s['id']);
+    if (id == null) continue;
+    final n = [
+      _str(s['lastName']),
+      _str(s['firstName']),
+    ].where((x) => x.isNotEmpty).join(' ');
+    if (n.isNotEmpty) names[id] = n;
+  }
+  return [
+    for (final e in _items(raw)) ?parseClassAbsenceRecord(e, students: names),
+  ];
+}
