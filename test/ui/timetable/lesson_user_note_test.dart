@@ -67,6 +67,11 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('lesson-exam-add')));
     await tester.pumpAndSettle();
     expect(find.text('Exam details'), findsOneWidget);
+    // "Only for you, …" wraps on small screens instead of being cut off.
+    final field = tester.widget<TextField>(
+      find.byKey(const ValueKey('lesson-details-field')),
+    );
+    expect(field.decoration!.helperMaxLines, greaterThan(1));
     await tester.enterText(
       find.byKey(const ValueKey('lesson-details-field')),
       'mündliche Wiederholung',

@@ -500,6 +500,7 @@ class _LessonDetailsDialogState extends State<_LessonDetailsDialog> {
         textCapitalization: TextCapitalization.sentences,
         decoration: InputDecoration(
           hintText: widget.hint,
+          helperMaxLines: 3,
           helperText: 'Only for you, not sent to the school.',
           border: const OutlineInputBorder(),
         ),

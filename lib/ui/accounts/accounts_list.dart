@@ -301,6 +301,7 @@ class _RenameDialogState extends State<_RenameDialog> {
       decoration: InputDecoration(
         labelText: 'Profile name',
         hintText: widget.account.displayName,
+        helperMaxLines: 3,
         helperText: 'Leave empty to use "${widget.account.displayName}"',
         border: const OutlineInputBorder(),
       ),
