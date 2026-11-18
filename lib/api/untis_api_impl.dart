@@ -24,7 +24,7 @@ import 'class_lead_parsers.dart';
 import 'class_register_parsers.dart';
 import 'excuse_parsers.dart';
 import 'json_rpc.dart';
-import 'request_throttle.dart';
+import 'rate_limit_retry.dart';
 import 'messaging_parsers.dart';
 import 'parsers.dart';
 import 'rest_teachers.dart';
@@ -51,7 +51,7 @@ class UntisApiImpl
     List<Interceptor> interceptors = const [],
   }) : this._(dio ?? _defaultDio(interceptors), now, isIos);
 
-  /// The app's client: [RequestThrottle] first (it sees the school's host,
+  /// The app's client: [RateLimitRetry] first (it sees the school's host,
   /// before the web relay rewrites the URL), then [interceptors].
   static Dio _defaultDio(List<Interceptor> interceptors) {
     final dio = Dio(
@@ -61,7 +61,7 @@ class UntisApiImpl
       ),
     );
     dio.interceptors
-      ..add(RequestThrottle(dio))
+      ..add(RateLimitRetry(dio))
       ..addAll(interceptors);
     return dio;
   }

@@ -4,7 +4,6 @@ import '../../core/colleague_lessons.dart';
 import '../../core/lesson_notes.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
-import '../../core/request_priority.dart';
 import '../../core/settings.dart';
 
 /// Key of one week of one timetable. Equality uses the account id (not the
@@ -52,17 +51,6 @@ final rawWeekPeriodsProvider = StreamProvider.autoDispose
       retry: (_, _) => null,
     );
 
-/// A class week for [colleagueLessonsProvider]: like [rawWeekPeriodsProvider],
-/// but its requests run at background priority (lib/core/request_priority.dart),
-/// so the classes' timetables never hold up what the user opens.
-final colleagueClassWeekProvider = StreamProvider.autoDispose
-    .family<List<Period>, WeekRequest>((ref, req) {
-      final repo = ref.watch(timetableRepositoryProvider);
-      return inBackground(
-        () => repo.watchWeek(req.account, req.target, req.weekStart),
-      );
-    }, retry: (_, _) => null);
-
 /// [rawWeekPeriodsProvider] with the user's lesson notes (own exams and
 /// details) applied.
 final weekPeriodsProvider = Provider.autoDispose
@@ -88,9 +76,8 @@ bool isOwnTeacherTimetable(Account account, TimetableTarget target) =>
 ///
 /// Starts only once the own week is there, then loads (cache-first, like any
 /// timetable) the week of each assigned class through
-/// [colleagueClassWeekProvider], at background priority. A class week that
-/// is still loading or fails is simply left out: this never errors and
-/// never holds up the own timetable.
+/// [rawWeekPeriodsProvider]. A class week that is still loading or fails is
+/// simply left out: this never errors and never holds up the own timetable.
 final colleagueLessonsProvider = Provider.autoDispose
     .family<List<Period>, WeekRequest>((ref, req) {
       if (!isOwnTeacherTimetable(req.account, req.target)) return const [];
@@ -108,7 +95,7 @@ final colleagueLessonsProvider = Provider.autoDispose
       final out = <Period>[];
       for (final c in classIds) {
         final week = ref.watch(
-          colleagueClassWeekProvider(
+          rawWeekPeriodsProvider(
             WeekRequest(
               req.account,
               TimetableTarget(ElementType.klasse, c),

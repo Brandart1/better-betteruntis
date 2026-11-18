@@ -7,7 +7,6 @@ import 'package:drift/drift.dart';
 
 import '../core/interfaces.dart';
 import '../core/models.dart';
-import '../core/request_priority.dart';
 import 'db/database.dart';
 import 'aggregated_timetable.dart';
 import 'master_data_store.dart';
@@ -75,9 +74,6 @@ class TimetableRepositoryImpl implements TimetableRepository {
   ) {
     final monday = mondayOf(weekStart);
     final key = _key(account.id, target, monday);
-    // The caller's zone: inside inBackground the refresh
-    // stays at background priority (onListen runs in the listener's zone).
-    final zone = Zone.current;
     StreamSubscription<CachedWeekRow?>? sub;
     late final StreamController<List<Period>> out;
     out = StreamController<List<Period>>(
@@ -96,23 +92,19 @@ class TimetableRepositoryImpl implements TimetableRepository {
             final stale =
                 row == null || clock().difference(_fetchedAt[key]!) > maxAge;
             if (!stale) return;
-            // With cached data on screen the refresh is background work:
-            // it must not hold up requests the user is waiting for.
-            Future<void> run() => refresh(account, target, monday);
-            (row != null ? zone.run(() => inBackground(run)) : zone.run(run))
-                .then(
-                  (_) {
-                    _lastError = null;
-                    _errors.add(null);
-                  },
-                  onError: (Object e, StackTrace s) {
-                    final ex = _wrap(e);
-                    _lastError = ex;
-                    _errors.add(ex);
-                    // Without cached data there is nothing to show: surface it.
-                    if (row == null && !out.isClosed) out.addError(ex, s);
-                  },
-                );
+            refresh(account, target, monday).then(
+              (_) {
+                _lastError = null;
+                _errors.add(null);
+              },
+              onError: (Object e, StackTrace s) {
+                final ex = _wrap(e);
+                _lastError = ex;
+                _errors.add(ex);
+                // Without cached data there is nothing to show: surface it.
+                if (row == null && !out.isClosed) out.addError(ex, s);
+              },
+            );
           },
           onError: out.addError,
         );
