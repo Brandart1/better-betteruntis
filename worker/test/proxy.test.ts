@@ -2,7 +2,14 @@ import { createExecutionContext, SELF } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Env } from "../src/env";
-import { handleProxy, type ProxyOptions, UPSTREAM_USER_AGENT } from "../src/proxy";
+import {
+  handleProxy,
+  type ProxyOptions,
+  SESSION_REQUEST_HEADER,
+  SESSION_RESPONSE_HEADER,
+  sessionCookiesOf,
+  UPSTREAM_USER_AGENT,
+} from "../src/proxy";
 
 const DEFAULT_UPSTREAM_HEADERS = {
   "content-type": "application/json;charset=UTF-8",
@@ -196,6 +203,58 @@ describe("proxy forwarding", () => {
     expect(sent.headers.has("cookie")).toBe(false);
   });
 
+  it("the WebUntis session goes upstream as Cookie, with the school's own Origin and Referer", async () => {
+    await call(
+      req("POST", "/proxy/x.webuntis.com/WebUntis/api/classreg/absences/students/self", {
+        headers: {
+          [SESSION_REQUEST_HEADER]: 'JSESSIONID=abc; schoolname="_ZGVtbw=="',
+          "x-csrf-token": "csrf1",
+          "tenant-id": "123",
+          // The browser's own cookie and origin never go upstream.
+          cookie: "__Host-bbu_sync=secret",
+          origin: "https://bbu.test",
+          "content-type": "application/json",
+        },
+        body: "{}",
+      }),
+      { fetch: rec.fetch },
+    );
+    const sent = rec.single.headers;
+    expect(sent.get("cookie")).toBe('JSESSIONID=abc; schoolname="_ZGVtbw=="');
+    expect(sent.get("origin")).toBe("https://x.webuntis.com");
+    expect(sent.get("referer")).toBe("https://x.webuntis.com/WebUntis/embedded.do?showSidebar=false");
+    expect(sent.get("x-csrf-token")).toBe("csrf1");
+    expect(sent.get("tenant-id")).toBe("123");
+    expect(sent.has(SESSION_REQUEST_HEADER)).toBe(false);
+    expect([...sent.values()].join("\n")).not.toContain("secret");
+  });
+
+  it("without a session: no Cookie, Origin or Referer upstream", async () => {
+    await call(req("GET", "/proxy/x.webuntis.com/x", { headers: { [SESSION_REQUEST_HEADER]: "  " } }), {
+      fetch: rec.fetch,
+    });
+    const sent = rec.single.headers;
+    expect(sent.has("cookie") || sent.has("origin") || sent.has("referer")).toBe(false);
+  });
+
+  it("an oversized session header is refused", async () => {
+    const res = await call(
+      req("GET", "/proxy/x.webuntis.com/x", { headers: { [SESSION_REQUEST_HEADER]: "a=" + "b".repeat(5000) } }),
+      { fetch: rec.fetch },
+    );
+    expect(res.status).toBe(400);
+    expect(rec.requests).toHaveLength(0);
+  });
+
+  it("session cookies: name=value only, several, broken ones dropped", async () => {
+    expect(
+      sessionCookiesOf(["JSESSIONID=abc; Path=/WebUntis; HttpOnly", "Tenant-Id=\"42\"; Path=/", "broken", "=x"]),
+    ).toEqual(["JSESSIONID=abc", 'Tenant-Id="42"']);
+    const r = new Recorder(200, "{}", {});
+    const res = await call(req("GET", "/proxy/x.webuntis.com/x"), { fetch: r.fetch });
+    expect(res.headers.has(SESSION_RESPONSE_HEADER)).toBe(false);
+  });
+
   it("basic-auth credentials are never forwarded upstream", async () => {
     await call(
       req("POST", "/proxy/x.webuntis.com/WebUntis/jsonrpc_intern.do", {
@@ -221,14 +280,23 @@ describe("proxy forwarding", () => {
     expect(rec.single.headers.get("content-type")).toBe("application/json");
   });
 
-  it("returns only status, body and content-type", async () => {
+  it("returns only status, body, content-type and the session cookies as a custom header", async () => {
     const r = new Recorder(418, "teapot");
     const res = await call(req("GET", "/proxy/x.webuntis.com/x"), { fetch: r.fetch });
     expect(res.status).toBe(418);
     expect(await res.text()).toBe("teapot");
     expect(new Set([...res.headers.keys()])).toEqual(
-      new Set(["content-type", "cache-control", "content-security-policy", "content-disposition"]),
+      new Set([
+        "content-type",
+        "cache-control",
+        "content-security-policy",
+        "content-disposition",
+        SESSION_RESPONSE_HEADER,
+      ]),
     );
+    // Never a real cookie for this origin; only name=value, no attributes.
+    expect(res.headers.has("set-cookie")).toBe(false);
+    expect(JSON.parse(res.headers.get(SESSION_RESPONSE_HEADER)!)).toEqual(["JSESSIONID=abc"]);
     expect(res.headers.get("content-type")).toBe("application/json;charset=UTF-8");
     expect(res.headers.get("cache-control")).toBe("no-store");
   });

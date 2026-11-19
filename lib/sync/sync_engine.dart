@@ -56,6 +56,7 @@ import '../core/interfaces.dart' show UntisException;
 import '../core/lesson_notes.dart';
 import '../core/models.dart';
 import '../core/providers.dart';
+import '../core/favourites.dart';
 import '../core/settings.dart';
 import '../data/data_providers.dart';
 import '../data/secret_store.dart';
@@ -235,6 +236,7 @@ class SyncEngine extends SyncController {
     ref.listen(lessonNotesProvider, (_, _) => _onNotesChanged());
     ref.listen(timetableSettingsProvider, (_, _) => _onSettingsChanged());
     ref.listen(accessibilityProvider, (_, _) => _onSettingsChanged());
+    ref.listen(favouritesProvider, (_, _) => _onSettingsChanged());
     ref.onDispose(() => _debounceTimer?.cancel());
     _settingsLoading = _loadSettings();
     final store = ref.read(settingsStoreProvider);
@@ -728,15 +730,19 @@ class SyncEngine extends SyncController {
 
   // ------------------------------------------------------- synced settings
 
-  Map<String, Object> _currentSettings() => syncedSettingsOf(
-    ref.read(timetableSettingsProvider),
-    ref.read(accessibilityProvider),
-  );
+  Map<String, Object> _currentSettings() => {
+    ...syncedSettingsOf(
+      ref.read(timetableSettingsProvider),
+      ref.read(accessibilityProvider),
+    ),
+    ...favouriteSettingsOf(ref.read(favouritesProvider)),
+  };
 
   Future<void> _loadSettings() async {
     try {
       await ref.read(timetableSettingsProvider.notifier).ready;
       await ref.read(accessibilityProvider.notifier).ready;
+      await ref.read(favouritesProvider.notifier).ready;
       final raw = await ref
           .read(settingsStoreProvider)
           .read(SyncedSettingStamps.storeKey);
@@ -783,12 +789,16 @@ class SyncEngine extends SyncController {
     if (remote.isEmpty) return;
     final acked = _metaOf(accountId).settingsAcked;
     final changes = <String, Object?>{};
+    final favourites = <String, bool>{};
     var stamped = false;
     for (final e in remote.entries) {
-      final name = e.key;
       final r = e.value;
+      // Settings of this account only (favourites) are stamped per account.
+      final name = isFavouriteSetting(e.key)
+          ? accountSettingKey(accountId, e.key)
+          : e.key;
       acked[name] = r.updatedAt;
-      final read = readRemoteSetting(name, r.text, deleted: r.deleted);
+      final read = readRemoteSetting(e.key, r.text, deleted: r.deleted);
       final Object? value;
       switch (read) {
         case UnknownSetting():
@@ -809,7 +819,14 @@ class SyncEngine extends SyncController {
       _stamps.stamps[name] = SettingStamp(value, r.updatedAt);
       stamped = true;
       if (local == null && value == null) continue; // tombstone only
-      changes[name] = value;
+      if (isFavouriteSetting(e.key)) {
+        favourites[e.key.substring(favouritePrefix.length)] = value == true;
+      } else {
+        changes[name] = value;
+      }
+    }
+    if (favourites.isNotEmpty) {
+      ref.read(favouritesProvider.notifier).applyRemote(accountId, favourites);
     }
     if (changes.isNotEmpty) {
       final tt = ref.read(timetableSettingsProvider);
@@ -1409,11 +1426,14 @@ class SyncEngine extends SyncController {
     if (legacy) unawaited(_saveStamps());
     for (final e in _stamps.stamps.entries) {
       final st = e.value;
+      // Settings of one account (favourites) go only to its own server.
+      final own = splitAccountSetting(e.key);
+      if (own != null && own.$1 != accountId) continue;
       final have = meta.settingsAcked[e.key];
       if (have != null && have >= st.at) continue;
       // Never on the server and at the default: nothing to tell.
       if (have == null && st.deleted) continue;
-      final remoteKey = settingsRemoteKey(e.key);
+      final remoteKey = settingsRemoteKey(own?.$2 ?? e.key);
       final text = st.deleted ? '' : jsonEncode(st.value);
       if (text.length > _maxTextLength ||
           (keys == null && remoteKey.length > _maxKeyLength)) {

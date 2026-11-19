@@ -197,8 +197,43 @@ class SettingValue extends RemoteSettingValue {
   final Object? value;
 }
 
+// ------------------------------------------- settings of one account only
+
+/// Favourite classes and teachers (lib/core/favourites.dart): one record
+/// per favourite, `favourite.<TYPE>#<id>` with the value `true`;
+/// unstarring leaves a tombstone. Element ids belong to one school, so
+/// these go only to the server of the account they belong to.
+const String favouritePrefix = 'favourite.';
+
+final _favouriteName = RegExp(r'^favourite\.(CLASS|TEACHER)#-?\d{1,12}$');
+
+bool isFavouriteSetting(String name) => _favouriteName.hasMatch(name);
+
+/// Local stamp key of [name] belonging to [accountId] only (app-wide
+/// settings use the plain name).
+String accountSettingKey(String accountId, String name) => '@$accountId|$name';
+
+/// (account id, name) of a stamp key from [accountSettingKey], or null for
+/// an app-wide setting.
+(String, String)? splitAccountSetting(String key) {
+  if (!key.startsWith('@')) return null;
+  final bar = key.indexOf('|');
+  if (bar < 2) return null;
+  return (key.substring(1, bar), key.substring(bar + 1));
+}
+
+/// The favourites of every account as synced settings (stamp keys).
+Map<String, Object> favouriteSettingsOf(Map<String, Set<String>> favourites) =>
+    {
+      for (final e in favourites.entries)
+        for (final k in e.value)
+          if (isFavouriteSetting('$favouritePrefix$k'))
+            accountSettingKey(e.key, '$favouritePrefix$k'): true,
+    };
+
 /// Whether this app version syncs a setting called [name].
 bool isKnownSetting(String name) {
+  if (name.startsWith(favouritePrefix)) return isFavouriteSetting(name);
   if (name.startsWith(_subjectColor)) return true;
   if (name.startsWith(_timetable)) {
     return _timetableFields.contains(name.substring(_timetable.length));
@@ -218,6 +253,16 @@ RemoteSettingValue readRemoteSetting(
   bool deleted = false,
 }) {
   if (!isKnownSetting(name)) return const UnknownSetting();
+  if (isFavouriteSetting(name)) {
+    if (deleted) return const SettingValue(null);
+    try {
+      return jsonDecode(text) == true
+          ? const SettingValue(true)
+          : const InvalidSetting();
+    } on FormatException {
+      return const InvalidSetting();
+    }
+  }
   if (name.startsWith(_subjectColor)) {
     final subject = name.substring(_subjectColor.length);
     if (subject.isEmpty || TimetableSettings.subjectKey(subject) != subject) {

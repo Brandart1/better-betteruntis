@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:better_betteruntis/api/parsers.dart';
 import 'package:better_betteruntis/api/untis_api_impl.dart';
+import 'package:better_betteruntis/app/web_proxy.dart';
 import 'package:better_betteruntis/core/info.dart';
 import 'package:better_betteruntis/core/interfaces.dart';
 import 'package:dio/dio.dart';
@@ -464,6 +465,61 @@ void main() {
         'names': ['JSESSIONID', 'traceId'],
       });
       expect(log.map((e) => e.json).join(), isNot(contains('SESSION-SECRET')));
+    });
+
+    test('web version: the session goes through the relay in its own '
+        'headers, never as a cookie', () async {
+      final web = UntisApiImpl(
+        dio: Dio()
+          ..interceptors.add(
+            WebProxyInterceptor(Uri.parse('https://better-betteruntis.eu/')),
+          )
+          ..httpClientAdapter = adapter,
+        now: () => DateTime(2026, 11, 10, 9),
+      );
+      handler = (r) {
+        if (isToken(r)) return rpc({'token': 't'});
+        if (isSession(r)) {
+          // What the relay answers: no Set-Cookie, the cookies in its header.
+          return (
+            status: 200,
+            body: {'id': '1', 'jsonrpc': '2.0', 'result': {}},
+            headers: {
+              sessionResponseHeader: [
+                jsonEncode(['JSESSIONID=SESSION-SECRET', 'traceId=t1']),
+              ],
+            },
+          );
+        }
+        return ok({
+          'data': {'conflicts': []},
+        });
+      };
+      await web.reportAbsence(
+        host: host,
+        school: schoolName,
+        auth: creds,
+        report: report,
+      );
+      final post = adapter.requests.last;
+      expect(
+        post.uri.toString(),
+        startsWith(
+          'https://better-betteruntis.eu/proxy/$host/WebUntis/api/classreg/'
+          'absences/students/self',
+        ),
+      );
+      final b64 = base64.encode(utf8.encode(schoolName));
+      expect(
+        post.headers[sessionRequestHeader],
+        'schoolname="_$b64"; JSESSIONID=SESSION-SECRET; traceId=t1',
+      );
+      // Headers a browser refuses to set are left to the relay.
+      for (final h in ['Cookie', 'Origin', 'Referer']) {
+        expect(post.headers.containsKey(h), isFalse, reason: h);
+      }
+      expect(post.headers['Authorization'], isNull);
+      expect(web.debugLog.last.method, contains('(web session)'));
     });
 
     test('CSRF token and tenant id from api/app/config are sent', () async {

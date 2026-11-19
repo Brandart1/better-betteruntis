@@ -86,6 +86,25 @@ void main() {
       expect((c.covered, c.lessons), (4, 6));
     });
 
+    test('parallel entries at the same time are one lesson', () {
+      // Tuesday 10:55–11:45 listed twice (e.g. the class split in groups),
+      // and lessons right before and after.
+      final day = [
+        lesson(1, at(1, 10, 5)),
+        lesson(2, at(1, 10, 55)),
+        lesson(3, at(1, 10, 55), subject: german),
+        lesson(4, at(1, 11, 45)),
+      ];
+      final c = dayCoverage(absence(1, at(1, 10, 55), at(1, 11, 20)), day)!;
+      expect((c.covered, c.affected, c.lessons), (0, 1, 3));
+      final d = dayCoverage(absence(2, at(1, 8, 50), at(1, 9, 40)), [
+        lesson(5, at(1, 8)),
+        lesson(6, at(1, 8, 50)),
+        lesson(7, at(1, 9, 40)),
+      ])!;
+      expect((d.affected, d.lessons), (1, 3));
+    });
+
     test('no lessons that day: unknown', () {
       expect(dayCoverage(absence(1, at(5, 8), at(5, 12)), lessons), isNull);
     });
@@ -211,6 +230,18 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('absences-by-subject')));
       await tester.pumpAndSettle();
       expect(find.text('Absences by subject'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      // Like its neighbours, with an icon.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('absences-by-subject')),
+          matching: find.byIcon(Icons.bar_chart),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('absences-by-subject')));
+      await tester.pumpAndSettle();
       expect(find.text('Mathematik'), findsOneWidget);
       expect(find.text('Deutsch'), findsOneWidget);
       expect(

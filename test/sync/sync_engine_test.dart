@@ -1,4 +1,5 @@
 import 'package:better_betteruntis/core/accessibility.dart';
+import 'package:better_betteruntis/core/favourites.dart';
 import 'package:better_betteruntis/core/interfaces.dart';
 import 'package:better_betteruntis/core/lesson_notes.dart';
 import 'package:better_betteruntis/core/models.dart';
@@ -2050,6 +2051,88 @@ void main() {
       for (final n in records().values) {
         expect('${n['text']}', isNot(contains('calendar')));
       }
+    });
+
+    group('favourites', () {
+      Set<String> favs(Device d) =>
+          d.c.read(favouritesProvider)[d.accountId] ?? const {};
+      void star(Device d, ElementType t, int id, {String? account}) => d.c
+          .read(favouritesProvider.notifier)
+          .toggle(account ?? d.accountId, t, id);
+
+      test('starred and unstarred on one device, the same on the other '
+          '(also under another local account id)', () async {
+        final a = Device(server);
+        final b = Device(server, accountId: 'other-local-id');
+        addTearDown(a.dispose);
+        addTearDown(b.dispose);
+        await a.enable();
+        tick();
+        star(a, ElementType.klasse, 40);
+        star(a, ElementType.teacher, 2);
+        await a.sync();
+        expect(records()['settings|favourite.CLASS#40']!['text'], 'true');
+        expect(records()['settings|favourite.TEACHER#2']!['text'], 'true');
+
+        await b.enable();
+        expect(favs(b), {'CLASS#40', 'TEACHER#2'});
+
+        tick();
+        star(b, ElementType.teacher, 2); // unstar
+        await b.sync();
+        expect(records()['settings|favourite.TEACHER#2']!['deleted'], true);
+        await a.sync();
+        expect(favs(a), {'CLASS#40'});
+        // Settings of the timetable are untouched.
+        expect(tt(a), const TimetableSettings());
+      });
+
+      test(
+        "another account's favourites stay off this account's server",
+        () async {
+          final a = Device(server, more: [_account('acc2', 'lisa')]);
+          addTearDown(a.dispose);
+          await a.enable();
+          tick();
+          star(a, ElementType.klasse, 7, account: 'acc2');
+          star(a, ElementType.klasse, 40);
+          await a.sync();
+          expect(
+            records().keys.where((k) => k.startsWith('settings|favourite.')),
+            ['settings|favourite.CLASS#40'],
+          );
+        },
+      );
+
+      test(
+        'names and values that are no favourites are refused or ignored',
+        () {
+          expect(isFavouriteSetting('favourite.CLASS#40'), isTrue);
+          expect(isFavouriteSetting('favourite.ROOM#4'), isFalse);
+          expect(
+            readRemoteSetting('favourite.CLASS#40', 'true'),
+            isA<SettingValue>().having((v) => v.value, 'value', true),
+          );
+          expect(
+            readRemoteSetting('favourite.CLASS#40', 'false'),
+            isA<InvalidSetting>(),
+          );
+          expect(
+            readRemoteSetting('favourite.CLASS#40', '', deleted: true),
+            isA<SettingValue>().having((v) => v.value, 'value', null),
+          );
+          // e.g. rooms from a newer version: ignored, not an error.
+          expect(
+            readRemoteSetting('favourite.ROOM#4', 'true'),
+            isA<UnknownSetting>(),
+          );
+          expect(
+            splitAccountSetting(accountSettingKey('acc1', 'favourite.CLASS#4')),
+            ('acc1', 'favourite.CLASS#4'),
+          );
+          expect(splitAccountSetting('timetable.examColor'), isNull);
+        },
+      );
     });
 
     test('namespaces: notes stay notes, settings records stored as notes by '

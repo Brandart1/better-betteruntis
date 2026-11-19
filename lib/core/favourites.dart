@@ -1,6 +1,7 @@
 /// Favourite classes and teachers in "Browse timetables": starred ones are
-/// listed first, under "Favourites". Kept per account (element ids belong
-/// to one school) on this device only.
+/// shown again at the top, under "Favourites". Kept per account (element
+/// ids belong to one school); with sync on they go to that account's sync
+/// (lib/sync/synced_settings.dart, `favourite.<TYPE>#<id>`).
 library;
 
 import 'dart:async';
@@ -59,6 +60,17 @@ class FavouritesNotifier extends Notifier<Map<String, Set<String>>> {
     } catch (_) {}
   }
 
+  /// Applies favourites synced from another device: [changes] maps
+  /// [favouriteKey]s to true (starred) or false (unstarred).
+  void applyRemote(String accountId, Map<String, bool> changes) {
+    if (changes.isEmpty) return;
+    final mine = {...?state[accountId]};
+    for (final e in changes.entries) {
+      e.value ? mine.add(e.key) : mine.remove(e.key);
+    }
+    _commit(accountId, mine);
+  }
+
   bool isFavourite(String accountId, ElementType type, int id) =>
       state[accountId]?.contains(favouriteKey(type, id)) ?? false;
 
@@ -67,6 +79,10 @@ class FavouritesNotifier extends Notifier<Map<String, Set<String>>> {
     final key = favouriteKey(type, id);
     final mine = {...?state[accountId]};
     if (!mine.remove(key)) mine.add(key);
+    _commit(accountId, mine);
+  }
+
+  void _commit(String accountId, Set<String> mine) {
     final next = {...state};
     if (mine.isEmpty) {
       next.remove(accountId);

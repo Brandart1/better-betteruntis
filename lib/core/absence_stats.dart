@@ -43,24 +43,45 @@ class DayCoverage {
 }
 
 /// [a] compared with [periods] (at least the lessons of the days it
-/// touches; others are ignored). Null when those days have no lessons
-/// (weekend, holidays, or the timetable isn't known).
+/// touches; others are ignored). Lessons are counted by time, not by
+/// timetable entry: entries at the same or overlapping times (a class
+/// split into groups, two teachers, a lesson listed twice) are one lesson.
+/// Null when those days have no lessons (weekend, holidays, or the
+/// timetable isn't known).
 DayCoverage? dayCoverage(AbsenceItem a, Iterable<Period> periods) {
   final first = _day(a.start);
   final last = _day(a.end);
-  var lessons = 0;
+  final relevant = [
+    for (final p in periods)
+      if (countsAsLesson(p) &&
+          !_day(p.start).isBefore(first) &&
+          !_day(p.start).isAfter(last))
+        p,
+  ]..sort((x, y) => x.start.compareTo(y.start));
+  // Merge overlapping entries into lesson slots.
+  final slots = <(DateTime, DateTime)>[];
+  for (final p in relevant) {
+    if (slots.isNotEmpty && p.start.isBefore(slots.last.$2)) {
+      final (s, e) = slots.last;
+      slots.last = (s, p.end.isAfter(e) ? p.end : e);
+    } else {
+      slots.add((p.start, p.end));
+    }
+  }
+  if (slots.isEmpty) return null;
   var covered = 0;
   var affected = 0;
-  for (final p in periods) {
-    if (!countsAsLesson(p)) continue;
-    final d = _day(p.start);
-    if (d.isBefore(first) || d.isAfter(last)) continue;
-    lessons++;
-    if (!p.start.isBefore(a.start) && !p.end.isAfter(a.end)) covered++;
-    if (overlapMinutes(p, a) > 0) affected++;
+  for (final (s, e) in slots) {
+    if (!s.isBefore(a.start) && !e.isAfter(a.end)) covered++;
+    final from = s.isAfter(a.start) ? s : a.start;
+    final to = e.isBefore(a.end) ? e : a.end;
+    if (to.isAfter(from)) affected++;
   }
-  if (lessons == 0) return null;
-  return DayCoverage(covered: covered, affected: affected, lessons: lessons);
+  return DayCoverage(
+    covered: covered,
+    affected: affected,
+    lessons: slots.length,
+  );
 }
 
 /// Attendance in one subject.
@@ -105,6 +126,7 @@ List<SubjectAttendance> attendanceBySubject(
 ) {
   final bySubject = <int, _Acc>{};
   final seen = <int>{};
+  final slots = <(int, DateTime, DateTime)>{};
   for (final p in periods) {
     if (!countsAsLesson(p) || !p.start.isBefore(now) || !seen.add(p.id)) {
       continue;
@@ -125,6 +147,8 @@ List<SubjectAttendance> attendanceBySubject(
     }
     if (absent > minutes) absent = minutes;
     for (final s in subjects.isEmpty ? const [0] : subjects.toSet()) {
+      // The same subject listed twice at the same time is one lesson.
+      if (!slots.add((s, p.start, p.end))) continue;
       final acc = bySubject.putIfAbsent(s, _Acc.new);
       acc.lessons++;
       acc.lessonMinutes += minutes;

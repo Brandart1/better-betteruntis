@@ -3,6 +3,7 @@
 Teacher test build (branch `teacher`). Absences, lesson topic, previous topics and class register entries are confirmed with real teacher accounts. Room booking and creating exams are still guesses at the server calls (the official app can't do either); most other teacher calls now follow the official Untis app 6.8.1 — if something fails, please send the entries from the Debug screen.
 
 ### New
+- With sync on, **favourite classes and teachers** sync too (from v0.5.9-beta), per WebUntis account.
 - Absences (from v0.5.8-beta): each absence says **Whole day** or **Partial · n of m lessons**, from the timetable (cancelled lessons don't count), and **By subject** shows the attendance in each subject as a percentage with missed and unexcused lessons.
 - **Favourite classes and teachers** in Browse timetables (from v0.5.7-beta): tap the star next to a class or teacher, or in the top bar of its timetable, and it is also shown at the top of its list under "Favourites" (it keeps its place in the list).
 - Your own homework on a lesson, like your own exams; both also appear in the Info center marked “Custom”.
@@ -41,6 +42,8 @@ Teacher test build (branch `teacher`). Absences, lesson topic, previous topics a
 - Demo school: log in as `teacher` to try the teacher features.
 
 ### Fixed
+- Web version: **reporting an absence** works (from v0.5.9-beta): the relay now carries the WebUntis website login, keeps nothing and logs nothing.
+- Absences: "Partial · n of m lessons" no longer counts a lesson twice when the timetable lists it more than once at the same time (from v0.5.9-beta).
 - Teachers: **Create exam** offers the school's own exam types again when the server gives them to the app, and then sends the type's id like the WebUntis website does (the server may refuse an exam with only a type name). Otherwise the types of existing exams are offered as before.
 - Custom homework, exams and lesson notes: the hint under the text field (e.g. "Only for you, not sent to the school.") wraps onto a second line on small screens instead of being cut off with "…".
 - Teachers: your own timetable shows the class (and room) of each lesson again instead of your own name.

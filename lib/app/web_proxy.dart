@@ -4,7 +4,20 @@
 /// `<origin>/proxy/<host>/<path>?<query>` to `https://<host>/<path>?<query>`.
 library;
 
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
+
+/// The relay's stand-ins for cookies (worker/src/proxy.ts): a browser never
+/// lets the app read WebUntis' `Set-Cookie` nor send a `Cookie`, so the
+/// WebUntis website session (needed e.g. to report an absence) travels in
+/// these headers instead.
+const sessionRequestHeader = 'x-bbu-cookie';
+const sessionResponseHeader = 'x-bbu-set-cookie';
+
+/// Headers a browser refuses to set; the relay sets Origin / Referer of the
+/// school's site itself when a session is sent.
+const _browserOnly = {'cookie', 'origin', 'referer'};
 
 /// Maps an absolute `https://host/...` URL onto the proxy at [origin].
 /// Anything that isn't absolute https (e.g. already proxied) is returned
@@ -33,6 +46,43 @@ class WebProxyInterceptor extends Interceptor {
       ..baseUrl = ''
       ..path = rewritten
       ..queryParameters = {};
+    for (final name in [...options.headers.keys]) {
+      final lower = name.toLowerCase();
+      if (!_browserOnly.contains(lower)) continue;
+      final value = options.headers.remove(name);
+      if (lower == 'cookie' && value != null && '$value'.trim().isNotEmpty) {
+        options.headers[sessionRequestHeader] = '$value';
+      }
+    }
     handler.next(options);
+  }
+
+  @override
+  void onResponse(
+    Response<dynamic> response,
+    ResponseInterceptorHandler handler,
+  ) {
+    exposeSessionCookies(response.headers);
+    handler.next(response);
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) {
+    if (err.response case final r?) exposeSessionCookies(r.headers);
+    handler.next(err);
+  }
+}
+
+/// Puts the relay's [sessionResponseHeader] back as `set-cookie`, where the
+/// web session login looks for it.
+void exposeSessionCookies(Headers headers) {
+  final raw = headers.value(sessionResponseHeader);
+  if (raw == null) return;
+  try {
+    final list = jsonDecode(raw);
+    if (list is! List) return;
+    headers.set('set-cookie', [for (final c in list) '$c']);
+  } on FormatException {
+    // Not from our relay: ignored.
   }
 }
