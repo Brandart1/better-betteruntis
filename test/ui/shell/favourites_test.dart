@@ -61,42 +61,46 @@ void main() {
 
   double top(WidgetTester tester, String k) => tester.getTopLeft(key(k)).dy;
 
-  testWidgets('starred teachers come first under "Favourites", stored per '
-      'account', (tester) async {
+  testWidgets('a starred teacher is shown again at the top under '
+      '"Favourites" and keeps its place; stored per account', (tester) async {
     await pump(tester);
     await tap(tester, find.widgetWithText(Tab, 'Teachers'));
     expect(find.text('Favourites'), findsNothing);
-    expect(
-      top(tester, 'browse-teacher-1'),
-      lessThan(top(tester, 'browse-teacher-2')),
-    );
+    final before = top(tester, 'browse-teacher-2');
+    expect(top(tester, 'browse-teacher-1'), lessThan(before));
 
     await tap(tester, key('browse-star-teacher-2'));
     expect(find.text('Favourites'), findsOneWidget);
     expect(find.text('All teachers'), findsOneWidget);
+    expect(find.text('Peter Schmidt'), findsNWidgets(2));
+    // The copy on top, the original still after Müller; both starred.
     expect(
-      top(tester, 'browse-teacher-2'),
+      top(tester, 'browse-fav-teacher-2'),
       lessThan(top(tester, 'browse-teacher-1')),
     );
-    expect(store.values[FavouritesNotifier.storeKey], {
-      demoAccount().id: ['TEACHER#2'],
-    });
-
-    // Unstarred: back in its place, no header.
-    await tap(tester, key('browse-star-teacher-2'));
-    expect(find.text('Favourites'), findsNothing);
     expect(
       top(tester, 'browse-teacher-1'),
       lessThan(top(tester, 'browse-teacher-2')),
     );
+    expect(find.byTooltip('Remove from favourites'), findsNWidgets(2));
+    expect(store.values[FavouritesNotifier.storeKey], {
+      demoAccount().id: ['TEACHER#2'],
+    });
+
+    // Unstarred from the copy: the copy and the header go.
+    await tap(tester, key('browse-star-fav-teacher-2'));
+    expect(find.text('Favourites'), findsNothing);
+    expect(find.text('Peter Schmidt'), findsOneWidget);
+    expect(top(tester, 'browse-teacher-2'), before);
   });
 
   testWidgets('classes can be favourites, rooms have no star', (tester) async {
     await pump(tester);
     await tap(tester, key('browse-star-klasse-40'));
     expect(find.text('Favourites'), findsOneWidget);
-    // Only favourites: no "All classes" header below them.
-    expect(find.text('All classes'), findsNothing);
+    expect(find.text('All classes'), findsOneWidget);
+    expect(key('browse-fav-klasse-40'), findsOneWidget);
+    expect(key('browse-klasse-40'), findsOneWidget);
     await tap(tester, find.widgetWithText(Tab, 'Rooms'));
     expect(find.byIcon(Icons.star_border), findsNothing);
   });
@@ -114,5 +118,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Favourites'), findsNothing);
     expect(key('browse-teacher-1'), findsOneWidget);
+    expect(key('browse-teacher-2'), findsNothing);
   });
 }

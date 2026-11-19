@@ -463,8 +463,8 @@ class _DiscoverCard extends StatelessWidget {
 }
 
 /// One tab's list. Classes and teachers have a star to make them
-/// favourites, which are listed first under "Favourites", the rest under
-/// [allLabel].
+/// favourites, which are shown again at the top under "Favourites" (they
+/// keep their place in the full list, under [allLabel]).
 class _ElementList extends ConsumerWidget {
   const _ElementList({
     required this.type,
@@ -493,15 +493,15 @@ class _ElementList extends ConsumerWidget {
               const <String>{}
         : const <String>{};
     bool fav(MasterElement e) => mine.contains(favouriteKey(e.type, e.id));
+    // Favourites are a copy at the top; they keep their place in the list.
     final favourites = elements.where(fav).toList();
-    final rest = favourites.isEmpty
-        ? elements
-        : elements.where((e) => !fav(e)).toList();
+    final rest = elements;
     final rows = <Widget>[
       ...header,
       if (favourites.isNotEmpty) ...[
         _SectionHeader('Favourites', key: ValueKey('browse-favourites-$type')),
-        for (final e in favourites) _tile(context, ref, e, true, starrable),
+        for (final e in favourites)
+          _tile(context, ref, e, true, starrable, copy: true),
         if (rest.isNotEmpty) _SectionHeader(allLabel),
       ],
       if (elements.isEmpty)
@@ -509,7 +509,7 @@ class _ElementList extends ConsumerWidget {
           padding: EdgeInsets.all(24),
           child: Center(child: Text('Nothing here yet.')),
         ),
-      for (final e in rest) _tile(context, ref, e, false, starrable),
+      for (final e in rest) _tile(context, ref, e, fav(e), starrable),
     ];
     return ListView.builder(
       itemCount: rows.length,
@@ -522,15 +522,18 @@ class _ElementList extends ConsumerWidget {
     WidgetRef ref,
     MasterElement e,
     bool favourite,
-    bool starrable,
-  ) => ListTile(
-    key: ValueKey('browse-${e.type.name}-${e.id}'),
+    bool starrable, {
+    bool copy = false,
+  }) => ListTile(
+    key: ValueKey('browse-${copy ? 'fav-' : ''}${e.type.name}-${e.id}'),
     title: Text(e.longName),
     subtitle: e.longName == e.name ? null : Text(e.name),
     onTap: () => context.push('/timetable/${e.type.apiName}/${e.id}'),
     trailing: starrable
         ? IconButton(
-            key: ValueKey('browse-star-${e.type.name}-${e.id}'),
+            key: ValueKey(
+              'browse-star-${copy ? 'fav-' : ''}${e.type.name}-${e.id}',
+            ),
             tooltip: favourite ? 'Remove from favourites' : 'Add to favourites',
             isSelected: favourite,
             icon: const Icon(Icons.star_border),
