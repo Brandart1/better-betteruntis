@@ -230,7 +230,10 @@ describe("session check", () => {
 
   it("RL_AUTH counts only failed lookups per client IP; over the limit the IP is blocked before D1 (IPv6 /64)", async () => {
     const statuses: number[] = [];
-    for (let i = 0; i < 302; i++) {
+    // Until blocked: the limiter's 60 s window may roll over during the
+    // loop and start counting again, so the block can come later than the
+    // 302nd request (it used to fail CI now and then).
+    for (let i = 0; i < 700 && statuses.at(-1) !== 429; i++) {
       const token = (crypto.randomUUID().replace(/-/g, "") + "x".repeat(20)).slice(0, 43);
       // Different addresses of one /64 count together.
       const ip = `2001:db8:77:1:${i.toString(16)}::1`;
@@ -238,8 +241,9 @@ describe("session check", () => {
       statuses.push(res.status);
     }
     // 300 misses allowed; the 301st is still answered (401) and marks the IP blocked.
-    expect(statuses.slice(0, 301).every((x) => x === 401)).toBe(true);
-    expect(statuses[301]).toBe(429);
+    expect(statuses.at(-1)).toBe(429);
+    expect(statuses.length).toBeGreaterThanOrEqual(302);
+    expect(statuses.slice(0, -1).every((x) => x === 401)).toBe(true);
     // Blocked means blocked: even a valid session from that /64 gets 429 without a lookup.
     const s = await login(freshUser());
     const blocked = await call(req("GET", "/api/sync/notes", { token: s.token, headers: { "cf-connecting-ip": "2001:db8:77:1::9" } }));
