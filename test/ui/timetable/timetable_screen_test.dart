@@ -1,6 +1,8 @@
+import 'package:better_betteruntis/core/favourites.dart';
 import 'package:better_betteruntis/core/interfaces.dart';
 import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/core/providers.dart';
+import 'package:better_betteruntis/core/settings.dart';
 import 'package:better_betteruntis/dev/fake_timetable.dart';
 import 'package:better_betteruntis/ui/timetable/lesson_card.dart';
 import 'package:better_betteruntis/ui/timetable/timetable_screen.dart';
@@ -617,5 +619,45 @@ void main() {
         findsOneWidget,
       );
     });
+  });
+
+  testWidgets('class and teacher timetables have a favourite star; the own '
+      'timetable has none', (tester) async {
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = MemorySettingsStore();
+    Widget app(TimetableTarget? target) => ProviderScope(
+      key: ValueKey(target),
+      overrides: [
+        settingsStoreProvider.overrideWithValue(store),
+        timetableRepositoryProvider.overrideWithValue(repo),
+        activeAccountProvider.overrideWith(
+          (ref) => Stream.value(demoAccount()),
+        ),
+      ],
+      child: MaterialApp(home: TimetableScreen(target: target)),
+    );
+    await tester.pumpWidget(app(null));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('timetable-favourite')), findsNothing);
+
+    await tester.pumpWidget(
+      app(const TimetableTarget(ElementType.teacher, DemoIds.sch)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Add to favourites'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('timetable-favourite')));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Remove from favourites'), findsOneWidget);
+    expect(store.values[FavouritesNotifier.storeKey], {
+      demoAccount().id: [favouriteKey(ElementType.teacher, DemoIds.sch)],
+    });
+
+    await tester.pumpWidget(
+      app(const TimetableTarget(ElementType.room, DemoIds.klasse)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('timetable-favourite')), findsNothing);
   });
 }
