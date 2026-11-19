@@ -5,9 +5,11 @@ import '../core/class_register.dart';
 import '../core/interfaces.dart';
 import '../core/models.dart';
 
-/// [ClassRegisterRepository] on top of [ClassRegisterApi]. Nothing is
-/// cached: class register data is always loaded fresh, since another device
-/// (or the web client) may have changed it.
+/// [ClassRegisterRepository] on top of [ClassRegisterApi]. Class register
+/// data is kept only briefly ([readsFor]) in memory, so the overview, a
+/// lesson and its earlier lessons don't each ask for the same lessons again;
+/// another device (or the web client) may change it, so pull to refresh
+/// ([forgetReads]) and every write start fresh.
 class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
   ClassRegisterRepositoryImpl({
     required this.api,
@@ -79,16 +81,84 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
     }
   }
 
+  /// How long a lesson's class register data and a refreshed timetable
+  /// week are reused before the server is asked again.
+  static const readsFor = Duration(minutes: 2);
+
   /// getPeriodData2017 calls still running per `account|ids`: one lesson
   /// screen asks for the same lessons several times at once (data,
   /// homework), which then share one request. Writes start fresh.
   final _running = <String, Future<PeriodRegisterData>>{};
 
-  Future<PeriodRegisterData> _periodData(Account a, List<int> ids) {
+  /// Recently read lessons per `account|ttId`, with their pupils.
+  final _read =
+      <
+        String,
+        ({
+          PeriodRegister register,
+          Map<int, ClassRegStudent> students,
+          DateTime at,
+        })
+      >{};
+
+  /// When this repository last refreshed a week, per `account|target|monday`.
+  final _weeksAt = <String, DateTime>{};
+
+  @override
+  void forgetReads() {
+    _generation++;
+    _running.clear();
+    _read.clear();
+    _weeksAt.clear();
+  }
+
+  Future<PeriodRegisterData> _periodData(Account a, List<int> ids) async {
+    final now = clock();
+    bool fresh(int id) {
+      final r = _read['${a.id}|$id'];
+      return r != null && now.difference(r.at) < readsFor;
+    }
+
+    final missing = [
+      for (final id in ids)
+        if (!fresh(id)) id,
+    ];
+    if (missing.isNotEmpty) await _fetchShared(a, missing);
+    final periods = <int, PeriodRegister>{};
+    final students = <int, ClassRegStudent>{};
+    for (final id in ids) {
+      final r = _read['${a.id}|$id'];
+      if (r == null) continue;
+      periods[id] = r.register;
+      students.addAll(r.students);
+    }
+    return PeriodRegisterData(periods: periods, students: students);
+  }
+
+  /// Bumped by writes and [forgetReads]: reads started before are not
+  /// remembered.
+  var _generation = 0;
+
+  Future<PeriodRegisterData> _fetchShared(Account a, List<int> ids) {
     final key = '${a.id}|${([...ids]..sort()).join(',')}';
     final running = _running[key];
     if (running != null) return running;
-    final data = _fetchPeriodData(a, ids);
+    final gen = _generation;
+    final data = _fetchPeriodData(a, ids).then((d) {
+      if (gen != _generation) return d;
+      final at = clock();
+      for (final MapEntry(key: id, value: r) in d.periods.entries) {
+        _read['${a.id}|$id'] = (
+          register: r,
+          // Without its own pupil list, a lesson shows all pupils sent.
+          students: r.studentIds.isEmpty
+              ? d.students
+              : {for (final s in r.studentIds) s: ?d.students[s]},
+          at: at,
+        );
+      }
+      return d;
+    });
     _running[key] = data;
     data.whenComplete(() {
       if (identical(_running[key], data)) _running.remove(key);
@@ -696,17 +766,23 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
   static DateTime _mondayOf(DateTime d) =>
       DateTime(d.year, d.month, d.day - (d.weekday - 1));
 
-  /// Fresh week if the server answers, else the cached one.
+  /// Fresh week if the server answers, else the cached one. A week this
+  /// repository refreshed less than [readsFor] ago is not asked for again.
   Future<List<Period>> _week(
     Account a,
     TimetableTarget target,
     DateTime monday,
   ) async {
     Object? error;
-    try {
-      await timetables.refresh(a, target, monday);
-    } catch (e) {
-      error = e;
+    final key = '${a.id}|${target.type.apiName}#${target.id}|$monday';
+    final at = _weeksAt[key];
+    if (at == null || clock().difference(at) >= readsFor) {
+      try {
+        await timetables.refresh(a, target, monday);
+        _weeksAt[key] = clock();
+      } catch (e) {
+        error = e;
+      }
     }
     try {
       return await timetables
@@ -720,11 +796,11 @@ class ClassRegisterRepositoryImpl implements ClassRegisterRepository {
 
   /// A write: lesson data read before or during it is stale.
   Future<T> _writing<T>(Future<T> Function() f) async {
-    _running.clear();
+    forgetReads();
     try {
       return await _wrapAsync(f);
     } finally {
-      _running.clear();
+      forgetReads();
     }
   }
 

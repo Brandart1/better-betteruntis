@@ -162,7 +162,10 @@ class _ClassRegisterOverviewScreenState
         ),
       ),
       data: (lessons) => RefreshIndicator(
-        onRefresh: reload,
+        onRefresh: () {
+          ref.read(classRegisterRepositoryProvider).forgetReads();
+          return reload();
+        },
         child: _list(account, names, lessons, reload),
       ),
     );

@@ -943,6 +943,9 @@ class FakeUntisApi
   bool _seededTopic(int ttId) =>
       _seededPast(ttId) && (ttId % 4 == 0 || ttId % 4 == 2);
 
+  /// The ttIds of every [periodData] call, in order.
+  final periodDataRequests = <List<int>>[];
+
   @override
   Future<PeriodRegisterData> periodData({
     required String host,
@@ -950,6 +953,7 @@ class FakeUntisApi
     required UntisCredentials auth,
     required List<int> ttIds,
   }) async {
+    periodDataRequests.add([...ttIds]);
     await _delay();
     return PeriodRegisterData(
       periods: {

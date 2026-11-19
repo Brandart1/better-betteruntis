@@ -426,6 +426,10 @@ class ClassRegLesson {
 }
 
 abstract interface class ClassRegisterRepository {
+  /// Forgets what was read recently, so the next loads ask the server
+  /// again (pull to refresh). Writes do this by themselves.
+  void forgetReads();
+
   /// Data for [periods] (one lesson block, e.g. a double lesson).
   Future<PeriodRegisterData> load(Account account, List<Period> periods);
 

@@ -45,6 +45,7 @@ Teacher test build (branch `teacher`). Absences, lesson topic, previous topics a
 - Teachers: removing the notes for pupils no longer removes the notes for teachers too.
 - Teachers: if the school server refuses a request for its rate limit, it is repeated after a short wait, and the lesson screen asks for its data only once.
 - The app is fast again: the request limit from the previous builds is gone, so every screen loads at full speed. Pupil photos also need fewer requests: after three photos in a row that don't load, the app stops asking for them.
+- Teachers: the class register sends far fewer requests. Lessons read a moment ago (in the overview, the lesson, previous topics, homework) are reused for 2 minutes instead of asked for again, the overview no longer reloads its weeks each time you come back from a lesson, and pupil photos share one login and one pupil list instead of one per pupil. Saving, or pulling down in the Class register overview, always loads fresh.
 - Teachers: "All subjects" in the absence summary explains that only the class teacher may see all of a class's absences, instead of "invalid user role".
 - Teachers: creating an exam now sends what the WebUntis website sends.
 - Teachers: changing a lesson's room back to the planned room now works (the app sent the planned room instead of the current one).

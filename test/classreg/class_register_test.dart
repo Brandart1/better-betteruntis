@@ -70,6 +70,55 @@ void main() {
     );
   });
 
+  group('fewer requests', () {
+    test('lessons read a moment ago are not asked for again', () async {
+      final a = teacherAccount();
+      final ps = [lesson(11, DateTime(2026, 11, 10, 8))];
+      await repo.load(a, ps);
+      await repo.load(a, ps);
+      await repo.homework(a, ps);
+      expect(api.periodDataRequests, [
+        [11],
+      ]);
+      // Only the lessons not read yet are asked for.
+      await repo.load(a, [...ps, lesson(12, DateTime(2026, 11, 10, 9))]);
+      expect(api.periodDataRequests.last, [12]);
+      // Pull to refresh asks again.
+      repo.forgetReads();
+      await repo.load(a, ps);
+      expect(api.periodDataRequests, hasLength(3));
+    });
+
+    test('a save starts fresh', () async {
+      final a = teacherAccount();
+      final ps = [lesson(11, DateTime(2026, 11, 10, 8))];
+      final data = await repo.load(a, ps);
+      await repo.save(a, ps, data, const ClassRegChanges(markAbsent: {501}));
+      final after = await repo.load(a, ps);
+      expect(after.periods[11]!.absences.map((x) => x.studentId), [501]);
+    });
+
+    test('the overview does not reload its weeks right away', () async {
+      final timetables = FakeTimetableRepository(weekBuilder: week);
+      final r = ClassRegisterRepositoryImpl(
+        api: api,
+        accounts: accounts,
+        timetables: timetables,
+        clock: () => now,
+      );
+      final first = await r.lessons(teacherAccount());
+      final refreshes = timetables.refreshCount;
+      expect(refreshes, greaterThan(0));
+      final requests = api.periodDataRequests.length;
+      expect(await r.lessons(teacherAccount()), hasLength(first.length));
+      expect(timetables.refreshCount, refreshes);
+      expect(api.periodDataRequests, hasLength(requests));
+      r.forgetReads();
+      await r.lessons(teacherAccount());
+      expect(timetables.refreshCount, greaterThan(refreshes));
+    });
+  });
+
   test('only teachers', () {
     expect(hasClassRegister(teacherAccount()), isTrue);
     expect(hasClassRegister(demoAccount()), isFalse);
@@ -376,11 +425,18 @@ void main() {
       await t.tap(tile(202611111));
       await t.pumpAndSettle();
       expect(find.byType(ClassRegisterScreen), findsOneWidget);
-      // Entered elsewhere (or by the screen) while it was open.
+      // Entered elsewhere while it was open.
       api.registerTopics[202611111] = 'Fractions';
+      final requests = api.periodDataRequests.length;
       await t.pageBack();
       await t.pumpAndSettle();
       expect(find.byType(ClassRegisterOverviewScreen), findsOneWidget);
+      // Just looked at: what was read a moment ago is not asked for again.
+      expect(api.periodDataRequests, hasLength(requests));
+      expect(tile(202611111), findsOneWidget);
+      // Pull to refresh asks the server.
+      await t.fling(find.byType(ListView), const Offset(0, 400), 1000);
+      await t.pumpAndSettle();
       expect(tile(202611111), findsNothing);
     });
 

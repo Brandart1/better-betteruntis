@@ -254,6 +254,31 @@ void main() {
       imageUrl: '/WebUntis/img/$id.jpg',
     );
 
+    test('photos loading at once share one token and one master data '
+        'load', () async {
+      final adapter = ImageAdapter((_, _) => image())
+        ..userData = {
+          'masterData': {
+            'students': [
+              for (var i = 1; i <= 6; i++)
+                {'id': i, 'imageUrl': '/WebUntis/img/$i.jpg'},
+            ],
+          },
+        };
+      final api = UntisApiImpl(dio: Dio()..httpClientAdapter = adapter);
+      final photos = await Future.wait([
+        for (var i = 1; i <= 6; i++)
+          api.pupilPhoto(host: host, school: 's', auth: creds, studentId: i),
+      ]);
+      expect(photos, everyElement(jpegLike));
+      expect(
+        adapter.rpcMethods.where((m) => m == 'getUserData2017'),
+        hasLength(1),
+      );
+      expect(adapter.rpcMethods.where((m) => m == ''), hasLength(1));
+      expect(adapter.gets, hasLength(6));
+    });
+
     test('three photos in a row without an image: no more requests', () async {
       final adapter = ImageAdapter((_, _) => notFound());
       final api = UntisApiImpl(dio: Dio()..httpClientAdapter = adapter);

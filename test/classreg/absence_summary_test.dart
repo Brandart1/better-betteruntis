@@ -605,6 +605,7 @@ void main() {
       expect(sub.substitutedBy!.id, _sub);
       // Refused: the own lessons still come.
       api.refused.add(202611111);
+      register.forgetReads();
       final h2 = await register.courseHistory(teacherAccount(), [
         _lesson(202611121, DateTime(2026, 11, 12, 8)),
       ]);

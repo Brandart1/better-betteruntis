@@ -217,6 +217,10 @@ class UntisApiImpl
     required UntisCredentials auth,
   }) => _token(host, school, auth);
 
+  /// getAuthToken calls still running per account: callers at the same
+  /// time share one.
+  final _tokensLoading = <String, Future<String>>{};
+
   /// Bearer token for REST calls, cached for a few minutes per account.
   Future<String> _token(
     String host,
@@ -229,6 +233,18 @@ class UntisApiImpl
         DateTime.now().difference(cached.at) < const Duration(minutes: 5)) {
       return cached.token;
     }
+    return _tokensLoading[key] ??= _fetchToken(host, school, auth, key)
+        .whenComplete(() {
+          _tokensLoading.remove(key);
+        });
+  }
+
+  Future<String> _fetchToken(
+    String host,
+    String school,
+    UntisCredentials auth,
+    String key,
+  ) async {
     final r = await _rpc.call(rpcUrl(host, school), 'getAuthToken', {
       'auth': _rpc.auth(auth),
     });
@@ -413,6 +429,10 @@ class UntisApiImpl
   /// deltas and [absenceLookups]). Used by the contract [absences]; the data
   /// layer persists its own copy.
   final _lookups = <String, AbsenceLookups>{};
+
+  /// The one master data load per `host|school` that pupil photos without
+  /// an imageUrl wait for.
+  final _photoLookups = <String, Future<AbsenceLookups>>{};
 
   void _rememberLookups(String host, String school, MasterData? md) {
     if (md is! MasterDataWithLookups || md.lookups.isEmpty) return;
@@ -1654,15 +1674,17 @@ class UntisApiImpl
       final key = '$host|$school';
       url = _lookups[key]?.studentImages[studentId];
       if (url == null && !_lookups.containsKey(key)) {
-        try {
-          url = (await absenceLookups(
-            host: host,
-            school: school,
-            auth: auth,
-          )).studentImages[studentId];
-        } on UntisException {
-          return null;
-        }
+        // One getUserData2017 (the whole master data) for all pupils of a
+        // screen, not one per pupil; after a failure the next screen tries
+        // again.
+        final lookups = await (_photoLookups[key] ??=
+            absenceLookups(host: host, school: school, auth: auth).catchError((
+              Object _,
+            ) {
+              _photoLookups.remove(key);
+              return const AbsenceLookups();
+            }));
+        url = lookups.studentImages[studentId];
       }
     }
     if (url == null || url.isEmpty) return null;
@@ -2250,6 +2272,28 @@ class UntisApiImpl
         _now().difference(cached.at) < const Duration(minutes: 10)) {
       return cached.headers;
     }
+    // Callers at the same time (e.g. several pupil photos) share one login.
+    // A refresh starts its own (it may come from within a login).
+    final running = _webSessionsLoading[key];
+    if (running != null && !refresh) return running;
+    final login = _newWebSession(host, school, auth, key);
+    _webSessionsLoading[key] = login;
+    return login.whenComplete(() {
+      if (identical(_webSessionsLoading[key], login)) {
+        _webSessionsLoading.remove(key);
+      }
+    });
+  }
+
+  /// Web session logins still running per account.
+  final _webSessionsLoading = <String, Future<Map<String, String>?>>{};
+
+  Future<Map<String, String>?> _newWebSession(
+    String host,
+    String school,
+    UntisCredentials auth,
+    String key,
+  ) async {
     _webSessions.remove(key);
     Headers? loginHeaders;
     try {
