@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/favourites.dart';
 import '../../core/accessibility.dart';
 import '../../core/class_register.dart';
 import '../../core/interfaces.dart';
@@ -791,6 +792,9 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                     },
                     icon: const Icon(Icons.chevron_left),
                   ),
+                if (widget.target case final t?
+                    when canBeFavourite(t.type) && !account.anonymous)
+                  _FavouriteButton(account: account, target: t),
                 IconButton(
                   tooltip: 'Today (T)',
                   onPressed: atToday ? null : () => _goToDate(DateTime.now()),
@@ -977,6 +981,36 @@ class _FittingLabel extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
         );
       },
+    );
+  }
+}
+
+/// Star in the app bar of a class or teacher timetable opened from
+/// "Browse timetables": adds it to (or removes it from) the favourites
+/// listed first there.
+class _FavouriteButton extends ConsumerWidget {
+  const _FavouriteButton({required this.account, required this.target});
+  final Account account;
+  final TimetableTarget target;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final on = ref.watch(
+      favouritesProvider.select(
+        (f) =>
+            f[account.id]?.contains(favouriteKey(target.type, target.id)) ??
+            false,
+      ),
+    );
+    return IconButton(
+      key: const ValueKey('timetable-favourite'),
+      tooltip: on ? 'Remove from favourites' : 'Add to favourites',
+      isSelected: on,
+      icon: const Icon(Icons.star_border),
+      selectedIcon: const Icon(Icons.star),
+      onPressed: () => ref
+          .read(favouritesProvider.notifier)
+          .toggle(account.id, target.type, target.id),
     );
   }
 }

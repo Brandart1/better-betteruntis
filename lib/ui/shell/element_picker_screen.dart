@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/favourites.dart';
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
@@ -74,6 +75,9 @@ class _ElementPickerScreenState extends ConsumerState<ElementPickerScreen> {
                     _gated(
                       t.$1,
                       _ElementList(
+                        type: t.$1,
+                        account: account,
+                        allLabel: 'All ${t.$2.toLowerCase()}',
                         header: _header(t.$1, _browsable(names, t.$1), account),
                         elements: _browsable(names, t.$1)
                             .where(
@@ -458,35 +462,105 @@ class _DiscoverCard extends StatelessWidget {
   }
 }
 
-class _ElementList extends StatelessWidget {
-  const _ElementList({required this.elements, this.header = const []});
+/// One tab's list. Classes and teachers have a star to make them
+/// favourites, which are listed first under "Favourites", the rest under
+/// [allLabel].
+class _ElementList extends ConsumerWidget {
+  const _ElementList({
+    required this.type,
+    required this.account,
+    required this.allLabel,
+    required this.elements,
+    this.header = const [],
+  });
+  final ElementType type;
+  final Account? account;
+  final String allLabel;
   final List<MasterElement> elements;
   final List<Widget> header;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (elements.isEmpty && header.isEmpty) {
       return const Center(
         child: Text('Nothing here — your school may not share this list.'),
       );
     }
+    final a = account;
+    final starrable = a != null && canBeFavourite(type);
+    final mine = starrable
+        ? ref.watch(favouritesProvider.select((f) => f[a.id])) ??
+              const <String>{}
+        : const <String>{};
+    bool fav(MasterElement e) => mine.contains(favouriteKey(e.type, e.id));
+    final favourites = elements.where(fav).toList();
+    final rest = favourites.isEmpty
+        ? elements
+        : elements.where((e) => !fav(e)).toList();
+    final rows = <Widget>[
+      ...header,
+      if (favourites.isNotEmpty) ...[
+        _SectionHeader('Favourites', key: ValueKey('browse-favourites-$type')),
+        for (final e in favourites) _tile(context, ref, e, true, starrable),
+        if (rest.isNotEmpty) _SectionHeader(allLabel),
+      ],
+      if (elements.isEmpty)
+        const Padding(
+          padding: EdgeInsets.all(24),
+          child: Center(child: Text('Nothing here yet.')),
+        ),
+      for (final e in rest) _tile(context, ref, e, false, starrable),
+    ];
     return ListView.builder(
-      itemCount: header.length + (elements.isEmpty ? 1 : elements.length),
-      itemBuilder: (context, i) {
-        if (i < header.length) return header[i];
-        if (elements.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: Text('Nothing here yet.')),
-          );
-        }
-        final e = elements[i - header.length];
-        return ListTile(
-          title: Text(e.longName),
-          subtitle: e.longName == e.name ? null : Text(e.name),
-          onTap: () => context.push('/timetable/${e.type.apiName}/${e.id}'),
-        );
-      },
+      itemCount: rows.length,
+      itemBuilder: (context, i) => rows[i],
+    );
+  }
+
+  Widget _tile(
+    BuildContext context,
+    WidgetRef ref,
+    MasterElement e,
+    bool favourite,
+    bool starrable,
+  ) => ListTile(
+    key: ValueKey('browse-${e.type.name}-${e.id}'),
+    title: Text(e.longName),
+    subtitle: e.longName == e.name ? null : Text(e.name),
+    onTap: () => context.push('/timetable/${e.type.apiName}/${e.id}'),
+    trailing: starrable
+        ? IconButton(
+            key: ValueKey('browse-star-${e.type.name}-${e.id}'),
+            tooltip: favourite ? 'Remove from favourites' : 'Add to favourites',
+            isSelected: favourite,
+            icon: const Icon(Icons.star_border),
+            selectedIcon: const Icon(Icons.star),
+            onPressed: () => ref
+                .read(favouritesProvider.notifier)
+                .toggle(account!.id, e.type, e.id),
+          )
+        : null,
+  );
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader(this.text, {super.key});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Semantics(
+      header: true,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+        child: Text(
+          text,
+          style: theme.textTheme.titleSmall?.copyWith(
+            color: theme.colorScheme.primary,
+          ),
+        ),
+      ),
     );
   }
 }
