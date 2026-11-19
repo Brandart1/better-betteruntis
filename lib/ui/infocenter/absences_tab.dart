@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/absence_stats.dart';
 import '../../core/info.dart';
 import '../../core/interfaces.dart';
 import '../../core/models.dart';
 import '../timetable/timetable_utils.dart';
+import 'absence_lessons.dart';
 import 'absence_report_screen.dart';
+import 'absences_by_subject_screen.dart';
 import 'info_common.dart';
 import 'info_providers.dart';
 
@@ -43,12 +46,15 @@ class AbsenceFilter {
   final bool reverse;
   final AbsenceRange range;
 
-  AbsenceFilter copyWith({bool? onlyUnexcused, bool? reverse, AbsenceRange? range}) =>
-      AbsenceFilter(
-        onlyUnexcused: onlyUnexcused ?? this.onlyUnexcused,
-        reverse: reverse ?? this.reverse,
-        range: range ?? this.range,
-      );
+  AbsenceFilter copyWith({
+    bool? onlyUnexcused,
+    bool? reverse,
+    AbsenceRange? range,
+  }) => AbsenceFilter(
+    onlyUnexcused: onlyUnexcused ?? this.onlyUnexcused,
+    reverse: reverse ?? this.reverse,
+    range: range ?? this.range,
+  );
 
   /// From the range's start up to the end of the school year, so absences
   /// reported in advance show up too.
@@ -62,10 +68,14 @@ class AbsenceFilter {
   }
 
   List<AbsenceItem> apply(List<AbsenceItem> items) {
-    final out = [
-      for (final a in items)
-        if (!onlyUnexcused || !a.excused) a,
-    ]..sort((a, b) => reverse ? a.start.compareTo(b.start) : b.start.compareTo(a.start));
+    final out =
+        [
+          for (final a in items)
+            if (!onlyUnexcused || !a.excused) a,
+        ]..sort(
+          (a, b) =>
+              reverse ? a.start.compareTo(b.start) : b.start.compareTo(a.start),
+        );
     return out;
   }
 }
@@ -76,7 +86,9 @@ final absenceFilterProvider =
     );
 
 /// Summary over all absences in the range (independent of the toggles).
-({int total, int unexcused, double hours}) absenceSummary(List<AbsenceItem> items) {
+({int total, int unexcused, double hours}) absenceSummary(
+  List<AbsenceItem> items,
+) {
   var minutes = 0;
   for (final a in items) {
     final m = a.end.difference(a.start).inMinutes;
@@ -119,15 +131,29 @@ class AbsencesTab extends ConsumerWidget {
                 key: const ValueKey('absences-only-unexcused'),
                 label: const Text('Only unexcused'),
                 selected: filter.onlyUnexcused,
-                onSelected: (v) => notifier.set(filter.copyWith(onlyUnexcused: v)),
+                onSelected: (v) =>
+                    notifier.set(filter.copyWith(onlyUnexcused: v)),
               ),
               FilterChip(
                 key: const ValueKey('absences-reverse'),
-                avatar: Icon(filter.reverse ? Icons.arrow_upward : Icons.arrow_downward, size: 18),
+                avatar: Icon(
+                  filter.reverse ? Icons.arrow_upward : Icons.arrow_downward,
+                  size: 18,
+                ),
                 showCheckmark: false,
                 label: Text(filter.reverse ? 'Oldest first' : 'Newest first'),
                 selected: filter.reverse,
                 onSelected: (v) => notifier.set(filter.copyWith(reverse: v)),
+              ),
+              ActionChip(
+                key: const ValueKey('absences-by-subject'),
+                avatar: const Icon(Icons.bar_chart, size: 18),
+                label: const Text('By subject'),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => AbsencesBySubjectScreen(account: account),
+                  ),
+                ),
               ),
               PopupMenuButton<AbsenceRange>(
                 key: const ValueKey('absences-range'),
@@ -144,7 +170,10 @@ class AbsencesTab extends ConsumerWidget {
                     showCheckmark: false,
                     label: Row(
                       mainAxisSize: MainAxisSize.min,
-                      children: [Text(filter.range.label), const Icon(Icons.arrow_drop_down, size: 18)],
+                      children: [
+                        Text(filter.range.label),
+                        const Icon(Icons.arrow_drop_down, size: 18),
+                      ],
                     ),
                     selected: false,
                     onSelected: (_) {},
@@ -171,6 +200,15 @@ class AbsencesTab extends ConsumerWidget {
       builder: (context, items) {
         final summary = absenceSummary(items);
         final shown = filter.apply(items);
+        // The timetable of the days with absences, for "Whole day" /
+        // "Partial" (cached weeks are not loaded again).
+        final lessons = ref
+            .watch(
+              absenceLessonsProvider(
+                AbsenceWeeks(account, absenceMondays(items)),
+              ),
+            )
+            .value;
         return [
           SliverToBoxAdapter(child: _SummaryCard(summary: summary)),
           if (shown.isEmpty)
@@ -181,7 +219,17 @@ class AbsencesTab extends ConsumerWidget {
               ),
             )
           else
-            SliverList.list(children: [for (final a in shown) AbsenceCard(account: account, absence: a, now: now)]),
+            SliverList.list(
+              children: [
+                for (final a in shown)
+                  AbsenceCard(
+                    account: account,
+                    absence: a,
+                    now: now,
+                    coverage: lessons == null ? null : dayCoverage(a, lessons),
+                  ),
+              ],
+            ),
           // Room for the "Report absence" button of parent accounts.
           if (canReportAbsences(account))
             const SliverToBoxAdapter(child: SizedBox(height: 72)),
@@ -199,18 +247,23 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    Widget stat(String key, String value, String label, {Color? color}) => Expanded(
-      child: Column(
-        children: [
-          Text(
-            value,
-            key: ValueKey('absences-summary-$key'),
-            style: theme.textTheme.headlineSmall?.copyWith(color: color),
+    Widget stat(String key, String value, String label, {Color? color}) =>
+        Expanded(
+          child: Column(
+            children: [
+              Text(
+                value,
+                key: ValueKey('absences-summary-$key'),
+                style: theme.textTheme.headlineSmall?.copyWith(color: color),
+              ),
+              Text(
+                label,
+                style: theme.textTheme.labelMedium,
+                textAlign: TextAlign.center,
+              ),
+            ],
           ),
-          Text(label, style: theme.textTheme.labelMedium, textAlign: TextAlign.center),
-        ],
-      ),
-    );
+        );
     return Card.filled(
       margin: const EdgeInsets.symmetric(vertical: 8),
       child: Padding(
@@ -473,10 +526,14 @@ class AbsenceCard extends ConsumerWidget {
     required this.account,
     required this.absence,
     required this.now,
+    this.coverage,
   });
   final Account account;
   final AbsenceItem absence;
   final DateTime now;
+
+  /// Whole day or partial, from the timetable; null while unknown.
+  final DayCoverage? coverage;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -500,45 +557,73 @@ class AbsenceCard extends ConsumerWidget {
           }
         },
         child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: Text(when, style: theme.textTheme.titleSmall)),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(when, style: theme.textTheme.titleSmall),
+                  ),
                   a.excused
-                    ? InfoChip('Excused', icon: Icons.check, background: ok.bg, foreground: ok.fg)
-                    : InfoChip(
-                        'Unexcused',
-                        icon: Icons.priority_high,
-                        background: cs.errorContainer,
-                        foreground: cs.onErrorContainer,
-                      ),
-              ],
-            ),
-            if (a.reason.trim().isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(a.reason.trim(), style: theme.textTheme.bodyMedium),
+                      ? InfoChip(
+                          'Excused',
+                          icon: Icons.check,
+                          background: ok.bg,
+                          foreground: ok.fg,
+                        )
+                      : InfoChip(
+                          'Unexcused',
+                          icon: Icons.priority_high,
+                          background: cs.errorContainer,
+                          foreground: cs.onErrorContainer,
+                        ),
+                ],
               ),
-            if (a.excuseStatus.trim().isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  'Excuse: ${a.excuseStatus.trim()}',
-                  style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              if (coverage case final c?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: InfoChip(
+                    c.wholeDay
+                        ? 'Whole day'
+                        : 'Partial · ${c.affected} of ${c.lessons} '
+                              '${c.lessons == 1 ? 'lesson' : 'lessons'}',
+                    key: ValueKey(
+                      'absence-${a.id}-${c.wholeDay ? 'whole' : 'partial'}',
+                    ),
+                    icon: c.wholeDay ? Icons.event_busy : Icons.timelapse,
+                    background: cs.secondaryContainer,
+                    foreground: cs.onSecondaryContainer,
+                  ),
                 ),
-              ),
-            if (a.text.trim().isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(a.text.trim(), style: theme.textTheme.bodySmall),
-              ),
-          ],
+              if (a.reason.trim().isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    a.reason.trim(),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+              if (a.excuseStatus.trim().isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    'Excuse: ${a.excuseStatus.trim()}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              if (a.text.trim().isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(a.text.trim(), style: theme.textTheme.bodySmall),
+                ),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }

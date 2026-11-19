@@ -117,6 +117,38 @@ class TimetableRepositoryImpl implements TimetableRepository {
   }
 
   @override
+  Future<List<Period>> week(
+    Account account,
+    TimetableTarget target,
+    DateTime weekStart,
+  ) async {
+    final monday = mondayOf(weekStart);
+    final row = await _weekQuery(account.id, target, monday).getSingleOrNull();
+    if (row != null) {
+      final at = DateTime.fromMillisecondsSinceEpoch(row.fetchedAt);
+      final now = clock();
+      final over = !DateTime(
+        monday.year,
+        monday.month,
+        monday.day + 7,
+      ).isAfter(DateTime(now.year, now.month, now.day));
+      // A past week fetched after it was over doesn't change any more.
+      final fetchedAfterEnd = !at.isBefore(
+        DateTime(monday.year, monday.month, monday.day + 7),
+      );
+      if ((over && fetchedAfterEnd) || now.difference(at) <= maxAge) {
+        return PeriodCodec.decodeList(row.periodsJson);
+      }
+    }
+    try {
+      return await _refreshPeriods(account, target, monday);
+    } catch (e) {
+      if (row != null) return PeriodCodec.decodeList(row.periodsJson);
+      throw _wrap(e);
+    }
+  }
+
+  @override
   Future<void> refresh(
     Account account,
     TimetableTarget target,
@@ -308,10 +340,12 @@ class TimetableRepositoryImpl implements TimetableRepository {
     if (run == null) {
       final r = run = _ScanRun();
       _scans[key] = r;
-      r.future = _doScan(account, monday, r).then((scan) {
-        _lastScans[key] = scan;
-        return scan;
-      }).whenComplete(() => _scans.remove(key));
+      r.future = _doScan(account, monday, r)
+          .then((scan) {
+            _lastScans[key] = scan;
+            return scan;
+          })
+          .whenComplete(() => _scans.remove(key));
     }
     if (onProgress != null) {
       run.listeners.add(onProgress);
@@ -320,7 +354,11 @@ class TimetableRepositoryImpl implements TimetableRepository {
     return run.future;
   }
 
-  Future<ClassScan> _doScan(Account account, DateTime monday, _ScanRun run) async {
+  Future<ClassScan> _doScan(
+    Account account,
+    DateTime monday,
+    _ScanRun run,
+  ) async {
     final names = await _master.loadResolver(account.id);
     var classes = names.elementsOf(ElementType.klasse);
     if (classes.isEmpty) {
@@ -332,7 +370,9 @@ class TimetableRepositoryImpl implements TimetableRepository {
 
     Object? firstError;
     StackTrace? firstStack;
-    final results = await runLimited(classes, aggregationConcurrency, (c) async {
+    final results = await runLimited(classes, aggregationConcurrency, (
+      c,
+    ) async {
       try {
         return await _classWeek(account, c.id, monday);
       } catch (e, s) {
