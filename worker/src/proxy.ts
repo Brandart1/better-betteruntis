@@ -6,9 +6,20 @@
  * What goes upstream: method (GET/POST/HEAD), path, raw query, the body, and
  * only content-type, accept, accept-language and a bearer authorization
  * header, with a neutral user agent. What comes back: status, body and
- * content-type, plus `cache-control: no-store`. Cookies are never forwarded
- * in either direction (same as the Dart server); redirects are not followed
+ * content-type, plus `cache-control: no-store`. Redirects are not followed
  * and their `location` is dropped.
+ *
+ * WebUntis website session (added 2026-11-19, maintainer: "go ahead"): some
+ * WebUntis functions (reporting an absence and its reasons) accept only the
+ * website's session cookie, which a browser never lets the app see. So the
+ * relay carries it in custom headers instead of real cookies, which never
+ * pass in either direction: upstream `Set-Cookie` comes back as
+ * [SESSION_RESPONSE_HEADER] (a JSON array of `name=value`, no attributes);
+ * the app sends it back as [SESSION_REQUEST_HEADER], which goes upstream as
+ * `Cookie` together with the CSRF / tenant headers and the `Origin` /
+ * `Referer` of the school's own site (set here, never taken from the
+ * client). Nothing of it is stored or logged; the session lives only in
+ * the open app tab.
  *
  * Nothing is logged: no bodies, auth headers, query strings or hosts.
  */
@@ -20,7 +31,38 @@ import { clientIpKey } from "./ip";
 export const PROXY_PREFIX = "/proxy/";
 
 /** Request headers copied upstream; everything else is dropped. */
-export const FORWARDED_REQUEST_HEADERS = ["content-type", "accept", "accept-language", "authorization"] as const;
+export const FORWARDED_REQUEST_HEADERS = [
+  "content-type",
+  "accept",
+  "accept-language",
+  "authorization",
+  // The WebUntis website session's companions (see the file comment).
+  "x-csrf-token",
+  "x-xsrf-token",
+  "tenant-id",
+] as const;
+
+/** The app's WebUntis session cookies, sent upstream as `Cookie`. */
+export const SESSION_REQUEST_HEADER = "x-bbu-cookie";
+
+/** Upstream `Set-Cookie` values for the app (JSON array of `name=value`). */
+export const SESSION_RESPONSE_HEADER = "x-bbu-set-cookie";
+
+/** Longest session header accepted (WebUntis' cookies are a few hundred chars). */
+const MAX_SESSION_HEADER = 4096;
+
+/** `name=value` pairs of [setCookies], attributes dropped. */
+export function sessionCookiesOf(setCookies: string[]): string[] {
+  const out: string[] = [];
+  for (const line of setCookies) {
+    const pair = line.split(";")[0]!.trim();
+    const eq = pair.indexOf("=");
+    if (eq <= 0) continue;
+    if (/[\r\n]/.test(pair)) continue;
+    out.push(pair);
+  }
+  return out;
+}
 
 export const UPSTREAM_USER_AGENT = "BetterBetterUntis-Web/1.0";
 
@@ -134,6 +176,16 @@ async function relay(
     if (name === "authorization" && !v.trimStart().toLowerCase().startsWith("bearer ")) continue;
     headers.set(name, v);
   }
+  const session = request.headers.get(SESSION_REQUEST_HEADER);
+  if (session !== null && session.trim() !== "") {
+    if (session.length > MAX_SESSION_HEADER || /[\r\n]/.test(session)) {
+      return textError(400, "Bad session header");
+    }
+    const origin = new URL(target).origin;
+    headers.set("cookie", session);
+    headers.set("origin", origin);
+    headers.set("referer", `${origin}/WebUntis/embedded.do?showSidebar=false`);
+  }
   headers.set("user-agent", UPSTREAM_USER_AGENT);
 
   const controller = new AbortController();
@@ -157,14 +209,20 @@ async function relay(
       const res = await fetchImpl(upstream);
       if (method === "HEAD") await res.body?.cancel().catch(() => {});
       const bytes = method === "HEAD" ? new Uint8Array(0) : await readLimited(res.body, maxResponse);
-      return { status: res.status, contentType: res.headers.get("content-type"), bytes };
+      return {
+        status: res.status,
+        contentType: res.headers.get("content-type"),
+        cookies: sessionCookiesOf(res.headers.getSetCookie()),
+        bytes,
+      };
     })();
     // After a timeout the losing branch may still reject; that's expected.
     work.catch(() => {});
-    const { status, contentType, bytes } = await Promise.race([work, timeout]);
+    const { status, contentType, cookies, bytes } = await Promise.race([work, timeout]);
     if (status < 200 || status > 599) return textError(502, "Upstream protocol error");
     const out = new Headers({ "cache-control": "no-store" });
     if (contentType !== null) out.set("content-type", contentType);
+    if (cookies.length > 0) out.set(SESSION_RESPONSE_HEADER, JSON.stringify(cookies));
     const hasBody = method !== "HEAD" && !NULL_BODY_STATUSES.has(status);
     return new Response(hasBody ? bytes : null, { status, headers: out });
   } catch (e) {

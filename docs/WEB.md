@@ -54,12 +54,22 @@ same origin instead of Google's CDN.
   Paths with `.`/`..` segments, empty segments (`//`) or encoded backslashes
   get 403. Only HTTPS on port 443 is used.
 - Methods: `GET`, `POST`, `HEAD`. Others get **405**.
-- Request headers forwarded: `Content-Type`, `Accept`, `Accept-Language`, and
-  `Authorization` **only if it's `Bearer ...`**. Cookies, Origin, Referer and
+- Request headers forwarded: `Content-Type`, `Accept`, `Accept-Language`,
+  `Authorization` **only if it's `Bearer ...`**, and `X-CSRF-TOKEN`,
+  `X-XSRF-TOKEN`, `Tenant-Id`. The browser's cookies, Origin, Referer and
   the rest are dropped. The User-Agent is set to `BetterBetterUntis-Web/1.0`.
+- **WebUntis website session** (since 0.5.8+161): reporting an absence and
+  its reasons accept only the WebUntis website's session cookie, which a
+  browser never shows the app. The app sends that session in
+  `X-BBU-Cookie`; the relay sends it upstream as `Cookie`, with `Origin` /
+  `Referer` of the school's own site (set by the relay, never taken from the
+  browser). At most 4 096 characters, no line breaks (**400**).
 - Response: upstream status, body and `Content-Type` only, plus
-  `Cache-Control: no-store`. `Set-Cookie`, `Location` and all other upstream
-  headers are dropped. Redirects are not followed.
+  `Cache-Control: no-store`. Upstream `Set-Cookie` comes back only as
+  `X-BBU-Set-Cookie` (a JSON array of `name=value`, no attributes), never as
+  a cookie of this site; the app keeps it in memory for the open tab only.
+  `Location` and all other upstream headers are dropped. Redirects are not
+  followed.
 - Limits: request body 1 MB (**413**), upstream response 32 MB (**502**),
   45 s upstream time (**504**), 300 requests per minute per IP (**429**).
 - Nothing is logged: no bodies, queries, auth headers or hosts.

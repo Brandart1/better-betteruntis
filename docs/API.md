@@ -112,7 +112,7 @@ Session (0.4.6+23, to be confirmed):
 - Then `GET /WebUntis/api/app/config` with that cookie. Its `data` has `csrfHeader` (the header **name**), `csrfToken` (the value) and `tenantId`. We send `<csrfHeader>: <csrfToken>` and `Tenant-Id`. An `XSRF-TOKEN` cookie is echoed as `X-XSRF-TOKEN`.
 - What the browser sends on the POST (captured 2026-11-12): `Accept: application/json`, `Content-Type: application/json`, `X-CSRF-TOKEN`, `Tenant-Id`, `Origin: https://<host>`, `Referer: https://<host>/WebUntis/embedded.do?showSidebar=false`, `Cookie`, and **no** `Authorization`. With a session we send exactly these (0.4.6+24); the bearer token only when no session could be opened.
 - The Debug log shows `web session: …` entries: cookie names received, the config's top-level keys and the key paths where CSRF / tenant were found (never values). A cached session that is redirected or refused is reopened once.
-- Native apps only: on the web the browser hides `Set-Cookie` and our proxy drops cookies.
+- Web version (since 0.5.8+161): the browser hides `Set-Cookie` and never sends our `Cookie`, so the relay carries the session in `X-BBU-Cookie` / `X-BBU-Set-Cookie` instead (docs/WEB.md, lib/app/web_proxy.dart). Before that, reporting absences and their reasons got 403 on the web.
 - If it still fails, the server answers with a redirect or a login page; our client then reports "The school's server didn't accept the app's sign-in for this function" (code `-8530`, internal).
 
 Assumed (to be confirmed with a real parent account):
