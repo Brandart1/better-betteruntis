@@ -145,11 +145,14 @@ class AbsencesTab extends ConsumerWidget {
                 selected: filter.reverse,
                 onSelected: (v) => notifier.set(filter.copyWith(reverse: v)),
               ),
-              ActionChip(
+              // The same chip as its neighbours, so it looks the same.
+              FilterChip(
                 key: const ValueKey('absences-by-subject'),
                 avatar: const Icon(Icons.bar_chart, size: 18),
+                showCheckmark: false,
                 label: const Text('By subject'),
-                onPressed: () => Navigator.of(context).push(
+                selected: false,
+                onSelected: (_) => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => AbsencesBySubjectScreen(account: account),
                   ),
