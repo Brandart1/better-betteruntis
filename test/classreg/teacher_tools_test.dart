@@ -77,6 +77,10 @@ class ApiTimetables implements TimetableRepository {
   ) => Stream.fromFuture(_week(target, weekStart));
 
   @override
+  Future<List<Period>> week(Account a, TimetableTarget t, DateTime w) =>
+      watchWeek(a, t, w).first;
+
+  @override
   Future<void> refresh(
     Account account,
     TimetableTarget target,

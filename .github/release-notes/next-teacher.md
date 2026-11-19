@@ -3,6 +3,7 @@
 Teacher test build (branch `teacher`). Absences, lesson topic, previous topics and class register entries are confirmed with real teacher accounts. Room booking and creating exams are still guesses at the server calls (the official app can't do either); most other teacher calls now follow the official Untis app 6.8.1 — if something fails, please send the entries from the Debug screen.
 
 ### New
+- Absences (from v0.5.8-beta): each absence says **Whole day** or **Partial · n of m lessons**, from the timetable (cancelled lessons don't count), and **By subject** shows the attendance in each subject as a percentage with missed and unexcused lessons.
 - **Favourite classes and teachers** in Browse timetables (from v0.5.7-beta): tap the star next to a class or teacher, or in the top bar of its timetable, and it is also shown at the top of its list under "Favourites" (it keeps its place in the list).
 - Your own homework on a lesson, like your own exams; both also appear in the Info center marked “Custom”.
 - Pupils and parents: the first time they open **Teachers** in the timetables menu, a notice asks them not to use teacher timetables to contact teachers in free periods and points to the office hours (once per device). Teacher accounts don't see it.

@@ -117,6 +117,38 @@ class TimetableRepositoryImpl implements TimetableRepository {
   }
 
   @override
+  Future<List<Period>> week(
+    Account account,
+    TimetableTarget target,
+    DateTime weekStart,
+  ) async {
+    final monday = mondayOf(weekStart);
+    final row = await _weekQuery(account.id, target, monday).getSingleOrNull();
+    if (row != null) {
+      final at = DateTime.fromMillisecondsSinceEpoch(row.fetchedAt);
+      final now = clock();
+      final over = !DateTime(
+        monday.year,
+        monday.month,
+        monday.day + 7,
+      ).isAfter(DateTime(now.year, now.month, now.day));
+      // A past week fetched after it was over doesn't change any more.
+      final fetchedAfterEnd = !at.isBefore(
+        DateTime(monday.year, monday.month, monday.day + 7),
+      );
+      if ((over && fetchedAfterEnd) || now.difference(at) <= maxAge) {
+        return PeriodCodec.decodeList(row.periodsJson);
+      }
+    }
+    try {
+      return await _refreshPeriods(account, target, monday);
+    } catch (e) {
+      if (row != null) return PeriodCodec.decodeList(row.periodsJson);
+      throw _wrap(e);
+    }
+  }
+
+  @override
   Future<void> refresh(
     Account account,
     TimetableTarget target,

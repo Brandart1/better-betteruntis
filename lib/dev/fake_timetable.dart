@@ -698,6 +698,21 @@ class FakeTimetableRepository implements TimetableRepository {
     }
   }
 
+  /// Weeks asked for through [week], in order.
+  final weekRequests = <DateTime>[];
+
+  @override
+  Future<List<Period>> week(
+    Account account,
+    TimetableTarget target,
+    DateTime weekStart,
+  ) async {
+    weekRequests.add(weekStart);
+    if (latency > Duration.zero) await Future<void>.delayed(latency);
+    if (refreshError != null) throw refreshError!;
+    return weekBuilder(target, weekStart);
+  }
+
   @override
   Future<void> refresh(
     Account account,

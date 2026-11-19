@@ -679,6 +679,10 @@ class _FakeTimetables implements TimetableRepository {
   bool fail = false;
 
   @override
+  Future<List<Period>> week(Account a, TimetableTarget t, DateTime w) =>
+      watchWeek(a, t, w).first;
+
+  @override
   Future<void> refresh(Account a, TimetableTarget t, DateTime weekStart) async {
     if (fail) throw const UntisException(0, 'offline');
     refreshed.add(ymd(weekStart));

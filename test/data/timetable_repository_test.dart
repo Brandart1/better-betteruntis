@@ -57,6 +57,66 @@ void main() {
     ),
   );
 
+  group('week() for statistics', () {
+    setUp(
+      () => whenTimetable().thenAnswer(
+        (_) async => TimetableResponse([period(1)], null),
+      ),
+    );
+    final lastWeek = DateTime(2026, 11, 2);
+
+    test('a past week fetched after it ended is served from the cache, '
+        'however old', () async {
+      expect(await repo.week(acc, target, lastWeek), hasLength(1));
+      now = now.add(const Duration(days: 30));
+      expect(await repo.week(acc, target, lastWeek), hasLength(1));
+      verify(
+        () => api.timetable(
+          host: any(named: 'host'),
+          school: any(named: 'school'),
+          auth: any(named: 'auth'),
+          target: any(named: 'target'),
+          start: any(named: 'start'),
+          end: any(named: 'end'),
+          masterDataTimestamp: any(named: 'masterDataTimestamp'),
+        ),
+      ).called(1);
+    });
+
+    test('a week fetched while it ran is fetched once more afterwards; '
+        'the current week only after a few minutes', () async {
+      await repo.week(acc, target, monday); // Tuesday of this week
+      await repo.week(acc, target, monday);
+      now = now.add(const Duration(minutes: 10));
+      await repo.week(acc, target, monday);
+      now = now.add(const Duration(days: 10)); // the week is over
+      await repo.week(acc, target, monday);
+      await repo.week(acc, target, monday);
+      verify(
+        () => api.timetable(
+          host: any(named: 'host'),
+          school: any(named: 'school'),
+          auth: any(named: 'auth'),
+          target: any(named: 'target'),
+          start: any(named: 'start', that: equals(monday)),
+          end: any(named: 'end'),
+          masterDataTimestamp: any(named: 'masterDataTimestamp'),
+        ),
+      ).called(3);
+    });
+
+    test('offline: the cached week, however old', () async {
+      await repo.week(acc, target, monday);
+      whenTimetable().thenThrow(const UntisException(0, 'offline'));
+      now = now.add(const Duration(minutes: 10));
+      expect(await repo.week(acc, target, monday), hasLength(1));
+      await expectLater(
+        repo.week(acc, target, lastWeek),
+        throwsA(isA<UntisException>()),
+      );
+    });
+  });
+
   test('mondayOf normalizes', () {
     expect(mondayOf(DateTime(2026, 11, 15, 23)), monday);
     expect(mondayOf(monday), monday);

@@ -189,13 +189,31 @@ abstract interface class TimetableRepository {
   );
 
   /// Forces a network refresh of that week. Throws [UntisException].
-  Future<void> refresh(Account account, TimetableTarget target, DateTime weekStart);
+  Future<void> refresh(
+    Account account,
+    TimetableTarget target,
+    DateTime weekStart,
+  );
+
+  /// That week once: from the cache when it is there and either over (a
+  /// past week, any age) or younger than a few minutes, else fetched and
+  /// stored. For statistics over many weeks, which must not re-download
+  /// weeks that are already known. Throws [UntisException].
+  Future<List<Period>> week(
+    Account account,
+    TimetableTarget target,
+    DateTime weekStart,
+  );
 
   /// Emits a new resolver whenever master data changes (deltas applied before
   /// periods are emitted, so names are never stale).
   Stream<NameResolver> watchNames(Account account);
 
-  DateTime? lastRefreshed(Account account, TimetableTarget target, DateTime weekStart);
+  DateTime? lastRefreshed(
+    Account account,
+    TimetableTarget target,
+    DateTime weekStart,
+  );
 
   /// Loads every class timetable of that week (cache-first, a few requests at
   /// a time) only to find teachers that the school shares by name. Found
