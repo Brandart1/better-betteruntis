@@ -94,7 +94,7 @@ void main() {
     expect(top(tester, 'browse-teacher-2'), before);
   });
 
-  testWidgets('classes can be favourites, rooms have no star', (tester) async {
+  testWidgets('classes and rooms can be favourites', (tester) async {
     await pump(tester);
     await tap(tester, key('browse-star-klasse-40'));
     expect(find.text('Favourites'), findsOneWidget);
@@ -102,7 +102,16 @@ void main() {
     expect(key('browse-fav-klasse-40'), findsOneWidget);
     expect(key('browse-klasse-40'), findsOneWidget);
     await tap(tester, find.widgetWithText(Tab, 'Rooms'));
-    expect(find.byIcon(Icons.star_border), findsNothing);
+    await tap(tester, key('browse-star-room-30'));
+    expect(key('browse-favourites-${ElementType.room}'), findsOneWidget);
+    expect(key('browse-fav-room-30'), findsOneWidget);
+    expect(key('browse-room-30'), findsOneWidget);
+    expect(store.values[FavouritesNotifier.storeKey], {
+      demoAccount().id: [
+        favouriteKey(ElementType.klasse, 40),
+        favouriteKey(ElementType.room, 30),
+      ],
+    });
   });
 
   testWidgets('favourites load from the store; search still filters', (

@@ -199,13 +199,13 @@ class SettingValue extends RemoteSettingValue {
 
 // ------------------------------------------- settings of one account only
 
-/// Favourite classes and teachers (lib/core/favourites.dart): one record
+/// Favourite classes, teachers and rooms (lib/core/favourites.dart): one record
 /// per favourite, `favourite.<TYPE>#<id>` with the value `true`;
 /// unstarring leaves a tombstone. Element ids belong to one school, so
 /// these go only to the server of the account they belong to.
 const String favouritePrefix = 'favourite.';
 
-final _favouriteName = RegExp(r'^favourite\.(CLASS|TEACHER)#-?\d{1,12}$');
+final _favouriteName = RegExp(r'^favourite\.(CLASS|TEACHER|ROOM)#-?\d{1,12}$');
 
 bool isFavouriteSetting(String name) => _favouriteName.hasMatch(name);
 

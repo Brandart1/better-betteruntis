@@ -621,8 +621,8 @@ void main() {
     });
   });
 
-  testWidgets('class and teacher timetables have a favourite star; the own '
-      'timetable has none', (tester) async {
+  testWidgets('class, teacher and room timetables have a favourite star; '
+      'the own timetable has none', (tester) async {
     tester.view.physicalSize = const Size(1000, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -655,9 +655,9 @@ void main() {
     });
 
     await tester.pumpWidget(
-      app(const TimetableTarget(ElementType.room, DemoIds.klasse)),
+      app(const TimetableTarget(ElementType.room, DemoIds.r101)),
     );
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('timetable-favourite')), findsNothing);
+    expect(find.byTooltip('Add to favourites'), findsOneWidget);
   });
 }
