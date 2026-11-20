@@ -2108,7 +2108,8 @@ void main() {
         'names and values that are no favourites are refused or ignored',
         () {
           expect(isFavouriteSetting('favourite.CLASS#40'), isTrue);
-          expect(isFavouriteSetting('favourite.ROOM#4'), isFalse);
+          expect(isFavouriteSetting('favourite.ROOM#4'), isTrue);
+          expect(isFavouriteSetting('favourite.SUBJECT#4'), isFalse);
           expect(
             readRemoteSetting('favourite.CLASS#40', 'true'),
             isA<SettingValue>().having((v) => v.value, 'value', true),
@@ -2121,9 +2122,9 @@ void main() {
             readRemoteSetting('favourite.CLASS#40', '', deleted: true),
             isA<SettingValue>().having((v) => v.value, 'value', null),
           );
-          // e.g. rooms from a newer version: ignored, not an error.
+          // e.g. new types from a newer version: ignored, not an error.
           expect(
-            readRemoteSetting('favourite.ROOM#4', 'true'),
+            readRemoteSetting('favourite.SUBJECT#4', 'true'),
             isA<UnknownSetting>(),
           );
           expect(

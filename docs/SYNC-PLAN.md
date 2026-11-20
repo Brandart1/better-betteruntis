@@ -300,16 +300,16 @@ settings part of `lib/sync/sync_engine.dart`.
 | Accessibility, everything on the screen (`accessibility`): contrast, day view by default, large day headers, read-aloud button, read-aloud language, text size, voice speed | `accessibility.contrast`, `.dayViewByDefault`, `.largeDayHeaders`, `.speakButton`, `.speechLanguage`, `.textScale`, `.speechRate` |
 
 **Synced per account** (added 2026-11-19, maintainer: "make favourites
-sync"): favourite classes and teachers of Browse timetables (store key
+sync"): favourite classes, teachers and rooms (rooms since 2026-11-20) of Browse timetables (store key
 `favourites`, lib/core/favourites.dart), one record per favourite,
-`favourite.<CLASS|TEACHER>#<id>` with the value `true`; unstarring = a
+`favourite.<CLASS|TEACHER|ROOM>#<id>` with the value `true`; unstarring = a
 tombstone. Element ids belong to one school, so these records go only to
 the server of the account they belong to, never to another synced
 account. Locally their stamps are kept as `@<accountId>|favourite.…` in
 `syncedSettings` (and in that account's `settingsAcked`); the server name
 has no account id, so another device maps them onto its own local account
-id. Other names under `favourite.` (e.g. rooms from a newer version) are
-ignored.
+id. Other names under `favourite.` (e.g. new types from a newer version)
+are ignored; versions before 0.5.10 ignore room favourites.
 
 Custom exams, lesson details ("own lesson titles/texts") and the user's own
 homework are synced as lesson notes. Accessibility values are the user's explicit

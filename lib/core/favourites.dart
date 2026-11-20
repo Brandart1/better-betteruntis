@@ -1,4 +1,4 @@
-/// Favourite classes and teachers in "Browse timetables": starred ones are
+/// Favourite classes, teachers and rooms in "Browse timetables": starred ones are
 /// shown again at the top, under "Favourites". Kept per account (element
 /// ids belong to one school); with sync on they go to that account's sync
 /// (lib/sync/synced_settings.dart, `favourite.<TYPE>#<id>`).
@@ -13,7 +13,9 @@ import 'settings.dart';
 
 /// Element types that can be favourites.
 bool canBeFavourite(ElementType type) =>
-    type == ElementType.klasse || type == ElementType.teacher;
+    type == ElementType.klasse ||
+    type == ElementType.teacher ||
+    type == ElementType.room;
 
 String favouriteKey(ElementType type, int id) => '${type.apiName}#$id';
 
