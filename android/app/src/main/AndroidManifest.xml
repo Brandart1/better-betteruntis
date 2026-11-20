@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" />
     <!-- In-app updater: installs the GitHub release APK (ota_update). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Change notifications (Settings → Notifications); asked for on
+         Android 13+ when the user turns them on. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- ota_update merges these in; the updater needs none of them (it
          writes to the app's own files dir). -->
     <uses-permission android:name="android.permission.INSTALL_PACKAGES" tools:node="remove" />

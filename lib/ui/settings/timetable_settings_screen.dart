@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/notifications.dart';
+import '../../core/providers.dart';
 import '../../core/settings.dart';
 import 'color_picker_sheet.dart';
 import 'lesson_preview.dart';
+import 'notification_settings_screen.dart';
 import 'subject_colors_screen.dart';
 import '../common/large_text.dart';
 
@@ -72,6 +75,7 @@ class TimetableSettingsScreen extends ConsumerWidget {
     final notifier = ref.read(timetableSettingsProvider.notifier);
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final account = ref.watch(activeAccountProvider).value;
 
     void resetAll() {
       final before = ref.read(timetableSettingsProvider);
@@ -125,6 +129,27 @@ class TimetableSettingsScreen extends ConsumerWidget {
             child: ListView(
               padding: const EdgeInsets.only(bottom: 24),
               children: [
+                ListTile(
+                  key: const ValueKey('notification-settings'),
+                  leading: const Icon(Icons.notifications_outlined),
+                  title: const Text('Notifications'),
+                  subtitle: Text(
+                    account != null &&
+                            ref.watch(
+                              notificationPrefsProvider.select(
+                                (p) => p.of(account.id).enabled,
+                              ),
+                            )
+                        ? 'On'
+                        : 'Substitutions, cancellations, new messages',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const NotificationSettingsScreen(),
+                    ),
+                  ),
+                ),
                 const _Section('Lesson colors'),
                 for (final kind in LessonColorKind.values)
                   _ColorTile(

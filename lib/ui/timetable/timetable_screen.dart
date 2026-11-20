@@ -113,6 +113,31 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
   bool _drawerOpen = false;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _jumpRequested());
+  }
+
+  /// Opened from a notification: show the changed day ([timetableJumpProvider]).
+  /// Waits (a few frames) until the pager is laid out.
+  void _jumpRequested([int attempt = 0]) {
+    if (!mounted || widget.target != null) return;
+    final day = ref.read(timetableJumpProvider);
+    if (day == null) return;
+    final c = _day != null ? _dayController : _weekController;
+    if (c == null || !c.hasClients) {
+      if (attempt < 30) {
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _jumpRequested(attempt + 1),
+        );
+      }
+      return;
+    }
+    ref.read(timetableJumpProvider.notifier).set(null);
+    _goToDate(day);
+  }
+
+  @override
   void dispose() {
     _keyFocus.dispose();
     _weekController.dispose();
@@ -348,6 +373,11 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     final accountAsync = ref.watch(activeAccountProvider);
     final account = accountAsync.value;
     final names = ref.watch(nameResolverProvider).value;
+    if (widget.target == null) {
+      ref.listen(timetableJumpProvider, (_, day) {
+        if (day != null) _jumpRequested();
+      });
+    }
     // Only this flag changes the layout; colors/fonts rebuild the cards only.
     final showCancelled = ref.watch(
       timetableSettingsProvider.select((s) => s.showCancelled),

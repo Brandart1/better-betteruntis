@@ -24,6 +24,20 @@ class WeekRequest {
   int get hashCode => Object.hash(account.id, target, weekStart);
 }
 
+/// A day "My timetable" should show next (set when a notification about a
+/// timetable change is opened); the timetable screen jumps there and
+/// clears it.
+final timetableJumpProvider = NotifierProvider<TimetableJump, DateTime?>(
+  TimetableJump.new,
+);
+
+class TimetableJump extends Notifier<DateTime?> {
+  @override
+  DateTime? build() => null;
+
+  void set(DateTime? day) => state = day;
+}
+
 /// Periods of one week as loaded, cache-first via
 /// [TimetableRepository.watchWeek]. No automatic retry: the UI shows an error
 /// with a retry button instead.

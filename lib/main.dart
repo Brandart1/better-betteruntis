@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'api/untis_api_impl.dart';
+import 'app/notifications/background_check.dart';
+import 'app/notifications/local_notifiers.dart';
 import 'app/platform/platform_services.dart';
 import 'app/routing_api.dart';
+import 'core/notifications.dart';
 import 'core/providers.dart';
 import 'core/settings.dart';
 import 'data/data_providers.dart';
@@ -32,6 +35,14 @@ Future<void> main() async {
         untisApiProvider.overrideWithValue(api),
         settingsStoreProvider.overrideWithValue(settings),
         ...dataOverrides(secrets: createSecretStore()),
+        localNotifierProvider.overrideWithValue(createPlatformNotifier()),
+        notificationStateStoreProvider.overrideWithValue(
+          createNotificationStateStore(),
+        ),
+        backgroundSchedulerProvider.overrideWithValue(scheduleBackgroundChecks),
+        backgroundChecksSupportedProvider.overrideWithValue(
+          backgroundChecksSupported,
+        ),
         syncControllerProvider.overrideWith(SyncEngine.new),
         if (supportsDirectDownload) ...[
           exportDirectoryProvider.overrideWithValue(() async => null),

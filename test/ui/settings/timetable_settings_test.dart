@@ -288,6 +288,8 @@ void main() {
         200,
         scrollable: find.byType(Scrollable).last,
       );
+      await tester.ensureVisible(find.byKey(const ValueKey('center-text')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('center-text')));
       await tester.pumpAndSettle();
       expect(cardText(tester, 'regular').textAlign, TextAlign.start);
@@ -345,6 +347,12 @@ void main() {
     testWidgets('school colors switch and reset all', (tester) async {
       await pump(tester);
       expect(cardColor(tester, 'school'), const Color(0xFF81C784));
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('school-colors')),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('school-colors')));
       await tester.pumpAndSettle();
       expect(cardColor(tester, 'school'), cardColor(tester, 'regular'));
@@ -413,6 +421,12 @@ void main() {
 
     testWidgets('subject colors: pick, reset one, reset all', (tester) async {
       await pump(tester, names: FakeNameResolver());
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('subject-colors')),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('subject-colors')));
       await tester.pumpAndSettle();
       expect(find.byType(SubjectColorsScreen), findsOneWidget);

@@ -2,13 +2,18 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
+import '../../core/notifications.dart';
 import '../../core/settings.dart';
 import '../../data/secret_store.dart';
+import '../notifications/state_store_io.dart';
 import '../settings_store.dart';
 
 Future<SettingsStore> openSettingsStore() => FileSettingsStore.open();
 
 SecretStore createSecretStore() => SecureSecretStore();
+
+NotificationStateStore createNotificationStateStore() =>
+    FileNotificationStateStore();
 
 /// No request rewriting on native platforms.
 List<Interceptor> platformInterceptors() => const [];
