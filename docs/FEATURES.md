@@ -52,7 +52,10 @@ Legend: `[ ]` todo · `[~]` partial · `[x]` done · **P** = polish / beyond par
 ## Notifications & background
 - [ ] Break notification: next lesson info (subject/room/teacher/class each None/Short/Long)
 - [ ] Before-first-lesson notification (lead time, default 30 min); optional in multi-hour lessons
-- [ ] Background refresh
+- [x] Background refresh (Android WorkManager, every 15 min in school hours; iOS on start/resume; web while open)
+- [x] Change notifications: substitutions, cancellations, room changes (today + N school days), new messages
+- [x] Daily summary at a chosen time (today's changes and tests, own ones included); later changes notified at once
+- [x] Reminders N days before tests and homework (school and own)
 - [ ] Auto-mute during lessons — Android only (iOS has no API; use Focus filter / skip)
 - [ ] Widgets (BetterUntis never shipped them) — **P**
 
@@ -60,7 +63,7 @@ Legend: `[ ]` todo · `[~]` partial · `[x]` done · **P** = polish / beyond par
 - [ ] General: language, double-back-to-exit (Android), week display options
 - [ ] Styling: all item colors, reset colors, theme color / dynamic color, dark mode auto/light/dark, OLED black
 - [ ] Timetable options (see above)
-- [ ] Notifications options
+- [x] Notifications options (per account)
 - [ ] About: version, repo, license (GPLv3), libraries
 - [ ] Opt-in crash reporting (default **off**, unlike BetterUntis)
 - [ ] **P** Backup/export & import of profiles + settings

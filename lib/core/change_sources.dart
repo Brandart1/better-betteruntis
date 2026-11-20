@@ -146,7 +146,8 @@ String describeChange(Period p, NameResolver names) {
 
 /// Body lines for timetable changes: one per lesson, consecutive lessons
 /// with the same change merged ("Tue 18.11. 08:00–09:40: M cancelled").
-List<String> timetableLines(List<ChangeItem> fresh) {
+/// [withDay] false: without the date (the summary of one day).
+List<String> timetableLines(List<ChangeItem> fresh, {bool withDay = true}) {
   final items = [
     ...fresh,
   ]..sort((a, b) => (a.start ?? DateTime(0)).compareTo(b.start ?? DateTime(0)));
@@ -160,7 +161,8 @@ List<String> timetableLines(List<ChangeItem> fresh) {
     lines.add(
       s == null
           ? f.text
-          : '${shortDay(s)} ${hhmm(s)}–${hhmm(end ?? f.end ?? s)}: ${f.text}',
+          : '${withDay ? '${shortDay(s)} ' : ''}'
+                '${hhmm(s)}–${hhmm(end ?? f.end ?? s)}: ${f.text}',
     );
   }
 

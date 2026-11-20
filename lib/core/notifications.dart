@@ -28,10 +28,18 @@ class NotificationSettings {
     this.timetable = true,
     this.messages = true,
     this.daysAhead = defaultDaysAhead,
+    this.dailySummary = true,
+    this.dailyMinute = defaultDailyMinute,
+    this.examReminderDays = 0,
+    this.homeworkReminderDays = 0,
   });
 
   static const defaultDaysAhead = 2;
   static const maxDaysAhead = 7;
+
+  /// 07:00.
+  static const defaultDailyMinute = 7 * 60;
+  static const maxReminderDays = 7;
 
   final bool enabled;
 
@@ -45,16 +53,48 @@ class NotificationSettings {
   /// Saturdays and Sundays don't count.
   final int daysAhead;
 
+  /// Every day at [dailyMinute]: today's changes and tests in one
+  /// notification. Changes to today found after that time are notified
+  /// right away; before it they wait for the summary.
+  final bool dailySummary;
+
+  /// Time of the daily summary and the reminders, minutes after midnight.
+  final int dailyMinute;
+
+  /// Reminder about tests this many days before (at [dailyMinute]); 0 = off.
+  final int examReminderDays;
+
+  /// Reminder about homework due in this many days (at [dailyMinute]);
+  /// 0 = off.
+  final int homeworkReminderDays;
+
+  /// Whether anything is delivered at [dailyMinute].
+  bool get hasDaily =>
+      enabled &&
+      (dailySummary || examReminderDays > 0 || homeworkReminderDays > 0);
+
   NotificationSettings copyWith({
     bool? enabled,
     bool? timetable,
     bool? messages,
     int? daysAhead,
+    bool? dailySummary,
+    int? dailyMinute,
+    int? examReminderDays,
+    int? homeworkReminderDays,
   }) => NotificationSettings(
     enabled: enabled ?? this.enabled,
     timetable: timetable ?? this.timetable,
     messages: messages ?? this.messages,
     daysAhead: (daysAhead ?? this.daysAhead).clamp(0, maxDaysAhead),
+    dailySummary: dailySummary ?? this.dailySummary,
+    dailyMinute: (dailyMinute ?? this.dailyMinute).clamp(0, 24 * 60 - 1),
+    examReminderDays: (examReminderDays ?? this.examReminderDays).clamp(
+      0,
+      maxReminderDays,
+    ),
+    homeworkReminderDays: (homeworkReminderDays ?? this.homeworkReminderDays)
+        .clamp(0, maxReminderDays),
   );
 
   Map<String, Object?> toJson() => {
@@ -62,6 +102,10 @@ class NotificationSettings {
     'timetable': timetable,
     'messages': messages,
     'daysAhead': daysAhead,
+    'dailySummary': dailySummary,
+    'dailyMinute': dailyMinute,
+    'examReminderDays': examReminderDays,
+    'homeworkReminderDays': homeworkReminderDays,
   };
 
   /// Tolerant parse: wrong or missing fields fall back to the defaults.
@@ -70,6 +114,8 @@ class NotificationSettings {
     if (json is! Map) return d;
     bool b(String k, bool def) => json[k] is bool ? json[k] as bool : def;
     final days = json['daysAhead'];
+    int n(String k, int def, int max) =>
+        json[k] is num ? (json[k] as num).toInt().clamp(0, max) : def;
     return NotificationSettings(
       enabled: b('enabled', d.enabled),
       timetable: b('timetable', d.timetable),
@@ -77,6 +123,10 @@ class NotificationSettings {
       daysAhead: days is num
           ? days.toInt().clamp(0, maxDaysAhead)
           : d.daysAhead,
+      dailySummary: b('dailySummary', d.dailySummary),
+      dailyMinute: n('dailyMinute', d.dailyMinute, 24 * 60 - 1),
+      examReminderDays: n('examReminderDays', 0, maxReminderDays),
+      homeworkReminderDays: n('homeworkReminderDays', 0, maxReminderDays),
     );
   }
 
@@ -86,10 +136,23 @@ class NotificationSettings {
       other.enabled == enabled &&
       other.timetable == timetable &&
       other.messages == messages &&
-      other.daysAhead == daysAhead;
+      other.daysAhead == daysAhead &&
+      other.dailySummary == dailySummary &&
+      other.dailyMinute == dailyMinute &&
+      other.examReminderDays == examReminderDays &&
+      other.homeworkReminderDays == homeworkReminderDays;
 
   @override
-  int get hashCode => Object.hash(enabled, timetable, messages, daysAhead);
+  int get hashCode => Object.hash(
+    enabled,
+    timetable,
+    messages,
+    daysAhead,
+    dailySummary,
+    dailyMinute,
+    examReminderDays,
+    homeworkReminderDays,
+  );
 }
 
 /// [NotificationSettings] of every account, keyed by account id. Stored on
@@ -224,6 +287,15 @@ class ChangeItem {
 
   /// Recorded as seen but never notified (e.g. a message already read).
   final bool silent;
+
+  ChangeItem asSilent() => ChangeItem(
+    key: key,
+    signature: signature,
+    text: text,
+    start: start,
+    end: end,
+    silent: true,
+  );
 }
 
 /// Result of [diffChanges].
@@ -285,15 +357,19 @@ class MemoryNotificationStateStore implements NotificationStateStore {
 }
 
 /// Parsed state: when the last check ran and, per account and source, the
-/// scope and seen items.
+/// scope and seen items; per account the last day whose daily summary and
+/// reminders were shown or handed to the OS ([daily], `yyyy-mm-dd`).
 class NotificationState {
   NotificationState({
     this.lastCheck,
     Map<String, Map<String, SourceState>>? accounts,
-  }) : accounts = accounts ?? {};
+    Map<String, String>? daily,
+  }) : accounts = accounts ?? {},
+       daily = daily ?? {};
 
   DateTime? lastCheck;
   final Map<String, Map<String, SourceState>> accounts;
+  final Map<String, String> daily;
 
   factory NotificationState.fromJson(Map<String, Object?> json) {
     final at = json['lastCheck'];
@@ -309,9 +385,18 @@ class NotificationState {
         accounts[e.key as String] = sources;
       }
     }
+    final daily = <String, String>{};
+    if (json['daily'] case final Map d) {
+      for (final e in d.entries) {
+        if (e.key is String && e.value is String) {
+          daily[e.key as String] = e.value as String;
+        }
+      }
+    }
     return NotificationState(
       lastCheck: at is String ? DateTime.tryParse(at) : null,
       accounts: accounts,
+      daily: daily,
     );
   }
 
@@ -321,6 +406,7 @@ class NotificationState {
       for (final a in accounts.entries)
         a.key: {for (final s in a.value.entries) s.key: s.value.toJson()},
     },
+    if (daily.isNotEmpty) 'daily': daily,
   };
 }
 
@@ -412,6 +498,62 @@ class NotificationTarget {
   }
 }
 
+// ---- Daily summary and reminders -------------------------------------------
+
+/// What the daily time of one day brings: the summary of that day's
+/// changes and tests, and reminders about upcoming tests and homework.
+/// Either may be null (nothing to say).
+class DailyDigest {
+  const DailyDigest({this.summary, this.reminders});
+  final AppNotification? summary;
+  final AppNotification? reminders;
+}
+
+/// Builds the [DailyDigest] of an account for a day (see
+/// lib/core/daily_notifications.dart).
+abstract interface class DailyPlanner {
+  /// Null when it can't tell (offline, no timetable): nothing changes then.
+  Future<DailyDigest?> digest(
+    Account account,
+    NotificationSettings s,
+    DateTime day,
+  );
+}
+
+/// When the daily notifications of [day] are due.
+DateTime dailyAt(DateTime day, int minute) =>
+    DateTime(day.year, day.month, day.day, minute ~/ 60, minute % 60);
+
+/// A summary that couldn't be delivered on time (the app wasn't running
+/// and the OS can't schedule, e.g. the web) is still shown this long after.
+const dailyLateLimit = Duration(hours: 10);
+
+/// The Android background task wakes up every 15 minutes; it actually
+/// checks that often on school days from an hour before the earliest daily
+/// time (07:00 when no account has one) until 18:00, else about every 45
+/// minutes. (A wake-up shortly after a check, e.g. by the app, is skipped.)
+Duration backgroundMinIntervalAt(DateTime now, NotificationPrefs prefs) {
+  const busy = Duration(minutes: 10);
+  const calm = Duration(minutes: 40);
+  if (now.weekday == DateTime.saturday || now.weekday == DateTime.sunday) {
+    return calm;
+  }
+  final minutes = [
+    for (final s in prefs.byAccount.values)
+      if (s.hasDaily) s.dailyMinute,
+  ];
+  final first = minutes.isEmpty
+      ? NotificationSettings.defaultDailyMinute
+      : minutes.reduce((a, b) => a < b ? a : b);
+  final minute = now.hour * 60 + now.minute;
+  return minute >= first - 60 && minute < 18 * 60 ? busy : calm;
+}
+
+int dailySummaryId(String accountId) =>
+    notificationId(accountId, 'daily-summary');
+int dailyRemindersId(String accountId) =>
+    notificationId(accountId, 'daily-reminders');
+
 // ---- Notifier ------------------------------------------------------------------
 
 /// One notification to show.
@@ -439,6 +581,23 @@ abstract interface class LocalNotifier {
 
   Future<void> show(AppNotification n);
 
+  /// Whether [schedule] works here (the OS shows the notification at the
+  /// time, also while the app is closed). Not on the web.
+  bool get canSchedule;
+
+  /// Shows [n] at [at] (replacing a pending one with the same id).
+  Future<void> schedule(AppNotification n, DateTime at);
+
+  /// Removes a pending (scheduled) notification.
+  Future<void> cancel(int id);
+
+  /// Android 12+: whether scheduled notifications may come at the exact
+  /// time (else Android delivers them some minutes later). True elsewhere.
+  Future<bool> exactTimeAllowed();
+
+  /// Opens the system page where the user allows exact alarms (Android).
+  Future<void> requestExactTime();
+
   /// Payloads of tapped notifications while the app runs.
   Stream<String> get taps;
 
@@ -453,6 +612,16 @@ class NoopLocalNotifier implements LocalNotifier {
   Future<bool> requestPermission() async => true;
   @override
   Future<void> show(AppNotification n) async {}
+  @override
+  bool get canSchedule => false;
+  @override
+  Future<void> schedule(AppNotification n, DateTime at) async {}
+  @override
+  Future<void> cancel(int id) async {}
+  @override
+  Future<bool> exactTimeAllowed() async => true;
+  @override
+  Future<void> requestExactTime() async {}
   @override
   Stream<String> get taps => const Stream.empty();
   @override
@@ -499,11 +668,15 @@ class ChangeChecker {
     required this.sources,
     required this.stateStore,
     required this.notifier,
+    this.daily,
     DateTime Function()? clock,
     this.maxLines = 5,
   }) : clock = clock ?? DateTime.now;
 
   final List<ChangeSource> sources;
+
+  /// Daily summary and reminders; null = none (tests of the sources).
+  final DailyPlanner? daily;
   final NotificationStateStore stateStore;
   final LocalNotifier notifier;
   final DateTime Function() clock;
@@ -547,6 +720,28 @@ class ChangeChecker {
     final results = <String, Map<String, SourceState>>{};
     final shown = <AppNotification>[];
     final ids = {for (final a in accounts) a.id};
+    final today = DateTime(now.year, now.month, now.day);
+
+    // Daily summary of today still to come (scheduled, or overdue and shown
+    // in this run): today's changes wait for it instead of their own
+    // notification.
+    final overdue = <String>{};
+    final quiet = <String>{};
+    if (daily != null) {
+      for (final a in accounts) {
+        final s = prefs.of(a.id);
+        if (!s.hasDaily) continue;
+        final at = dailyAt(today, s.dailyMinute);
+        final done = state.daily[a.id];
+        final late =
+            !now.isBefore(at) &&
+            now.isBefore(at.add(dailyLateLimit)) &&
+            (done == null || done.compareTo(ymd(today)) < 0);
+        if (late) overdue.add(a.id);
+        if (s.dailySummary && (now.isBefore(at) || late)) quiet.add(a.id);
+      }
+    }
+
     for (final a in accounts) {
       final s = prefs.of(a.id);
       if (!s.enabled) continue;
@@ -559,11 +754,19 @@ class ChangeChecker {
           continue; // keep the old state
         }
         if (items == null) continue;
+        final current = quiet.contains(a.id)
+            ? [
+                for (final i in items)
+                  i.start != null && ymd(i.start!) == ymd(today)
+                      ? i.asSilent()
+                      : i,
+              ]
+            : items;
         final scope = source.scope(a, s);
         final before = state.accounts[a.id]?[source.id];
         final diff = diffChanges(
           before == null || before.scope != scope ? null : before.seen,
-          items,
+          current,
         );
         (results[a.id] ??= {})[source.id] = SourceState(scope, diff.seen);
         if (diff.fresh.isEmpty) continue;
@@ -582,10 +785,27 @@ class ChangeChecker {
       }
     }
 
+    final dailyDone = await _runDaily(accounts, prefs, now, overdue, shown);
+
     // Merge with what is on disk now (another isolate may have saved).
+    final dailyBefore = state.daily;
     state = NotificationState.fromJson(await stateStore.load());
     state.lastCheck = now;
     state.accounts.removeWhere((id, _) => !ids.contains(id));
+    for (final id in {...dailyBefore.keys, ...state.daily.keys}) {
+      final a = accounts.where((a) => a.id == id).firstOrNull;
+      if (a != null && prefs.of(id).hasDaily) continue;
+      // Off or account gone: nothing may come at the daily time any more.
+      state.daily.remove(id);
+      if (notifier.canSchedule) {
+        for (final n in [dailySummaryId(id), dailyRemindersId(id)]) {
+          try {
+            await notifier.cancel(n);
+          } catch (_) {}
+        }
+      }
+    }
+    state.daily.addAll(dailyDone);
     for (final a in accounts) {
       final s = prefs.of(a.id);
       final sourcesOf = state.accounts[a.id] ??= {};
@@ -600,6 +820,58 @@ class ChangeChecker {
     }
     await stateStore.save(state.toJson());
     return shown;
+  }
+
+  /// Shows overdue daily notifications and hands the next ones to the OS.
+  /// Returns the days handled per account.
+  Future<Map<String, String>> _runDaily(
+    List<Account> accounts,
+    NotificationPrefs prefs,
+    DateTime now,
+    Set<String> overdue,
+    List<AppNotification> shown,
+  ) async {
+    final planner = daily;
+    final done = <String, String>{};
+    if (planner == null) return done;
+    final today = DateTime(now.year, now.month, now.day);
+    for (final a in accounts) {
+      final s = prefs.of(a.id);
+      if (!s.hasDaily) continue;
+      try {
+        if (overdue.contains(a.id)) {
+          final d = await planner.digest(a, s, today);
+          if (d != null) {
+            for (final n in [d.summary, d.reminders].nonNulls) {
+              await notifier.show(n);
+              shown.add(n);
+            }
+            done[a.id] = ymd(today);
+          }
+        }
+        if (!notifier.canSchedule) continue;
+        final next = now.isBefore(dailyAt(today, s.dailyMinute))
+            ? today
+            : DateTime(today.year, today.month, today.day + 1);
+        final d = await planner.digest(a, s, next);
+        if (d == null) continue;
+        final at = dailyAt(next, s.dailyMinute);
+        for (final (id, n) in [
+          (dailySummaryId(a.id), d.summary),
+          (dailyRemindersId(a.id), d.reminders),
+        ]) {
+          if (n == null) {
+            await notifier.cancel(id);
+          } else {
+            await notifier.schedule(n, at);
+          }
+        }
+        done[a.id] = ymd(next);
+      } catch (e) {
+        // Offline or the OS refused: the next run tries again.
+      }
+    }
+    return done;
   }
 
   AppNotification _notification(

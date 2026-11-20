@@ -13,6 +13,8 @@ import 'package:workmanager/workmanager.dart';
 
 import '../../api/untis_api_impl.dart';
 import '../../core/change_sources.dart';
+import '../../core/daily_notifications.dart';
+import '../../core/lesson_notes.dart';
 import '../../core/notifications.dart';
 import '../../data/account_repository_impl.dart';
 import '../../data/db/database.dart';
@@ -26,13 +28,10 @@ import 'local_notifiers.dart';
 /// Unique WorkManager name of the periodic check.
 const backgroundCheckName = 'bbu-change-check';
 
-/// How often Android runs the check (WorkManager may delay it, e.g. in
-/// Doze; the minimum WorkManager allows is 15 minutes).
-const backgroundCheckInterval = Duration(minutes: 45);
-
-/// A background check right after an app check (or the other way round) is
-/// skipped.
-const backgroundMinInterval = Duration(minutes: 10);
+/// How often Android wakes the task (WorkManager may delay it, e.g. in
+/// Doze; 15 minutes is the minimum it allows). Outside school hours most
+/// wake-ups skip the check, see [backgroundMinIntervalAt].
+const backgroundCheckInterval = Duration(minutes: 15);
 
 bool get backgroundChecksSupported =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -104,12 +103,23 @@ Future<void> runBackgroundCheck() async {
     final info = InfoCenterRepositoryImpl(api: api, db: db, accounts: accounts);
     final checker = ChangeChecker(
       sources: defaultChangeSources(timetables: timetables, info: info),
+      daily: RepositoryDailyPlanner(
+        timetables: timetables,
+        info: info,
+        notes: () async => LessonNotesNotifier.decode(
+          await settings.read(LessonNotesNotifier.storeKey),
+        ),
+      ),
       stateStore: createNotificationStateStore(),
       notifier: PluginLocalNotifier(),
     );
     final list = await accounts.watchAccounts().first;
     await checker
-        .run(list, prefs, minInterval: backgroundMinInterval)
+        .run(
+          list,
+          prefs,
+          minInterval: backgroundMinIntervalAt(DateTime.now(), prefs),
+        )
         .timeout(const Duration(minutes: 8));
     await timetables.dispose();
   } finally {

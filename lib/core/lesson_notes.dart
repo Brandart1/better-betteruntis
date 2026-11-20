@@ -340,7 +340,7 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
     final cached = store.peek(storeKey);
     if (cached != null) {
       _loading = Future.value();
-      return _decode(cached);
+      return decode(cached);
     }
     _loading = _load(store);
     return const {};
@@ -360,7 +360,9 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
     return _lastWrite;
   }
 
-  static Map<String, LessonNote> _decode(Object? raw) {
+  /// The stored notes map (settings store [storeKey]) as notes; also used
+  /// by the background check, which has no providers.
+  static Map<String, LessonNote> decode(Object? raw) {
     if (raw is! Map) return const {};
     final out = <String, LessonNote>{};
     for (final e in raw.entries) {
@@ -379,7 +381,7 @@ class LessonNotesNotifier extends Notifier<Map<String, LessonNote>> {
     try {
       final raw = await store.read(storeKey);
       if (!ref.mounted || _changed || raw == null) return;
-      state = _decode(raw);
+      state = decode(raw);
     } catch (_) {}
   }
 
