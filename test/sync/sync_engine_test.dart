@@ -3,6 +3,7 @@ import 'package:better_betteruntis/core/favourites.dart';
 import 'package:better_betteruntis/core/interfaces.dart';
 import 'package:better_betteruntis/core/lesson_notes.dart';
 import 'package:better_betteruntis/core/models.dart';
+import 'package:better_betteruntis/core/notifications.dart';
 import 'package:better_betteruntis/core/providers.dart';
 import 'package:better_betteruntis/core/settings.dart';
 import 'package:better_betteruntis/data/data_providers.dart';
@@ -2134,6 +2135,175 @@ void main() {
           expect(splitAccountSetting('timetable.examColor'), isNull);
         },
       );
+    });
+
+    group('notification options', () {
+      NotificationSettings ns(Device d) =>
+          d.c.read(notificationPrefsProvider).of(d.accountId);
+      void setNs(
+        Device d,
+        NotificationSettings Function(NotificationSettings) f, {
+        String? account,
+      }) => d.c
+          .read(notificationPrefsProvider.notifier)
+          .update(account ?? d.accountId, f);
+
+      test('a changed option is pushed, back to default is a tombstone, '
+          '`enabled` is never sent', () async {
+        final a = Device(server);
+        addTearDown(a.dispose);
+        await a.enable();
+        tick();
+        setNs(a, (s) => s.copyWith(enabled: true, dailyMinute: 450));
+        await a.sync();
+        expect(records()['settings|notifications.dailyMinute']!['text'], '450');
+        expect(records().keys.where((k) => k.contains('enabled')), isEmpty);
+        expect(
+          records().keys.where((k) => k.startsWith('settings|notifications.')),
+          ['settings|notifications.dailyMinute'],
+        );
+
+        tick();
+        setNs(a, (s) => s.copyWith(dailyMinute: 420));
+        await a.sync();
+        expect(
+          records()['settings|notifications.dailyMinute']!['deleted'],
+          true,
+        );
+      });
+
+      test(
+        "another account's options stay off this account's server",
+        () async {
+          final a = Device(server, more: [_account('acc2', 'lisa')]);
+          addTearDown(a.dispose);
+          await a.enable();
+          tick();
+          setNs(a, (s) => s.copyWith(messages: false), account: 'acc2');
+          setNs(a, (s) => s.copyWith(daysAhead: 4));
+          await a.sync();
+          expect(
+            records().keys.where(
+              (k) => k.startsWith('settings|notifications.'),
+            ),
+            ['settings|notifications.daysAhead'],
+          );
+        },
+      );
+
+      test(
+        'a remote record applies to the local prefs but not `enabled`',
+        () async {
+          final a = Device(server);
+          final b = Device(server, accountId: 'other-local-id');
+          addTearDown(a.dispose);
+          addTearDown(b.dispose);
+          await a.enable();
+          tick();
+          setNs(
+            a,
+            (s) => s.copyWith(
+              enabled: true,
+              dailySummary: false,
+              homeworkReminderDays: 3,
+            ),
+          );
+          await a.sync();
+          await b.enable();
+          expect(ns(b).dailySummary, isFalse);
+          expect(ns(b).homeworkReminderDays, 3);
+          expect(ns(b).enabled, isFalse);
+
+          tick();
+          setNs(b, (s) => s.copyWith(dailySummary: true));
+          await b.sync();
+          await a.sync();
+          expect(ns(a).dailySummary, isTrue);
+          expect(ns(a).homeworkReminderDays, 3);
+          expect(ns(a).enabled, isTrue);
+        },
+      );
+
+      test('names and values: valid, default, invalid, unknown', () {
+        Matcher val(Object? v) =>
+            isA<SettingValue>().having((x) => x.value, 'value', v);
+        expect(isNotificationSetting('notifications.dailyMinute'), isTrue);
+        expect(isNotificationSetting('notifications.enabled'), isFalse);
+        expect(isNotificationSetting('notifications.foo'), isFalse);
+        expect(isAccountSetting('favourite.CLASS#4'), isTrue);
+        expect(isAccountSetting('notifications.messages'), isTrue);
+        expect(isAccountSetting('timetable.examColor'), isFalse);
+        expect(readRemoteSetting('notifications.dailyMinute', '450'), val(450));
+        expect(
+          readRemoteSetting('notifications.messages', 'false'),
+          val(false),
+        );
+        expect(
+          readRemoteSetting('notifications.dailyMinute', '420'),
+          val(null),
+        );
+        expect(readRemoteSetting('notifications.messages', 'true'), val(null));
+        expect(
+          readRemoteSetting('notifications.daysAhead', '', deleted: true),
+          val(null),
+        );
+        for (final (n, t) in [
+          ('notifications.dailyMinute', '2000'),
+          ('notifications.daysAhead', '99'),
+          ('notifications.messages', '1'),
+          ('notifications.dailyMinute', '"x"'),
+          ('notifications.dailyMinute', 'null'),
+          ('notifications.dailyMinute', '{'),
+        ]) {
+          expect(
+            readRemoteSetting(n, t),
+            isA<InvalidSetting>(),
+            reason: '$n $t',
+          );
+        }
+        expect(
+          readRemoteSetting('notifications.foo', '1'),
+          isA<UnknownSetting>(),
+        );
+        expect(
+          readRemoteSetting('notifications.enabled', 'true'),
+          isA<UnknownSetting>(),
+        );
+      });
+
+      test('notificationSettingsOf and applyNotificationChanges', () {
+        final prefs = const NotificationPrefs()
+            .withAccount(
+              'acc1',
+              const NotificationSettings(
+                enabled: true,
+                messages: false,
+                dailyMinute: 450,
+              ),
+            )
+            .withAccount('acc2', const NotificationSettings(enabled: true));
+        expect(notificationSettingsOf(prefs), {
+          '@acc1|notifications.messages': false,
+          '@acc1|notifications.dailyMinute': 450,
+        });
+        final s = applyNotificationChanges(
+          const NotificationSettings(enabled: true, messages: false),
+          {
+            'notifications.messages': null,
+            'notifications.daysAhead': 5,
+            'notifications.enabled': false,
+            'other': 1,
+          },
+        );
+        expect(s.messages, isTrue);
+        expect(s.daysAhead, 5);
+        expect(s.enabled, isTrue);
+        const same = NotificationSettings(daysAhead: 3);
+        expect(
+          identical(applyNotificationChanges(same, {'x': 1}), same),
+          isTrue,
+        );
+      });
     });
 
     test('namespaces: notes stay notes, settings records stored as notes by '

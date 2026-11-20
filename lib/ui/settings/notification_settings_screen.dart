@@ -311,7 +311,8 @@ class _NotificationSettingsScreenState
               '$how\n\nEverything stays on this device: the app asks '
               'WebUntis itself with your login, nothing goes through another '
               'server. Each change is notified once; the first check only '
-              'remembers what is there already.',
+              'remembers what is there already. With sync on, these options '
+              '(not the switch at the top) reach your other devices.',
               style: theme.textTheme.bodySmall,
             ),
           ),

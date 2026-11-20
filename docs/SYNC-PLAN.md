@@ -311,6 +311,8 @@ has no account id, so another device maps them onto its own local account
 id. Other names under `favourite.` (e.g. new types from a newer version)
 are ignored; versions before 0.5.10 ignore room favourites.
 
+Notification options (added 2026-11-20, maintainer: "add notification setting to sync") are synced per account the same way: `notifications.<field>` for `timetable`, `messages`, `daysAhead`, `dailySummary`, `dailyMinute`, `examReminderDays`, `homeworkReminderDays` (lib/core/notifications.dart), one record per option that differs from its default (back to the default = tombstone). The on/off switch (`enabled`) is not synced: it needs the system's notification permission on each device. Values must survive `NotificationSettings.fromJson` unchanged (clamped / wrong type = invalid). Unknown `notifications.` names (newer versions) are ignored.
+
 Custom exams, lesson details ("own lesson titles/texts") and the user's own
 homework are synced as lesson notes. Accessibility values are the user's explicit
 choices: "contrast off" (theme follows the system) and "read-aloud

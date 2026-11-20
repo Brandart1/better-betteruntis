@@ -57,6 +57,7 @@ import '../core/lesson_notes.dart';
 import '../core/models.dart';
 import '../core/providers.dart';
 import '../core/favourites.dart';
+import '../core/notifications.dart';
 import '../core/settings.dart';
 import '../data/data_providers.dart';
 import '../data/secret_store.dart';
@@ -237,6 +238,7 @@ class SyncEngine extends SyncController {
     ref.listen(timetableSettingsProvider, (_, _) => _onSettingsChanged());
     ref.listen(accessibilityProvider, (_, _) => _onSettingsChanged());
     ref.listen(favouritesProvider, (_, _) => _onSettingsChanged());
+    ref.listen(notificationPrefsProvider, (_, _) => _onSettingsChanged());
     ref.onDispose(() => _debounceTimer?.cancel());
     _settingsLoading = _loadSettings();
     final store = ref.read(settingsStoreProvider);
@@ -736,6 +738,7 @@ class SyncEngine extends SyncController {
       ref.read(accessibilityProvider),
     ),
     ...favouriteSettingsOf(ref.read(favouritesProvider)),
+    ...notificationSettingsOf(ref.read(notificationPrefsProvider)),
   };
 
   Future<void> _loadSettings() async {
@@ -743,6 +746,7 @@ class SyncEngine extends SyncController {
       await ref.read(timetableSettingsProvider.notifier).ready;
       await ref.read(accessibilityProvider.notifier).ready;
       await ref.read(favouritesProvider.notifier).ready;
+      await ref.read(notificationPrefsProvider.notifier).ready;
       final raw = await ref
           .read(settingsStoreProvider)
           .read(SyncedSettingStamps.storeKey);
@@ -790,11 +794,13 @@ class SyncEngine extends SyncController {
     final acked = _metaOf(accountId).settingsAcked;
     final changes = <String, Object?>{};
     final favourites = <String, bool>{};
+    final notifications = <String, Object?>{};
     var stamped = false;
     for (final e in remote.entries) {
       final r = e.value;
-      // Settings of this account only (favourites) are stamped per account.
-      final name = isFavouriteSetting(e.key)
+      // Settings of this account only (favourites, notification options)
+      // are stamped per account.
+      final name = isAccountSetting(e.key)
           ? accountSettingKey(accountId, e.key)
           : e.key;
       acked[name] = r.updatedAt;
@@ -821,12 +827,19 @@ class SyncEngine extends SyncController {
       if (local == null && value == null) continue; // tombstone only
       if (isFavouriteSetting(e.key)) {
         favourites[e.key.substring(favouritePrefix.length)] = value == true;
+      } else if (isNotificationSetting(e.key)) {
+        notifications[e.key] = value;
       } else {
         changes[name] = value;
       }
     }
     if (favourites.isNotEmpty) {
       ref.read(favouritesProvider.notifier).applyRemote(accountId, favourites);
+    }
+    if (notifications.isNotEmpty) {
+      ref
+          .read(notificationPrefsProvider.notifier)
+          .update(accountId, (s) => applyNotificationChanges(s, notifications));
     }
     if (changes.isNotEmpty) {
       final tt = ref.read(timetableSettingsProvider);
@@ -1426,7 +1439,8 @@ class SyncEngine extends SyncController {
     if (legacy) unawaited(_saveStamps());
     for (final e in _stamps.stamps.entries) {
       final st = e.value;
-      // Settings of one account (favourites) go only to its own server.
+      // Settings of one account (favourites, notification options) go only
+      // to its own server.
       final own = splitAccountSetting(e.key);
       if (own != null && own.$1 != accountId) continue;
       final have = meta.settingsAcked[e.key];
