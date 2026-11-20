@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:better_betteruntis/core/change_sources.dart';
+import 'package:better_betteruntis/core/daily_notifications.dart';
 import 'package:better_betteruntis/core/info.dart';
 import 'package:better_betteruntis/core/interfaces.dart';
+import 'package:better_betteruntis/core/lesson_notes.dart';
 import 'package:better_betteruntis/core/models.dart';
 import 'package:better_betteruntis/core/notifications.dart';
 import 'package:better_betteruntis/core/settings.dart';
@@ -102,8 +104,28 @@ ChangeItem _item(String key, [String sig = 'a', bool silent = false]) =>
     ChangeItem(key: key, signature: sig, text: key, silent: silent);
 
 class FakeNotifier implements LocalNotifier {
+  FakeNotifier({this.canSchedule = false});
   final shown = <AppNotification>[];
+
+  /// Pending scheduled notifications by id.
+  final scheduled = <int, (AppNotification, DateTime)>{};
   bool fail = false;
+
+  @override
+  final bool canSchedule;
+
+  @override
+  Future<void> schedule(AppNotification n, DateTime at) async =>
+      scheduled[n.id] = (n, at);
+
+  @override
+  Future<void> cancel(int id) async => scheduled.remove(id);
+
+  @override
+  Future<bool> exactTimeAllowed() async => true;
+
+  @override
+  Future<void> requestExactTime() async {}
   bool grant = true;
   int permissionRequests = 0;
 
@@ -669,6 +691,574 @@ void main() {
       );
     });
   });
+
+  group('daily settings', () {
+    test('defaults', () {
+      const s = NotificationSettings();
+      expect(s.dailySummary, isTrue);
+      expect(s.dailyMinute, 420);
+      expect(s.examReminderDays, 0);
+      expect(s.homeworkReminderDays, 0);
+    });
+
+    test('JSON round-trip', () {
+      const s = NotificationSettings(
+        enabled: true,
+        dailySummary: false,
+        dailyMinute: 18 * 60 + 5,
+        examReminderDays: 3,
+        homeworkReminderDays: 1,
+      );
+      expect(NotificationSettings.fromJson(s.toJson()), s);
+      expect(NotificationSettings.fromJson(s.toJson()).hashCode, s.hashCode);
+      expect(s, isNot(s.copyWith(dailyMinute: 0)));
+    });
+
+    test('clamping', () {
+      final t = NotificationSettings.fromJson({
+        'dailyMinute': 5000,
+        'examReminderDays': 99,
+        'homeworkReminderDays': -4,
+      });
+      expect(t.dailyMinute, 1439);
+      expect(t.examReminderDays, 7);
+      expect(t.homeworkReminderDays, 0);
+      const d = NotificationSettings();
+      expect(d.copyWith(dailyMinute: -5).dailyMinute, 0);
+      expect(d.copyWith(dailyMinute: 9999).dailyMinute, 1439);
+      expect(d.copyWith(examReminderDays: 30).examReminderDays, 7);
+      expect(d.copyWith(homeworkReminderDays: -1).homeworkReminderDays, 0);
+    });
+
+    test('old JSON without the new fields gets the defaults', () {
+      final s = NotificationSettings.fromJson({
+        'enabled': true,
+        'timetable': false,
+        'messages': true,
+        'daysAhead': 4,
+      });
+      expect(s.enabled, isTrue);
+      expect(s.daysAhead, 4);
+      expect(s.dailySummary, isTrue);
+      expect(s.dailyMinute, 420);
+      expect(s.examReminderDays, 0);
+      expect(s.homeworkReminderDays, 0);
+      final w = NotificationSettings.fromJson({
+        'dailySummary': 'x',
+        'dailyMinute': 'x',
+        'examReminderDays': null,
+      });
+      expect(w.dailySummary, isTrue);
+      expect(w.dailyMinute, 420);
+    });
+
+    test('hasDaily', () {
+      expect(const NotificationSettings().hasDaily, isFalse); // disabled
+      expect(const NotificationSettings(enabled: true).hasDaily, isTrue);
+      expect(
+        const NotificationSettings(enabled: true, dailySummary: false).hasDaily,
+        isFalse,
+      );
+      expect(
+        const NotificationSettings(
+          enabled: true,
+          dailySummary: false,
+          homeworkReminderDays: 1,
+        ).hasDaily,
+        isTrue,
+      );
+      expect(
+        const NotificationSettings(
+          enabled: true,
+          dailySummary: false,
+          examReminderDays: 2,
+        ).hasDaily,
+        isTrue,
+      );
+    });
+
+    test('state keeps the daily map in JSON', () {
+      final s = NotificationState(daily: {'a': '2026-11-18'});
+      final back = NotificationState.fromJson(s.toJson());
+      expect(back.daily, {'a': '2026-11-18'});
+      expect(NotificationState().toJson().containsKey('daily'), isFalse);
+    });
+  });
+
+  group('backgroundMinIntervalAt', () {
+    const on = NotificationPrefs({'a': NotificationSettings(enabled: true)});
+    const ten = Duration(minutes: 10);
+    const forty = Duration(minutes: 40);
+
+    test('weekday inside and outside the window', () {
+      // Wednesday; default 07:00 -> from 06:00 until 18:00.
+      expect(backgroundMinIntervalAt(DateTime(2026, 11, 18, 6), on), ten);
+      expect(backgroundMinIntervalAt(DateTime(2026, 11, 18, 12), on), ten);
+      expect(backgroundMinIntervalAt(DateTime(2026, 11, 18, 17, 59), on), ten);
+      expect(backgroundMinIntervalAt(DateTime(2026, 11, 18, 5, 59), on), forty);
+      expect(backgroundMinIntervalAt(DateTime(2026, 11, 18, 18), on), forty);
+    });
+
+    test('weekend is calm', () {
+      expect(backgroundMinIntervalAt(DateTime(2026, 11, 21, 7), on), forty);
+      expect(backgroundMinIntervalAt(DateTime(2026, 11, 22, 7), on), forty);
+    });
+
+    test('custom earliest time and accounts without daily', () {
+      final prefs = NotificationPrefs({
+        'a': const NotificationSettings(enabled: true, dailyMinute: 8 * 60),
+        'b': const NotificationSettings(enabled: true, dailyMinute: 5 * 60),
+        // No daily at all: does not count.
+        'c': const NotificationSettings(
+          enabled: true,
+          dailySummary: false,
+          dailyMinute: 3 * 60,
+        ),
+      });
+      expect(backgroundMinIntervalAt(DateTime(2026, 11, 18, 4), prefs), ten);
+      expect(
+        backgroundMinIntervalAt(DateTime(2026, 11, 18, 3, 59), prefs),
+        forty,
+      );
+      final late = NotificationPrefs({
+        'a': const NotificationSettings(enabled: true, dailyMinute: 9 * 60),
+      });
+      expect(backgroundMinIntervalAt(DateTime(2026, 11, 18, 7), late), forty);
+      expect(backgroundMinIntervalAt(DateTime(2026, 11, 18, 8), late), ten);
+    });
+
+    test('no daily time: the 07:00 default', () {
+      const none = NotificationPrefs();
+      expect(backgroundMinIntervalAt(DateTime(2026, 11, 18, 6), none), ten);
+      expect(backgroundMinIntervalAt(DateTime(2026, 11, 18, 5), none), forty);
+    });
+  });
+
+  group('dailySummary and dailyReminders', () {
+    final acc = _account('a');
+    final wed = DateTime(2026, 11, 18);
+    const s = NotificationSettings(enabled: true);
+
+    ExamItem exam(DateTime start, {CustomSource? custom, String type = ''}) =>
+        ExamItem(
+          id: 1,
+          start: start,
+          end: start.add(const Duration(hours: 1)),
+          subjectId: 1,
+          examType: type,
+          custom: custom,
+        );
+
+    HomeworkItem hw(DateTime due, {bool done = false, CustomSource? custom}) =>
+        HomeworkItem(
+          id: 1,
+          lessonId: 1,
+          assignedOn: DateTime(2026, 11, 10),
+          dueOn: due,
+          text: 'p. 34\nsecond line',
+          subjectId: 2,
+          completed: done,
+          custom: custom,
+        );
+
+    test('no changes', () {
+      final n = dailySummary(
+        acc,
+        wed,
+        [_period(1, DateTime(2026, 11, 18, 8))],
+        _names,
+        const [],
+      )!;
+      expect(n.title, 'Wed 18.11.: no changes · Max');
+      expect(n.body, 'Your timetable is as planned.');
+      expect(n.id, dailySummaryId('a'));
+      expect(NotificationTarget.parse(n.payload)!.day, wed);
+    });
+
+    test('changes and tests', () {
+      final n = dailySummary(
+        acc,
+        wed,
+        [
+          _period(1, DateTime(2026, 11, 18, 8)),
+          _period(2, DateTime(2026, 11, 18, 9), flags: {PeriodFlag.cancelled}),
+          // Another day: ignored.
+          _period(3, DateTime(2026, 11, 19, 9), flags: {PeriodFlag.cancelled}),
+        ],
+        _names,
+        [
+          exam(DateTime(2026, 11, 18, 10), type: 'Schularbeit'),
+          exam(DateTime(2026, 11, 19, 10)),
+        ],
+      )!;
+      expect(n.title, 'Wed 18.11.: 1 change, 1 test · Max');
+      expect(
+        n.body,
+        '09:00–09:50: M cancelled\nTest 10:00: Maths · Schularbeit',
+      );
+    });
+
+    test('plural and only tests', () {
+      final n = dailySummary(acc, wed, const [], _names, [
+        exam(DateTime(2026, 11, 18, 8)),
+        exam(DateTime(2026, 11, 18, 10)),
+      ])!;
+      expect(n.title, 'Wed 18.11.: 2 tests · Max');
+    });
+
+    test('null without lessons and tests (weekend, holiday)', () {
+      expect(
+        dailySummary(acc, DateTime(2026, 11, 21), const [], _names, const []),
+        isNull,
+      );
+      // Lessons only on another day.
+      expect(
+        dailySummary(
+          acc,
+          DateTime(2026, 11, 21),
+          [_period(1, DateTime(2026, 11, 20, 8))],
+          _names,
+          const [],
+        ),
+        isNull,
+      );
+    });
+
+    test('custom exam is marked as own', () {
+      final label = examLabel(
+        exam(
+          DateTime(2026, 11, 18, 10),
+          custom: const CustomSource(noteKeys: ['k']),
+        ),
+        _names,
+      );
+      expect(label, 'Maths (own)');
+      expect(examLabel(exam(DateTime(2026, 11, 18, 10)), _names), 'Maths');
+    });
+
+    test('homework label', () {
+      expect(homeworkLabel(hw(wed), _names), 'German: p. 34');
+      expect(
+        homeworkLabel(
+          hw(wed, custom: const CustomSource(noteKeys: ['k'])),
+          _names,
+        ),
+        'German: p. 34 (own)',
+      );
+    });
+
+    test('reminders: day offsets and nothing to say', () {
+      final settings = s.copyWith(examReminderDays: 2, homeworkReminderDays: 1);
+      final exams = [
+        exam(DateTime(2026, 11, 20, 8)), // +2
+        exam(DateTime(2026, 11, 19, 8)), // +1: not asked for
+      ];
+      final homework = [
+        hw(DateTime(2026, 11, 19)), // +1
+        hw(DateTime(2026, 11, 20)), // +2: not asked for
+      ];
+      final n = dailyReminders(
+        acc,
+        wed,
+        settings,
+        _names,
+        exams: exams,
+        homework: homework,
+      )!;
+      expect(n.id, dailyRemindersId('a'));
+      expect(n.title, 'Coming up · Max');
+      expect(
+        n.body,
+        'Test Fri 20.11. 08:00: Maths\nHomework for Thu 19.11.: German: p. 34',
+      );
+      // The earliest of the days.
+      expect(NotificationTarget.parse(n.payload)!.day, DateTime(2026, 11, 19));
+
+      expect(
+        dailyReminders(acc, wed, s, _names, exams: exams, homework: homework),
+        isNull,
+      );
+      expect(
+        dailyReminders(
+          acc,
+          wed,
+          settings,
+          _names,
+          exams: const [],
+          homework: const [],
+        ),
+        isNull,
+      );
+    });
+
+    test('completed homework is skipped, only exams give the exam day', () {
+      final settings = s.copyWith(examReminderDays: 2, homeworkReminderDays: 1);
+      expect(
+        dailyReminders(
+          acc,
+          wed,
+          settings,
+          _names,
+          exams: const [],
+          homework: [hw(DateTime(2026, 11, 19), done: true)],
+        ),
+        isNull,
+      );
+      final n = dailyReminders(
+        acc,
+        wed,
+        settings,
+        _names,
+        exams: [exam(DateTime(2026, 11, 20, 8))],
+        homework: [hw(DateTime(2026, 11, 19), done: true)],
+      )!;
+      expect(n.body, 'Test Fri 20.11. 08:00: Maths');
+      expect(NotificationTarget.parse(n.payload)!.day, DateTime(2026, 11, 20));
+    });
+  });
+
+  group('ChangeChecker daily', () {
+    late MemoryNotificationStateStore store;
+    late FakeSource timetable;
+    late _FakePlanner planner;
+    final acc = [_account('a')];
+    var now = DateTime(2026, 11, 18, 6);
+    const dailyOn = NotificationPrefs({
+      'a': NotificationSettings(enabled: true),
+    });
+    final today = DateTime(2026, 11, 18);
+    final sumId = dailySummaryId('a');
+    final remId = dailyRemindersId('a');
+
+    ChangeChecker checker(FakeNotifier notifier) => ChangeChecker(
+      sources: [timetable],
+      stateStore: store,
+      notifier: notifier,
+      daily: planner,
+      clock: () => now,
+    );
+
+    ChangeItem change(String key, DateTime start) => ChangeItem(
+      key: key,
+      signature: 'a',
+      text: key,
+      start: start,
+      end: start.add(const Duration(minutes: 50)),
+    );
+
+    Future<NotificationState> state() async =>
+        NotificationState.fromJson(await store.load());
+
+    setUp(() {
+      store = MemoryNotificationStateStore();
+      timetable = FakeSource('timetable');
+      planner = _FakePlanner();
+      now = DateTime(2026, 11, 18, 6);
+    });
+
+    test(
+      'before the time: today is silent, summary scheduled for today',
+      () async {
+        final n = FakeNotifier(canSchedule: true);
+        await checker(n).run(acc, dailyOn); // baseline
+        timetable.items = [change('x', DateTime(2026, 11, 18, 9))];
+        final shown = await checker(n).run(acc, dailyOn);
+        expect(shown, isEmpty);
+        expect(n.shown, isEmpty);
+        expect(n.scheduled[sumId]!.$2, DateTime(2026, 11, 18, 7));
+        expect(n.scheduled[remId]!.$2, DateTime(2026, 11, 18, 7));
+        expect(planner.calls.last, ('a', today));
+        expect((await state()).daily['a'], '2026-11-18');
+
+        // A change on another day is not held back.
+        timetable.items = [
+          change('x', DateTime(2026, 11, 18, 9)),
+          change('y', DateTime(2026, 11, 19, 9)),
+        ];
+        expect(await checker(n).run(acc, dailyOn), hasLength(1));
+      },
+    );
+
+    test(
+      'after the time: new change is notified, tomorrow scheduled',
+      () async {
+        now = DateTime(2026, 11, 18, 8);
+        store.state = {
+          'daily': {'a': '2026-11-18'},
+        };
+        final n = FakeNotifier(canSchedule: true);
+        await checker(n).run(acc, dailyOn); // baseline
+        timetable.items = [change('x', DateTime(2026, 11, 18, 9))];
+        final shown = await checker(n).run(acc, dailyOn);
+        expect(shown, hasLength(1));
+        expect(shown.single.id, notificationId('a', 'timetable'));
+        expect(n.shown, hasLength(1)); // no summary: already done
+        expect(planner.calls.map((c) => c.$2).toSet(), {
+          DateTime(2026, 11, 19),
+        });
+        expect(n.scheduled[sumId]!.$2, DateTime(2026, 11, 19, 7));
+        expect((await state()).daily['a'], '2026-11-19');
+      },
+    );
+
+    test('overdue without scheduling: shown late once, today silent', () async {
+      now = DateTime(2026, 11, 18, 9);
+      final n = FakeNotifier();
+      const off = NotificationPrefs({
+        'a': NotificationSettings(enabled: true, dailySummary: false),
+      });
+      await checker(n).run(acc, off); // baseline, no daily
+      expect(planner.calls, isEmpty);
+
+      timetable.items = [change('x', DateTime(2026, 11, 18, 10))];
+      final shown = await checker(n).run(acc, dailyOn);
+      expect(shown.map((e) => e.id), [sumId, remId]);
+      expect(n.shown, hasLength(2));
+      expect(planner.calls, [('a', today)]);
+      expect((await state()).daily['a'], '2026-11-18');
+
+      now = DateTime(2026, 11, 18, 9, 30);
+      expect(await checker(n).run(acc, dailyOn), isEmpty);
+      expect(n.shown, hasLength(2));
+      expect(planner.calls, hasLength(1));
+    });
+
+    test('more than 10 hours late: not shown', () async {
+      now = DateTime(2026, 11, 18, 17, 30);
+      final n = FakeNotifier();
+      await checker(n).run(acc, dailyOn);
+      timetable.items = [change('x', DateTime(2026, 11, 18, 18))];
+      final shown = await checker(n).run(acc, dailyOn);
+      // Only the ordinary change notification.
+      expect(shown.map((e) => e.id), [notificationId('a', 'timetable')]);
+      expect(planner.calls, isEmpty);
+      expect((await state()).daily, isEmpty);
+    });
+
+    test('digest null (offline): state.daily not advanced', () async {
+      planner.fn = (_, _) => null;
+      final n = FakeNotifier(canSchedule: true);
+      await checker(n).run(acc, dailyOn);
+      expect(planner.calls, isNotEmpty);
+      expect(n.scheduled, isEmpty);
+      expect((await state()).daily, isEmpty);
+
+      // Overdue and offline: nothing shown and not marked.
+      now = DateTime(2026, 11, 18, 9);
+      final web = FakeNotifier();
+      await checker(web).run(acc, dailyOn);
+      expect(web.shown, isEmpty);
+      expect((await state()).daily, isEmpty);
+    });
+
+    test('turning daily off cancels both ids and drops the state', () async {
+      final n = FakeNotifier(canSchedule: true);
+      await checker(n).run(acc, dailyOn);
+      expect(n.scheduled.keys, unorderedEquals([sumId, remId]));
+      expect((await state()).daily['a'], isNotNull);
+
+      const off = NotificationPrefs({
+        'a': NotificationSettings(enabled: true, dailySummary: false),
+      });
+      await checker(n).run(acc, off);
+      expect(n.scheduled, isEmpty);
+      expect((await state()).daily, isEmpty);
+    });
+
+    test('a removed account cancels its ids', () async {
+      final n = FakeNotifier(canSchedule: true);
+      await checker(n).run(acc, dailyOn);
+      await checker(n).run([_account('b')], dailyOn);
+      expect(n.scheduled, isEmpty);
+      expect((await state()).daily, isEmpty);
+    });
+
+    test('a digest without summary cancels the summary id', () async {
+      final n = FakeNotifier(canSchedule: true);
+      await checker(n).run(acc, dailyOn);
+      expect(n.scheduled.keys, unorderedEquals([sumId, remId]));
+      planner.fn = (a, d) => DailyDigest(reminders: _note(remId));
+      await checker(n).run(acc, dailyOn);
+      expect(n.scheduled.keys, [remId]);
+    });
+  });
+
+  group('RepositoryDailyPlanner', () {
+    final wedPeriods = {
+      '2026-11-16': [
+        _period(2, DateTime(2026, 11, 18, 9), flags: {PeriodFlag.cancelled}),
+      ],
+    };
+    final wed = DateTime(2026, 11, 18);
+
+    test('summary from the week, tests error still gives own tests', () async {
+      final info = _FakeInfo()..examsError = true;
+      final planner = RepositoryDailyPlanner(
+        timetables: _FakeTimetables(wedPeriods),
+        info: info,
+        notes: () async => {
+          'a|2026-11-18|1000|5|1': const LessonNote(exam: true),
+        },
+      );
+      final d = (await planner.digest(
+        _account('a'),
+        const NotificationSettings(enabled: true),
+        wed,
+      ))!;
+      expect(d.summary!.title, 'Wed 18.11.: 1 change, 1 test · Max');
+      expect(d.summary!.body, contains('Test 10:00: Maths (own)'));
+      expect(d.reminders, isNull);
+    });
+
+    test('reminders from school and own homework', () async {
+      final info = _FakeInfo()
+        ..homeworkItems = [
+          HomeworkItem(
+            id: 1,
+            lessonId: 1,
+            assignedOn: wed,
+            dueOn: DateTime(2026, 11, 19),
+            text: 'p. 1',
+            subjectId: 2,
+          ),
+        ];
+      final planner = RepositoryDailyPlanner(
+        timetables: _FakeTimetables(wedPeriods),
+        info: info,
+        notes: () async => {
+          'a|2026-11-19|0800|6|1': const LessonNote(homework: 'worksheet'),
+        },
+      );
+      final d = (await planner.digest(
+        _account('a'),
+        const NotificationSettings(
+          enabled: true,
+          dailySummary: false,
+          homeworkReminderDays: 1,
+        ),
+        wed,
+      ))!;
+      expect(d.summary, isNull);
+      expect(
+        d.reminders!.body,
+        'Homework for Thu 19.11.: German: p. 1\n'
+        'Homework for Thu 19.11.: Maths: worksheet (own)',
+      );
+    });
+
+    test('week failure propagates (the checker keeps its state)', () async {
+      final repo = _FakeTimetables({})..failWeek = true;
+      final planner = RepositoryDailyPlanner(
+        timetables: repo,
+        info: _FakeInfo(),
+        notes: () async => {},
+      );
+      await expectLater(
+        planner.digest(_account('a'), const NotificationSettings(), wed),
+        throwsA(isA<UntisException>()),
+      );
+    });
+  });
 }
 
 class _FakeTimetables implements TimetableRepository {
@@ -677,10 +1267,13 @@ class _FakeTimetables implements TimetableRepository {
   final Map<String, List<Period>> weeks;
   final refreshed = <String>[];
   bool fail = false;
+  bool failWeek = false;
 
   @override
-  Future<List<Period>> week(Account a, TimetableTarget t, DateTime w) =>
-      watchWeek(a, t, w).first;
+  Future<List<Period>> week(Account a, TimetableTarget t, DateTime w) async {
+    if (failWeek) throw const UntisException(0, 'offline');
+    return watchWeek(a, t, w).first;
+  }
 
   @override
   Future<void> refresh(Account a, TimetableTarget t, DateTime weekStart) async {
@@ -707,6 +1300,53 @@ class _FakeTimetables implements TimetableRepository {
     DateTime weekStart, {
     void Function(int done, int total)? onProgress,
   }) async {}
+}
+
+class _FakePlanner implements DailyPlanner {
+  final calls = <(String, DateTime)>[];
+  DailyDigest? Function(Account, DateTime) fn = (a, d) => DailyDigest(
+    summary: _note(dailySummaryId(a.id)),
+    reminders: _note(dailyRemindersId(a.id)),
+  );
+
+  @override
+  Future<DailyDigest?> digest(
+    Account account,
+    NotificationSettings s,
+    DateTime day,
+  ) async {
+    calls.add((account.id, day));
+    return fn(account, day);
+  }
+}
+
+AppNotification _note(int id) =>
+    AppNotification(id: id, title: 't$id', body: 'b', payload: '');
+
+class _FakeInfo implements InfoCenterRepository {
+  bool examsError = false;
+  List<HomeworkItem> homeworkItems = [];
+
+  @override
+  Stream<Cached<List<ExamItem>>> exams(
+    Account a,
+    DateTime start,
+    DateTime end, {
+    bool force = false,
+  }) => examsError
+      ? Stream.error(const UntisException(0, 'no access'))
+      : Stream.value(const Cached(data: <ExamItem>[]));
+
+  @override
+  Stream<Cached<List<HomeworkItem>>> homework(
+    Account a,
+    DateTime start,
+    DateTime end, {
+    bool force = false,
+  }) => Stream.value(Cached(data: homeworkItems));
+
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
 class _FakeSubstitutionRepo implements SubstitutionPlanningRepository {

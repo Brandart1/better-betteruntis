@@ -12,6 +12,11 @@
     <!-- Change notifications (Settings → Notifications); asked for on
          Android 13+ when the user turns them on. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Daily summary and reminders: scheduled notifications (kept after a
+         reboot), at the exact time when the user allows it (Android 14+
+         asks; otherwise Android delivers them a little later). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- ota_update merges these in; the updater needs none of them (it
          writes to the app's own files dir). -->
     <uses-permission android:name="android.permission.INSTALL_PACKAGES" tools:node="remove" />
@@ -55,6 +60,22 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/ota_update_filepaths" />
         </provider>
+        <!-- Scheduled notifications (flutter_local_notifications): shows them
+             at their time and schedules them again after a reboot or an app
+             update. -->
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

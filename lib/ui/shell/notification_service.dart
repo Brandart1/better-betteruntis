@@ -12,7 +12,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/notifications/local_notifiers.dart';
 import '../../core/change_sources.dart';
+import '../../core/daily_notifications.dart';
 import '../../core/info.dart';
+import '../../core/lesson_notes.dart';
 import '../../core/notifications.dart';
 import '../../core/providers.dart';
 import '../../core/substitution_planning.dart';
@@ -38,6 +40,14 @@ class NotificationService {
       timetables: ref.read(timetableRepositoryProvider),
       info: ref.read(infoCenterRepositoryProvider),
       substitution: ref.read(substitutionPlanningRepositoryProvider),
+    ),
+    daily: RepositoryDailyPlanner(
+      timetables: ref.read(timetableRepositoryProvider),
+      info: ref.read(infoCenterRepositoryProvider),
+      notes: () async {
+        await ref.read(lessonNotesProvider.notifier).ready;
+        return ref.read(lessonNotesProvider);
+      },
     ),
     stateStore: ref.read(notificationStateStoreProvider),
     notifier: ref.read(localNotifierProvider),
@@ -106,6 +116,7 @@ class NotificationAutoCheck extends ConsumerStatefulWidget {
 class _NotificationAutoCheckState extends ConsumerState<NotificationAutoCheck>
     with WidgetsBindingObserver {
   Timer? _timer;
+  Timer? _prefsCheck;
   StreamSubscription<String>? _taps;
   StreamSubscription<AppNotification>? _inApp;
   bool _resumed = true;
@@ -202,6 +213,7 @@ class _NotificationAutoCheckState extends ConsumerState<NotificationAutoCheck>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    _prefsCheck?.cancel();
     unawaited(_taps?.cancel());
     unawaited(_inApp?.cancel());
     super.dispose();
@@ -216,6 +228,15 @@ class _NotificationAutoCheckState extends ConsumerState<NotificationAutoCheck>
       if (before == on) return;
       unawaited(ref.read(backgroundSchedulerProvider)(enabled: on));
       _updateTimer(on);
+    });
+    // New time or reminders: schedule again (a moment later, so dragging
+    // through options doesn't start a check each).
+    ref.listen(notificationPrefsProvider, (before, now) {
+      if (before == now) return;
+      _prefsCheck?.cancel();
+      _prefsCheck = Timer(const Duration(seconds: 2), () {
+        if (mounted) unawaited(ref.read(notificationServiceProvider).check());
+      });
     });
     return widget.child;
   }

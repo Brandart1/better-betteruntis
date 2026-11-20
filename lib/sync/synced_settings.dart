@@ -23,6 +23,7 @@ library;
 import 'dart:convert';
 
 import '../core/accessibility.dart';
+import '../core/notifications.dart';
 import '../core/settings.dart';
 
 /// Reserved key namespace of synced settings on the server.
@@ -209,6 +210,63 @@ final _favouriteName = RegExp(r'^favourite\.(CLASS|TEACHER|ROOM)#-?\d{1,12}$');
 
 bool isFavouriteSetting(String name) => _favouriteName.hasMatch(name);
 
+/// Notification options of one account (lib/core/notifications.dart):
+/// `notifications.<field>`, one record per option that isn't at its
+/// default. Not `enabled`: turning notifications on needs the system
+/// permission on each device, so every device decides that itself.
+const String notificationPrefix = 'notifications.';
+
+const List<String> _notificationFields = [
+  'timetable',
+  'messages',
+  'daysAhead',
+  'dailySummary',
+  'dailyMinute',
+  'examReminderDays',
+  'homeworkReminderDays',
+];
+
+bool isNotificationSetting(String name) =>
+    name.startsWith(notificationPrefix) &&
+    _notificationFields.contains(name.substring(notificationPrefix.length));
+
+/// Settings that belong to one account and go only to its server.
+bool isAccountSetting(String name) =>
+    isFavouriteSetting(name) || isNotificationSetting(name);
+
+/// The notification options of every account that differ from the
+/// defaults, as synced settings (stamp keys).
+Map<String, Object> notificationSettingsOf(NotificationPrefs prefs) {
+  final defaults = const NotificationSettings().toJson();
+  return {
+    for (final e in prefs.byAccount.entries)
+      for (final f in e.value.toJson().entries)
+        if (_notificationFields.contains(f.key) &&
+            f.value != null &&
+            !sameSettingValue(defaults[f.key], f.value))
+          accountSettingKey(e.key, '$notificationPrefix${f.key}'):
+              canonicalValue(f.value)!,
+  };
+}
+
+/// [s] with synced [changes] (`notifications.<field>` → value, null = the
+/// default) applied; other names are ignored.
+NotificationSettings applyNotificationChanges(
+  NotificationSettings s,
+  Map<String, Object?> changes,
+) {
+  final json = s.toJson();
+  final defaults = const NotificationSettings().toJson();
+  var changed = false;
+  for (final e in changes.entries) {
+    if (!isNotificationSetting(e.key)) continue;
+    final f = e.key.substring(notificationPrefix.length);
+    json[f] = e.value ?? defaults[f];
+    changed = true;
+  }
+  return changed ? NotificationSettings.fromJson(json) : s;
+}
+
 /// Local stamp key of [name] belonging to [accountId] only (app-wide
 /// settings use the plain name).
 String accountSettingKey(String accountId, String name) => '@$accountId|$name';
@@ -234,6 +292,7 @@ Map<String, Object> favouriteSettingsOf(Map<String, Set<String>> favourites) =>
 /// Whether this app version syncs a setting called [name].
 bool isKnownSetting(String name) {
   if (name.startsWith(favouritePrefix)) return isFavouriteSetting(name);
+  if (name.startsWith(notificationPrefix)) return isNotificationSetting(name);
   if (name.startsWith(_subjectColor)) return true;
   if (name.startsWith(_timetable)) {
     return _timetableFields.contains(name.substring(_timetable.length));
@@ -262,6 +321,25 @@ RemoteSettingValue readRemoteSetting(
     } on FormatException {
       return const InvalidSetting();
     }
+  }
+  if (isNotificationSetting(name)) {
+    if (deleted) return const SettingValue(null);
+    final Object? raw;
+    try {
+      raw = canonicalValue(jsonDecode(text));
+    } on FormatException {
+      return const InvalidSetting();
+    }
+    final f = name.substring(notificationPrefix.length);
+    final got = canonicalValue(
+      NotificationSettings.fromJson({f: raw}).toJson()[f],
+    );
+    if (raw == null || !sameSettingValue(got, raw)) {
+      return const InvalidSetting();
+    }
+    return sameSettingValue(const NotificationSettings().toJson()[f], raw)
+        ? const SettingValue(null)
+        : SettingValue(got);
   }
   if (name.startsWith(_subjectColor)) {
     final subject = name.substring(_subjectColor.length);

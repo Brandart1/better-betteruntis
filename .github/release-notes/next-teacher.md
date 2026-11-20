@@ -3,6 +3,7 @@
 Teacher test build (branch `teacher`). Absences, lesson topic, previous topics and class register entries are confirmed with real teacher accounts. Room booking and creating exams are still guesses at the server calls (the official app can't do either); most other teacher calls now follow the official Untis app 6.8.1 — if something fails, please send the entries from the Debug screen.
 
 ### New
+- **Daily summary and reminders** (from v0.5.11-beta): at a time you choose, today's changes and tests in one notification (changes after that come right away; Android checks every 15 min in school hours); reminders N days before tests and homework; notification options sync per account.
 - **Rooms can be favourites** too (from v0.5.10-beta): star a room in Browse timetables or on its timetable; synced like class and teacher favourites.
 - With sync on, **favourite classes and teachers** sync too (from v0.5.9-beta), per WebUntis account.
 - Absences (from v0.5.8-beta): each absence says **Whole day** or **Partial · n of m lessons**, from the timetable (cancelled lessons don't count), and **By subject** shows the attendance in each subject as a percentage with missed and unexcused lessons.

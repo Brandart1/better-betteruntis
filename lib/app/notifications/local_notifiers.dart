@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 import '../../core/notifications.dart';
 
@@ -33,6 +34,7 @@ class PluginLocalNotifier implements LocalNotifier {
   bool _launchTaken = false;
 
   static const channelId = 'changes';
+  static const dailyChannelId = 'daily';
 
   Future<void> _ensureInit() => _init ??= _plugin
       .initialize(
@@ -96,6 +98,69 @@ class PluginLocalNotifier implements LocalNotifier {
   }
 
   @override
+  bool get canSchedule =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
+  AndroidFlutterLocalNotificationsPlugin? get _android =>
+      defaultTargetPlatform == TargetPlatform.android
+      ? _plugin
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >()
+      : null;
+
+  @override
+  Future<void> schedule(AppNotification n, DateTime at) async {
+    await _ensureInit();
+    final exact = await exactTimeAllowed();
+    await _plugin.zonedSchedule(
+      id: n.id,
+      title: n.title,
+      body: n.body,
+      payload: n.payload,
+      // An instant in UTC: no time zone database needed, and a new one is
+      // scheduled every day anyway (summer time).
+      scheduledDate: tz.TZDateTime.from(at.toUtc(), tz.UTC),
+      androidScheduleMode: exact
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle,
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          dailyChannelId,
+          'Daily summary and reminders',
+          channelDescription:
+              "Today's changes and tests, and reminders about tests and "
+              'homework, at the time you chose',
+          styleInformation: BigTextStyleInformation(n.body),
+        ),
+        iOS: const DarwinNotificationDetails(),
+      ),
+    );
+  }
+
+  @override
+  Future<void> cancel(int id) async {
+    await _ensureInit();
+    await _plugin.cancel(id: id);
+  }
+
+  @override
+  Future<bool> exactTimeAllowed() async {
+    final android = _android;
+    if (android == null) return true;
+    await _ensureInit();
+    return await android.canScheduleExactNotifications() ?? true;
+  }
+
+  @override
+  Future<void> requestExactTime() async {
+    await _ensureInit();
+    await _android?.requestExactAlarmsPermission();
+  }
+
+  @override
   Stream<String> get taps {
     unawaited(_ensureInit().catchError((_) {}));
     return _taps.stream;
@@ -130,6 +195,21 @@ class InAppNotifier implements LocalNotifier {
 
   @override
   Future<void> show(AppNotification n) async => _shown.add(n);
+
+  @override
+  bool get canSchedule => false;
+
+  @override
+  Future<void> schedule(AppNotification n, DateTime at) async {}
+
+  @override
+  Future<void> cancel(int id) async {}
+
+  @override
+  Future<bool> exactTimeAllowed() async => true;
+
+  @override
+  Future<void> requestExactTime() async {}
 
   @override
   Stream<String> get taps => _taps.stream;

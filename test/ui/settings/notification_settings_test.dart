@@ -10,9 +10,29 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _Notifier implements LocalNotifier {
-  _Notifier(this.grant);
+  _Notifier(this.grant, {this.exact = true});
   final bool grant;
+  bool exact;
   int asked = 0;
+  int exactAsked = 0;
+
+  @override
+  bool get canSchedule => true;
+
+  @override
+  Future<void> schedule(AppNotification n, DateTime at) async {}
+
+  @override
+  Future<void> cancel(int id) async {}
+
+  @override
+  Future<bool> exactTimeAllowed() async => exact;
+
+  @override
+  Future<void> requestExactTime() async {
+    exactAsked++;
+    exact = true;
+  }
 
   @override
   Future<bool> requestPermission() async {
@@ -138,10 +158,75 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('notifications-enabled')));
     await tester.pumpAndSettle();
     expect(find.text('Today and the next 2 school days'), findsOneWidget);
-    await tester.tap(find.byType(DropdownButton<int>));
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('notifications-days')),
+        matching: find.byType(DropdownButton<int>),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('4').last);
     await tester.pumpAndSettle();
     expect(c.read(notificationPrefsProvider).of('acc').daysAhead, 4);
+  });
+
+  testWidgets('daily summary, time and reminders', (tester) async {
+    tester.view.physicalSize = const Size(800, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final notifier = _Notifier(true, exact: false);
+    final (c, _) = await pump(tester, notifier);
+    NotificationSettings s() => c.read(notificationPrefsProvider).of('acc');
+    Finder key(String k) => find.byKey(ValueKey(k));
+    // Off: nothing to change, no exact-time hint.
+    expect(
+      tester
+          .widget<AdaptiveSwitchTile>(key('notifications-daily-summary'))
+          .onChanged,
+      isNull,
+    );
+    expect(key('notifications-exact-time'), findsNothing);
+
+    await tester.tap(key('notifications-enabled'));
+    await tester.pumpAndSettle();
+    expect(s().dailySummary, isTrue);
+    expect(find.text('07:00'), findsOneWidget);
+
+    Future<void> pick(String tile, String item) async {
+      await tester.tap(
+        find.descendant(
+          of: key(tile),
+          matching: find.byType(DropdownButton<int>),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(item).last);
+      await tester.pumpAndSettle();
+    }
+
+    await pick('notifications-exam-reminder', '3');
+    expect(s().examReminderDays, 3);
+    expect(find.text('3 days before'), findsOneWidget);
+    await pick('notifications-homework-reminder', '1');
+    expect(s().homeworkReminderDays, 1);
+    expect(find.text('1 day before'), findsOneWidget);
+
+    await tester.tap(key('notifications-daily-summary'));
+    await tester.pumpAndSettle();
+    expect(s().dailySummary, isFalse);
+
+    // The time picker opens with the current time; OK keeps it.
+    await tester.tap(key('notifications-daily-time'));
+    await tester.pumpAndSettle();
+    expect(find.text('Daily notifications at'), findsOneWidget);
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(s().dailyMinute, NotificationSettings.defaultDailyMinute);
+
+    // Android without exact alarms: a tile asks for them.
+    await tester.tap(key('notifications-exact-time'));
+    await tester.pumpAndSettle();
+    expect(notifier.exactAsked, 1);
+    expect(key('notifications-exact-time'), findsNothing);
   });
 }

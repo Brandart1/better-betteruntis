@@ -1,5 +1,6 @@
 /// Settings → Notifications: per account on/off (asks for the permission
-/// when turned on), which kinds, how many school days ahead.
+/// when turned on), which kinds, how many school days ahead, the daily
+/// summary with its time, and reminders before tests and homework.
 library;
 
 import 'dart:async';
@@ -60,6 +61,74 @@ class _NotificationSettingsScreenState
     unawaited(ref.read(notificationServiceProvider).check());
   }
 
+  bool? _exact;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadExact());
+  }
+
+  Future<void> _loadExact() async {
+    bool allowed;
+    try {
+      allowed = await ref.read(localNotifierProvider).exactTimeAllowed();
+    } catch (_) {
+      allowed = true;
+    }
+    if (mounted) setState(() => _exact = allowed);
+  }
+
+  Future<void> _pickTime(String accountId, int minute) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: minute ~/ 60, minute: minute % 60),
+      helpText: 'Daily notifications at',
+    );
+    if (picked == null || !mounted) return;
+    ref
+        .read(notificationPrefsProvider.notifier)
+        .update(
+          accountId,
+          (c) => c.copyWith(dailyMinute: picked.hour * 60 + picked.minute),
+        );
+  }
+
+  static String _time(int minute) =>
+      '${(minute ~/ 60).toString().padLeft(2, '0')}:'
+      '${(minute % 60).toString().padLeft(2, '0')}';
+
+  static String _reminderLabel(int n) => switch (n) {
+    0 => 'Off',
+    1 => '1 day before',
+    _ => '$n days before',
+  };
+
+  Widget _reminderTile({
+    required Key key,
+    required String title,
+    required int value,
+    required bool enabled,
+    required ValueChanged<int> onChanged,
+  }) => ListTile(
+    key: key,
+    enabled: enabled,
+    title: Text(title),
+    subtitle: Text(_reminderLabel(value)),
+    trailing: DropdownButton<int>(
+      value: value,
+      onChanged: enabled
+          ? (v) {
+              if (v != null) onChanged(v);
+            }
+          : null,
+      items: [
+        for (var i = 0; i <= NotificationSettings.maxReminderDays; i++)
+          DropdownMenuItem(value: i, child: Text(i == 0 ? 'Off' : '$i')),
+      ],
+    ),
+  );
+
   static String _daysLabel(int n) => switch (n) {
     0 => 'Today only',
     1 => 'Today and the next school day',
@@ -86,10 +155,19 @@ class _NotificationSettingsScreenState
               'open (no notifications while the page is closed).'
         : background
         ? 'The app checks when you open it, every 15 minutes while it is '
-              'open, and in the background about every 45 minutes (Android '
-              'decides the exact time, e.g. later in battery saver).'
+              'open, and in the background every 15 minutes on school days '
+              'from an hour before the daily time until 18:00, else about '
+              'every 45 minutes (Android decides the exact time, e.g. later '
+              'in battery saver).'
         : 'The app checks when you open it and every 15 minutes while it '
-              'is open. There is no check while the app is closed.';
+              'is open. The daily notifications come at their time also '
+              'when the app is closed, with what the app knew when it last '
+              'checked; changes are only found while the app is open.';
+    final daily = s.enabled && !account.anonymous;
+    final summaryNote = kIsWeb
+        ? 'In the browser, the summary shows when the app is open at or '
+              'after that time.'
+        : null;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Notifications')),
@@ -107,7 +185,7 @@ class _NotificationSettingsScreenState
             key: const ValueKey('notifications-enabled'),
             title: const Text('Notify about changes'),
             subtitle: const Text(
-              'Substitutions, cancellations, room changes and new messages',
+              'Changes, new messages, the daily summary and reminders',
             ),
             value: s.enabled,
             onChanged: _asking ? null : (v) => _setEnabled(account.id, v),
@@ -175,12 +253,86 @@ class _NotificationSettingsScreenState
           ),
           const Divider(),
           Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Text('Every day', style: theme.textTheme.titleSmall),
+          ),
+          AdaptiveSwitchTile(
+            key: const ValueKey('notifications-daily-summary'),
+            title: const Text('Daily summary'),
+            subtitle: Text(
+              "Today's changes and tests (also your own) at "
+              '${_time(s.dailyMinute)}. Changes found after that are '
+              'notified right away.'
+              '${summaryNote == null ? '' : ' $summaryNote'}',
+            ),
+            value: s.dailySummary,
+            onChanged: daily
+                ? (v) => prefs.update(
+                    account.id,
+                    (c) => c.copyWith(dailySummary: v),
+                  )
+                : null,
+          ),
+          ListTile(
+            key: const ValueKey('notifications-daily-time'),
+            enabled: daily,
+            leading: const Icon(Icons.schedule),
+            title: const Text('Time'),
+            subtitle: const Text('Of the summary and the reminders'),
+            trailing: Text(
+              _time(s.dailyMinute),
+              style: theme.textTheme.titleMedium,
+            ),
+            onTap: daily ? () => _pickTime(account.id, s.dailyMinute) : null,
+          ),
+          _reminderTile(
+            key: const ValueKey('notifications-exam-reminder'),
+            title: 'Tests',
+            value: s.examReminderDays,
+            enabled: daily,
+            onChanged: (v) => prefs.update(
+              account.id,
+              (c) => c.copyWith(examReminderDays: v),
+            ),
+          ),
+          _reminderTile(
+            key: const ValueKey('notifications-homework-reminder'),
+            title: 'Homework',
+            value: s.homeworkReminderDays,
+            enabled: daily,
+            onChanged: (v) => prefs.update(
+              account.id,
+              (c) => c.copyWith(homeworkReminderDays: v),
+            ),
+          ),
+          if (_exact == false && s.hasDaily)
+            ListTile(
+              key: const ValueKey('notifications-exact-time'),
+              leading: const Icon(Icons.alarm),
+              title: const Text('Allow exact time'),
+              subtitle: const Text(
+                'Without “Alarms & reminders”, Android shows the daily '
+                'notifications some minutes late.',
+              ),
+              trailing: const Icon(Icons.open_in_new),
+              onTap: () async {
+                try {
+                  await ref.read(localNotifierProvider).requestExactTime();
+                } catch (_) {}
+                await _loadExact();
+                // Scheduled again with the new mode.
+                unawaited(ref.read(notificationServiceProvider).check());
+              },
+            ),
+          const Divider(),
+          Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Text(
               '$how\n\nEverything stays on this device: the app asks '
               'WebUntis itself with your login, nothing goes through another '
               'server. Each change is notified once; the first check only '
-              'remembers what is there already.',
+              'remembers what is there already. With sync on, these options '
+              '(not the switch at the top) reach your other devices.',
               style: theme.textTheme.bodySmall,
             ),
           ),
