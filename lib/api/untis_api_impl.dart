@@ -16,6 +16,7 @@ import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/messaging.dart';
 import '../core/models.dart';
+import '../core/office_hour_booking.dart';
 import '../core/teacher_tools.dart';
 import '../core/pupil_photos.dart';
 import '../core/substitution_planning.dart';
@@ -26,6 +27,7 @@ import 'excuse_parsers.dart';
 import 'json_rpc.dart';
 import 'rate_limit_retry.dart';
 import 'messaging_parsers.dart';
+import 'office_hour_parsers.dart';
 import 'parsers.dart';
 import 'rest_teachers.dart';
 import 'substitution_parsers.dart';
@@ -41,7 +43,8 @@ class UntisApiImpl
         ExcuseApi,
         ClassLeadApi,
         SubstitutionPlanningApi,
-        MessagingApi {
+        MessagingApi,
+        OfficeHourBookingApi {
   /// [interceptors] are added to the default client (e.g. the web proxy
   /// rewrite); ignored when [dio] is given.
   UntisApiImpl({
@@ -587,6 +590,66 @@ class UntisApiImpl
       'auth': _rpc.auth(auth),
     }),
   );
+
+  // ---- Office hour booking (parents / pupils) ----------------------------
+
+  @override
+  Future<OfficeHourSlots> officeHourSlots({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required OfficeHourItem officeHour,
+  }) async {
+    final params = officeHourSlotsParams(officeHour);
+    _recordRequest('getOfficeHourRegistrations2017', params);
+    final raw = await _rpc.call(
+      rpcUrl(host, school),
+      'getOfficeHourRegistrations2017',
+      {...params, 'auth': _rpc.auth(auth)},
+    );
+    return parseOfficeHourSlots(raw, officeHourDay(officeHour));
+  }
+
+  @override
+  Future<OfficeHourSlots> bookOfficeHour({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required OfficeHourItem officeHour,
+    required OfficeHourSlot slot,
+    required String userText,
+    String teacherText = '',
+  }) async {
+    final params = bookOfficeHourParams(
+      officeHour,
+      slot,
+      userText: userText,
+      teacherText: teacherText,
+    );
+    _recordRequest('submitOfficeHourRegistration2017', params);
+    final raw = await _rpc.call(
+      rpcUrl(host, school),
+      'submitOfficeHourRegistration2017',
+      {...params, 'auth': _rpc.auth(auth)},
+    );
+    return parseOfficeHourSlots(raw, officeHourDay(officeHour));
+  }
+
+  @override
+  Future<void> cancelOfficeHour({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required OfficeHourItem officeHour,
+    String userText = '',
+  }) async {
+    final params = cancelOfficeHourParams(officeHour, userText: userText);
+    _recordRequest('deleteOfficeHourRegistration2017', params);
+    await _rpc.call(rpcUrl(host, school), 'deleteOfficeHourRegistration2017', {
+      ...params,
+      'auth': _rpc.auth(auth),
+    });
+  }
 
   @override
   Future<List<InboxMessage>> inbox({

@@ -11,6 +11,7 @@ import '../core/excuses.dart';
 import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/messaging.dart';
+import '../core/office_hour_booking.dart';
 import '../core/providers.dart';
 import '../core/pupil_photos.dart';
 import '../core/substitution_planning.dart';
@@ -23,6 +24,7 @@ import 'db/database.dart';
 import 'excuse_repository_impl.dart';
 import 'info_center_repository_impl.dart';
 import 'messaging_repository_impl.dart';
+import 'office_hour_booking_repository_impl.dart';
 import 'pupil_photo_repository_impl.dart';
 import 'secret_store.dart';
 import 'substitution_planning_repository_impl.dart';
@@ -134,6 +136,12 @@ List<Override> dataOverrides({
   ),
   pupilPhotoRepositoryProvider.overrideWith(
     (ref) => PupilPhotoRepositoryImpl(
+      api: api ?? ref.watch(untisApiProvider),
+      accounts: ref.watch(accountRepositoryProvider),
+    ),
+  ),
+  officeHourBookingRepositoryProvider.overrideWith(
+    (ref) => OfficeHourBookingRepositoryImpl(
       api: api ?? ref.watch(untisApiProvider),
       accounts: ref.watch(accountRepositoryProvider),
     ),

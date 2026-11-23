@@ -4,9 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/info.dart';
 import '../../core/models.dart';
+import '../../core/office_hour_booking.dart';
 import '../timetable/timetable_utils.dart';
 import 'info_common.dart';
 import 'info_providers.dart';
+import 'office_hour_booking_sheet.dart';
 import '../common/search_field.dart';
 
 /// Office hours of the next 2 weeks, grouped by teacher (A–Z), each
@@ -175,7 +177,13 @@ class _OfficeHoursTabState extends ConsumerState<OfficeHoursTab> {
           SliverList.list(
             children: [
               for (final o in g.items)
-                OfficeHourCard(item: o, showTeacher: false, now: now),
+                OfficeHourCard(
+                  item: o,
+                  showTeacher: false,
+                  now: now,
+                  account: widget.account,
+                  onBookingChanged: () => forceRefresh(ref, #officeHours, p, q),
+                ),
             ],
           ),
         ],
@@ -190,8 +198,16 @@ class OfficeHourCard extends ConsumerWidget {
     required this.item,
     this.showTeacher = true,
     this.now,
+    this.account,
+    this.onBookingChanged,
   });
   final OfficeHourItem item;
+
+  /// With an account whose API can book office hours, the card offers
+  /// "Book a time" / "Your booking"; [onBookingChanged] runs after a
+  /// booking was made or cancelled.
+  final Account? account;
+  final VoidCallback? onBookingChanged;
 
   /// Title is the teacher; when false (list grouped by teacher) the title is
   /// the day instead.
@@ -216,8 +232,14 @@ class OfficeHourCard extends ConsumerWidget {
           children: [
             Text(
               showTeacher
-                  ? (o.teacherName.trim().isEmpty ? 'Teacher' : o.teacherName.trim())
-                  : formatDay(context, dateOnly(o.start), now ?? DateTime.now()),
+                  ? (o.teacherName.trim().isEmpty
+                        ? 'Teacher'
+                        : o.teacherName.trim())
+                  : formatDay(
+                      context,
+                      dateOnly(o.start),
+                      now ?? DateTime.now(),
+                    ),
               style: theme.textTheme.titleSmall,
             ),
             const SizedBox(height: 4),
@@ -225,12 +247,24 @@ class OfficeHourCard extends ConsumerWidget {
               children: [
                 Icon(Icons.access_time, size: 16, color: cs.onSurfaceVariant),
                 const SizedBox(width: 8),
-                Text(formatTimeRange(context, o.start, o.end), style: theme.textTheme.bodySmall),
+                Text(
+                  formatTimeRange(context, o.start, o.end),
+                  style: theme.textTheme.bodySmall,
+                ),
                 if (o.rooms.trim().isNotEmpty) ...[
                   const SizedBox(width: 16),
-                  Icon(Icons.room_outlined, size: 16, color: cs.onSurfaceVariant),
+                  Icon(
+                    Icons.room_outlined,
+                    size: 16,
+                    color: cs.onSurfaceVariant,
+                  ),
                   const SizedBox(width: 4),
-                  Flexible(child: Text(o.rooms.trim(), style: theme.textTheme.bodySmall)),
+                  Flexible(
+                    child: Text(
+                      o.rooms.trim(),
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -238,8 +272,39 @@ class OfficeHourCard extends ConsumerWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: o.registered
-                    ? InfoChip('Registered', icon: Icons.how_to_reg, background: ok.bg, foreground: ok.fg)
-                    : const InfoChip('Registration possible', icon: Icons.edit_calendar_outlined),
+                    ? InfoChip(
+                        'Registered',
+                        icon: Icons.how_to_reg,
+                        background: ok.bg,
+                        foreground: ok.fg,
+                      )
+                    : const InfoChip(
+                        'Registration possible',
+                        icon: Icons.edit_calendar_outlined,
+                      ),
+              ),
+            if ((o.registered || o.registrationPossible) &&
+                account != null &&
+                ref
+                    .watch(officeHourBookingRepositoryProvider)
+                    .supports(account!))
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: ValueKey('officehour-${o.id}-book'),
+                  onPressed: () async {
+                    if (await showOfficeHourBooking(context, account!, o)) {
+                      onBookingChanged?.call();
+                    }
+                  },
+                  icon: Icon(
+                    o.registered
+                        ? Icons.event_note_outlined
+                        : Icons.event_available_outlined,
+                    size: 18,
+                  ),
+                  label: Text(o.registered ? 'Your booking' : 'Book a time'),
+                ),
               ),
             if (email.isNotEmpty || phone.isNotEmpty)
               Wrap(
@@ -255,8 +320,11 @@ class OfficeHourCard extends ConsumerWidget {
                   if (phone.isNotEmpty)
                     TextButton.icon(
                       key: ValueKey('officehour-${o.id}-phone'),
-                      onPressed: () =>
-                          openLink(context, ref, 'tel:${phone.replaceAll(RegExp(r'[^0-9+]'), '')}'),
+                      onPressed: () => openLink(
+                        context,
+                        ref,
+                        'tel:${phone.replaceAll(RegExp(r'[^0-9+]'), '')}',
+                      ),
                       icon: const Icon(Icons.phone_outlined, size: 18),
                       label: Text(phone),
                     ),

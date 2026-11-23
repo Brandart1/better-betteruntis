@@ -18,6 +18,7 @@ import '../core/info.dart';
 import '../core/interfaces.dart';
 import '../core/messaging.dart';
 import '../core/models.dart';
+import '../core/office_hour_booking.dart';
 import '../core/pupil_photos.dart';
 import '../core/substitution_planning.dart';
 import '../core/teacher_tools.dart';
@@ -53,7 +54,8 @@ class FakeUntisApi
         ExcuseApi,
         ClassLeadApi,
         SubstitutionPlanningApi,
-        MessagingApi {
+        MessagingApi,
+        OfficeHourBookingApi {
   FakeUntisApi({this.latency = const Duration(milliseconds: 400)});
 
   /// Artificial delay for every call. Use [Duration.zero] in widget tests.
@@ -2212,7 +2214,9 @@ class FakeUntisApi
         rooms: r,
         email: mail,
         registrationPossible: id != 3,
-        registered: id == 2,
+        registered:
+            officeHourBookings.containsKey(id) ||
+            (id == 2 && !_officeHoursCancelled.contains(2)),
       );
     }
 
@@ -2224,6 +2228,92 @@ class FakeUntisApi
       at(4, 1, 9, 'Huber', 'R110', ''),
       at(5, 4, 12, 'Huber', 'R215', ''),
     ];
+  }
+
+  /// Demo bookings: the booked slot start and note per office hour id.
+  /// Office hour 2 starts booked (its second slot).
+  final officeHourBookings = <int, ({DateTime start, String text})>{};
+  final _officeHoursCancelled = <int>{};
+
+  /// 10-minute slots over the office hour; every third one taken by
+  /// someone else.
+  OfficeHourSlots _demoSlots(OfficeHourItem o) {
+    final booked =
+        officeHourBookings[o.id] ??
+        (o.id == 2 && !_officeHoursCancelled.contains(2)
+            ? (start: o.start.add(const Duration(minutes: 10)), text: '')
+            : null);
+    final slots = <OfficeHourSlot>[];
+    var i = 0;
+    for (
+      var t = o.start;
+      !t.add(const Duration(minutes: 10)).isAfter(o.end);
+      t = t.add(const Duration(minutes: 10)), i++
+    ) {
+      slots.add(
+        OfficeHourSlot(
+          start: t,
+          end: t.add(const Duration(minutes: 10)),
+          state: booked?.start == t
+              ? OfficeHourSlotState.self
+              : (i % 3 == 2
+                    ? OfficeHourSlotState.other
+                    : OfficeHourSlotState.free),
+        ),
+      );
+    }
+    return OfficeHourSlots(
+      slots: slots,
+      teacherText: o.id == 1 ? 'Please say briefly what it is about.' : '',
+      userText: booked?.text ?? '',
+    );
+  }
+
+  @override
+  Future<OfficeHourSlots> officeHourSlots({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required OfficeHourItem officeHour,
+  }) async {
+    await _delay();
+    return _demoSlots(officeHour);
+  }
+
+  @override
+  Future<OfficeHourSlots> bookOfficeHour({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required OfficeHourItem officeHour,
+    required OfficeHourSlot slot,
+    required String userText,
+    String teacherText = '',
+  }) async {
+    await _delay();
+    final current = _demoSlots(officeHour);
+    final s = current.slots.where((x) => x.start == slot.start).firstOrNull;
+    if (s == null || s.state == OfficeHourSlotState.other) {
+      throw const UntisException(-1, 'This time is already taken.');
+    }
+    officeHourBookings[officeHour.id] = (
+      start: slot.start,
+      text: userText.trim(),
+    );
+    return _demoSlots(officeHour);
+  }
+
+  @override
+  Future<void> cancelOfficeHour({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required OfficeHourItem officeHour,
+    String userText = '',
+  }) async {
+    await _delay();
+    officeHourBookings.remove(officeHour.id);
+    _officeHoursCancelled.add(officeHour.id);
   }
 
   @override

@@ -12,6 +12,7 @@ import '../core/messaging.dart';
 import '../core/models.dart';
 import '../core/pupil_photos.dart';
 import '../core/substitution_planning.dart';
+import '../core/office_hour_booking.dart';
 import '../core/teacher_tools.dart';
 
 /// Sends demo accounts (host `*.invalid`) to [demo] and everything else to
@@ -26,7 +27,8 @@ class RoutingUntisApi
         ExcuseApi,
         ClassLeadApi,
         SubstitutionPlanningApi,
-        MessagingApi {
+        MessagingApi,
+        OfficeHourBookingApi {
   RoutingUntisApi({required this.real, required this.demo});
 
   final FullUntisApi real;
@@ -587,6 +589,61 @@ class RoutingUntisApi
       imageUrl: imageUrl,
     );
   }
+
+  OfficeHourBookingApi _officeHours(String host) {
+    final Object a = _for(host);
+    if (a is! OfficeHourBookingApi) {
+      throw const UntisException(-1, 'Not supported for this account.');
+    }
+    return a;
+  }
+
+  @override
+  Future<OfficeHourSlots> officeHourSlots({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required OfficeHourItem officeHour,
+  }) => _officeHours(host).officeHourSlots(
+    host: host,
+    school: school,
+    auth: auth,
+    officeHour: officeHour,
+  );
+
+  @override
+  Future<OfficeHourSlots> bookOfficeHour({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required OfficeHourItem officeHour,
+    required OfficeHourSlot slot,
+    required String userText,
+    String teacherText = '',
+  }) => _officeHours(host).bookOfficeHour(
+    host: host,
+    school: school,
+    auth: auth,
+    officeHour: officeHour,
+    slot: slot,
+    userText: userText,
+    teacherText: teacherText,
+  );
+
+  @override
+  Future<void> cancelOfficeHour({
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+    required OfficeHourItem officeHour,
+    String userText = '',
+  }) => _officeHours(host).cancelOfficeHour(
+    host: host,
+    school: school,
+    auth: auth,
+    officeHour: officeHour,
+    userText: userText,
+  );
 
   ExcuseApi _excuses(String host) {
     final Object a = _for(host);
