@@ -12,6 +12,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'interfaces.dart';
 import 'models.dart';
+import 'pupil_info.dart';
+
+export 'pupil_info.dart';
 
 /// A pupil of a lesson (`referencedStudents` of getPeriodData2017).
 class ClassRegStudent {
@@ -21,6 +24,7 @@ class ClassRegStudent {
     required this.lastName,
     this.klasseId,
     this.imageUrl,
+    this.birthDate,
   });
 
   final int id;
@@ -31,6 +35,22 @@ class ClassRegStudent {
   /// Photo URL sent with the pupil, if any (see `PupilPhotoApi` in
   /// pupil_photos.dart).
   final String? imageUrl;
+
+  /// Date of birth (`birthDate`), when the server sends it.
+  final DateTime? birthDate;
+
+  /// Same pupil with [birthDate] when this one has none.
+  ClassRegStudent withBirthDate(DateTime? birthDate) =>
+      this.birthDate != null || birthDate == null
+      ? this
+      : ClassRegStudent(
+          id: id,
+          firstName: firstName,
+          lastName: lastName,
+          klasseId: klasseId,
+          imageUrl: imageUrl,
+          birthDate: birthDate,
+        );
 
   /// Up to two initials ("Bauer Lena" -> "LB"), '' when there are none.
   String get initials {
@@ -154,9 +174,38 @@ class PeriodRegister {
     this.topic = '',
     this.events = const [],
     this.homework = const [],
+    this.exemptions = const [],
+    this.classRoles = const [],
+    this.seatingPlan,
   });
 
   final int ttId;
+
+  /// Pupils' exemptions (`exemptions`) sent with this lesson.
+  final List<ClassRegExemption> exemptions;
+
+  /// Class duties (`classRoles`) of the lesson's pupils.
+  final List<ClassRole> classRoles;
+
+  /// The lesson's seating plan (`seatingPlan`), null when it has none.
+  final SeatingPlan? seatingPlan;
+
+  /// Same lesson with other entries / class duties.
+  PeriodRegister copyWith({
+    List<ClassRegEvent>? events,
+    List<ClassRole>? classRoles,
+  }) => PeriodRegister(
+    ttId: ttId,
+    absenceChecked: absenceChecked,
+    studentIds: studentIds,
+    absences: absences,
+    topic: topic,
+    events: events ?? this.events,
+    homework: homework,
+    exemptions: exemptions,
+    classRoles: classRoles ?? this.classRoles,
+    seatingPlan: seatingPlan,
+  );
 
   /// Homework (`homeWorks`) the server sent with this lesson; may be empty
   /// even when there is some (then only the timetable has it).

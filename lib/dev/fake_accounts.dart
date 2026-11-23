@@ -976,11 +976,46 @@ class FakeUntisApi
               for (final h in submittedHomework.values)
                 if (h.ttId == id) h.homework,
             ],
+            classRoles: demoClassRoles,
+            exemptions: demoExemptions,
+            seatingPlan: demoSeatingPlan,
           ),
       },
-      students: {for (final s in demoStudents) s.id: s},
+      students: {
+        for (final s in demoStudents)
+          s.id: s.id == 501 ? s.withBirthDate(_demoBirthday()) : s,
+      },
     );
   }
+
+  /// Lena (501) turns 15 today, so the birthday badge always shows.
+  static DateTime _demoBirthday() {
+    final now = DateTime.now();
+    return DateTime(now.year - 15, now.month, now.day);
+  }
+
+  static const demoClassRoles = [
+    ClassRole(studentId: 505, dutyId: 1, name: 'Class speaker'),
+    ClassRole(studentId: 502, dutyId: 3, name: 'Board duty'),
+  ];
+
+  static const demoExemptions = [
+    ClassRegExemption(
+      id: 1,
+      studentId: 504,
+      reason: 'Medical certificate',
+      text: 'no sports until further notice',
+    ),
+  ];
+
+  /// Two rows of four seats; Ben (506) has no seat.
+  static const demoSeatingPlan = SeatingPlan(
+    id: 1,
+    name: 'Room 2.14',
+    rows: 2,
+    columns: 4,
+    seats: {(0, 0): 501, (0, 1): 502, (0, 3): 503, (1, 0): 504, (1, 2): 505},
+  );
 
   @override
   Future<void> submitLessonTopic({

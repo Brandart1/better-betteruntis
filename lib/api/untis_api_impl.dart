@@ -1011,8 +1011,65 @@ class UntisApiImpl
       'ttIds': ttIds,
       'auth': _rpc.auth(auth),
     });
-    return parsePeriodData(raw);
+    return _withMasterData(
+      parsePeriodData(raw),
+      host: host,
+      school: school,
+      auth: auth,
+    );
   }
+
+  /// Fills in what getPeriodData2017 refers to by id only: class duty names
+  /// (master data `duties`) and pupils' dates of birth missing from
+  /// `referencedStudents`. Uses the master data seen this session; loads it
+  /// once via [absenceLookups] when duties are unnamed (failures keep the
+  /// data as it is).
+  Future<PeriodRegisterData> _withMasterData(
+    PeriodRegisterData d, {
+    required String host,
+    required String school,
+    required UntisCredentials auth,
+  }) async {
+    final key = '$host|$school';
+    var lookups = _lookups[key] ?? const AbsenceLookups();
+    final unnamed = d.periods.values.any(
+      (r) => r.classRoles.any(
+        (c) =>
+            c.name.isEmpty &&
+            c.dutyId != null &&
+            !lookups.duties.containsKey(c.dutyId),
+      ),
+    );
+    if (unnamed && !_dutiesTried.contains(key)) {
+      _dutiesTried.add(key);
+      try {
+        lookups = await absenceLookups(host: host, school: school, auth: auth);
+      } catch (_) {}
+    }
+    if (lookups.duties.isEmpty && lookups.birthDates.isEmpty) return d;
+    return PeriodRegisterData(
+      periods: {
+        for (final MapEntry(:key, :value) in d.periods.entries)
+          key: value.classRoles.isEmpty
+              ? value
+              : value.copyWith(
+                  classRoles: [
+                    for (final c in value.classRoles)
+                      c.name.isEmpty && lookups.duties[c.dutyId] != null
+                          ? c.withName(lookups.duties[c.dutyId]!)
+                          : c,
+                  ],
+                ),
+      },
+      students: {
+        for (final MapEntry(:key, :value) in d.students.entries)
+          key: value.withBirthDate(lookups.birthDates[key]),
+      },
+    );
+  }
+
+  /// Schools whose master data was loaded once for duty names.
+  final _dutiesTried = <String>{};
 
   @override
   Future<void> submitLessonTopic({

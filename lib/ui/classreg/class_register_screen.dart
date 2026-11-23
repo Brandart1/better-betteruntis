@@ -14,6 +14,7 @@ import 'absence_details_sheet.dart';
 import 'absence_summary_screen.dart';
 import 'homework_editor_screen.dart';
 import 'pupil_avatar.dart';
+import 'pupil_badges.dart';
 import 'substitute_note.dart';
 
 /// Opens the class register of one lesson block ([periods]: one lesson, or
@@ -89,6 +90,14 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
   String _topicBefore = '';
 
   List<ClassRegStudent> _students = const [];
+
+  /// Birthday, class duties and exemptions per pupil on the lesson's day.
+  Map<int, PupilNotes> _notes = const {};
+
+  /// The lesson's seating plan (null when the server sent none) and
+  /// whether it is shown instead of the list.
+  SeatingPlan? _plan;
+  bool _seatView = false;
 
   /// Entries of this lesson block.
   List<ClassRegEvent> _events = const [];
@@ -200,9 +209,16 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
       final topic = regs
           .map((r) => r.topic)
           .firstWhere((t) => t.trim().isNotEmpty, orElse: () => '');
+      final plan = regs
+          .map((r) => r.seatingPlan)
+          .nonNulls
+          .where((p) => !p.isEmpty)
+          .firstOrNull;
       setState(() {
         _data = d;
         _students = students;
+        _notes = PupilNotes.of(regs, students, _blockStart);
+        _plan = plan;
         _absentBefore = absent;
         _absent = {...absent};
         _detailsBefore = details;
@@ -595,6 +611,20 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
                 label: Text(_checked ? 'Checked' : 'Not checked yet'),
                 visualDensity: VisualDensity.compact,
               ),
+              if (_plan != null)
+                TextButton.icon(
+                  key: const ValueKey('classreg-seating-toggle'),
+                  onPressed: () => setState(() => _seatView = !_seatView),
+                  icon: isLargeText(context)
+                      ? null
+                      : Icon(
+                          _seatView
+                              ? Icons.view_list_outlined
+                              : Icons.grid_view_outlined,
+                          size: 18,
+                        ),
+                  label: Text(_seatView ? 'List' : 'Seating plan'),
+                ),
               // Absence summary (lesson / subject / all subjects).
               TextButton.icon(
                 key: const ValueKey('classreg-summary'),
@@ -618,7 +648,20 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
             style: muted,
           ),
         ),
-        for (final s in _students) _studentTile(theme, s),
+        if (_plan != null && _seatView)
+          SeatingPlanView(
+            account: widget.account,
+            plan: _plan!,
+            students: _students,
+            absent: _absent,
+            notes: _notes,
+            onTap: _saving || _readOnly ? null : _toggleAbsent,
+            onLongPress: _readOnly
+                ? (s) => showPupilPhotoDialog(context, ref, widget.account, s)
+                : (s) => _saving ? null : _editAbsence(s),
+          )
+        else
+          for (final s in _students) _studentTile(theme, s),
         ..._homeworkSection(theme, muted),
         ..._entries(theme, muted),
       ],
@@ -922,15 +965,18 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
       key: ValueKey('classreg-student-${s.id}'),
       leading: PupilAvatar(account: widget.account, student: s, absent: absent),
       title: Text(s.displayName),
-      subtitle: Text(
-        absent
-            ? describeAbsence(
-                _details[s.id],
-                _blockStart,
-                _blockEnd,
-                _absenceReasons,
-              )
-            : 'Present',
+      subtitle: _withBadges(
+        s.id,
+        Text(
+          absent
+              ? describeAbsence(
+                  _details[s.id],
+                  _blockStart,
+                  _blockEnd,
+                  _absenceReasons,
+                )
+              : 'Present',
+        ),
       ),
       trailing: _readOnly
           ? null
@@ -940,19 +986,33 @@ class _ClassRegisterScreenState extends ConsumerState<ClassRegisterScreen> {
               icon: const Icon(Icons.more_time),
               onPressed: _saving ? null : () => _editAbsence(s),
             ),
-      onTap: _saving || _readOnly
-          ? null
-          : () => setState(() {
-              if (absent) {
-                _absent.remove(s.id);
-                _details.remove(s.id);
-              } else {
-                _absent.add(s.id);
-              }
-            }),
+      onTap: _saving || _readOnly ? null : () => _toggleAbsent(s),
       onLongPress: () => showPupilPhotoDialog(context, ref, widget.account, s),
     );
   }
+
+  /// [status] with the pupil's badges (birthday, duties, exemptions) below.
+  Widget _withBadges(int studentId, Widget status) {
+    final n = _notes[studentId];
+    if (n == null) return status;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        status,
+        const SizedBox(height: 4),
+        PupilBadges(notes: n, studentId: studentId),
+      ],
+    );
+  }
+
+  void _toggleAbsent(ClassRegStudent s) => setState(() {
+    if (_absent.contains(s.id)) {
+      _absent.remove(s.id);
+      _details.remove(s.id);
+    } else {
+      _absent.add(s.id);
+    }
+  });
 
   /// App bar button to show / hide pupil photos (stored on this device).
   Widget _photosToggle() {

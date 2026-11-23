@@ -20,6 +20,8 @@ class AbsenceLookups {
     this.statuses = const {},
     this.eventReasons = const {},
     this.studentImages = const {},
+    this.duties = const {},
+    this.birthDates = const {},
   });
 
   final Map<int, String> reasons;
@@ -33,11 +35,20 @@ class AbsenceLookups {
   /// Session only, personal data: not persisted.
   final Map<int, String> studentImages;
 
+  /// Class duty names (master data `duties`). Session only.
+  final Map<int, String> duties;
+
+  /// Pupils' dates of birth (master data `students[].birthDate`). Session
+  /// only, personal data: not persisted.
+  final Map<int, DateTime> birthDates;
+
   bool get isEmpty =>
       reasons.isEmpty &&
       statuses.isEmpty &&
       eventReasons.isEmpty &&
-      studentImages.isEmpty;
+      studentImages.isEmpty &&
+      duties.isEmpty &&
+      birthDates.isEmpty;
 
   /// [other] wins on conflicting ids.
   AbsenceLookups merge(AbsenceLookups other) => AbsenceLookups(
@@ -45,6 +56,8 @@ class AbsenceLookups {
     statuses: {...statuses, ...other.statuses},
     eventReasons: {...eventReasons, ...other.eventReasons},
     studentImages: {...studentImages, ...other.studentImages},
+    duties: {...duties, ...other.duties},
+    birthDates: {...birthDates, ...other.birthDates},
   );
 }
 

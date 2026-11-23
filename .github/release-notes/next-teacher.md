@@ -40,6 +40,7 @@ Teacher test build (branch `teacher`). Absences, lesson topic, previous topics a
 - Web test version: saving excuses and notes for teachers works there too now (the web relay forwards those requests).
 - **Messages**: write new messages, reply, see your sent messages with their read confirmations, confirm reading when asked, and revoke a sent message. Who you can write to depends on your school's settings. Attachments aren't supported yet.
 - **Notifications** (Settings → Notifications, per account, off by default): substitutions, cancellations and room changes in your timetable for today and the next school days, new messages and (teachers) new substitution requests — tapping one opens Substitution requests. Android also checks in the background about every 45 minutes; iOS checks when you open the app; in the browser they show inside the app. Everything stays on your device.
+- Teachers: in "Absences & lesson topic" pupils show small badges: **birthday** (on the lesson's day), **class duties** (e.g. class speaker) and **exemptions** with their reason. If the school keeps a **seating plan** for the lesson, "Seating plan" shows the pupils at their seats — tap a seat to mark absent, long press for late arrival, reason or note. All of it comes from WebUntis' class register; schools that don't use it show nothing new.
 - Web test version for teachers (no sync): https://bbu-teacher-alpha.brandart1.workers.dev
 - Demo school: log in as `teacher` to try the teacher features.
 

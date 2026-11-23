@@ -59,6 +59,7 @@ ClassRegStudent? parseClassRegStudent(Map<String, Object?> j) {
     lastName: last,
     klasseId: _int(j['klasseId'] ?? j['classId']),
     imageUrl: studentImageUrl(j),
+    birthDate: parseDate(j['birthDate']),
   );
 }
 
@@ -234,7 +235,85 @@ PeriodRegister parsePeriodRegister(int ttId, Map<String, Object?> j) =>
           .map(parseHomework)
           .whereType<Homework>()
           .toList(),
+      exemptions: _maps(j['exemptions'])
+          .map(parseExemption)
+          .whereType<ClassRegExemption>()
+          .toList(),
+      classRoles: _maps(j['classRoles'])
+          .map(parseClassRole)
+          .whereType<ClassRole>()
+          .toList(),
+      seatingPlan: parseSeatingPlan(j['seatingPlan']),
     );
+
+/// UMStudentExemption `{id, studentId, subjectId, subjectGroup,
+/// exemptionReason, text, startDate, endDate, startTime, endTime,
+/// weekDay}`. Null without a pupil.
+ClassRegExemption? parseExemption(Map<String, Object?> j) {
+  final student = _int(j['studentId']);
+  if (student == null || student <= 0) return null;
+  return ClassRegExemption(
+    id: _int(j['id']),
+    studentId: student,
+    subjectId: switch (_int(j['subjectId'])) {
+      0 => null,
+      final id => id,
+    },
+    subjectGroup: _str(j['subjectGroup']).trim(),
+    reason: _str(j['exemptionReason']).trim(),
+    text: _str(j['text']).trim(),
+    startDate: parseDate(j['startDate']),
+    endDate: parseDate(j['endDate']),
+    startMinute: parseTime(j['startTime']),
+    endMinute: parseTime(j['endTime']),
+    weekday: parseWeekday(j['weekDay']),
+  );
+}
+
+/// UMClassRole `{studentId, klasseId, dutyId, startDate, endDate, text}`;
+/// the name comes from master data `duties` later. Null without a pupil.
+ClassRole? parseClassRole(Map<String, Object?> j) {
+  final student = _int(j['studentId']);
+  if (student == null || student <= 0) return null;
+  return ClassRole(
+    studentId: student,
+    dutyId: switch (_int(j['dutyId'])) {
+      0 => null,
+      final id => id,
+    },
+    name: _firstStr(j, ['dutyName', 'name']),
+    text: _str(j['text']).trim(),
+    startDate: parseDate(j['startDate']),
+    endDate: parseDate(j['endDate']),
+  );
+}
+
+/// UMSeatingPlan `{id, name, numberOfRows, numberOfColumns,
+/// students:[{studentId, rowIndex, colIndex}]}`. Null when it seats no one.
+SeatingPlan? parseSeatingPlan(Object? raw) {
+  if (raw is! Map) return null;
+  final j = _map(raw);
+  final seats = <(int, int), int>{};
+  var rows = _int(j['numberOfRows']) ?? 0;
+  var cols = _int(j['numberOfColumns']) ?? 0;
+  for (final s in _maps(j['students'])) {
+    final id = _int(s['studentId']);
+    final r = _int(s['rowIndex']);
+    final c = _int(s['colIndex']);
+    if (id == null || r == null || c == null || r < 0 || c < 0) continue;
+    seats[(r, c)] = id;
+    if (r >= rows) rows = r + 1;
+    if (c >= cols) cols = c + 1;
+  }
+  final plan = SeatingPlan(
+    id: _int(j['id']),
+    name: _str(j['name']).trim(),
+    rows: rows,
+    columns: cols,
+    seats: seats,
+  );
+  return plan.isEmpty ? null : plan;
+}
 
 /// getPeriodData2017 result:
 /// `{dataByTTId:{"<id>":{…, classRegEvents?:[…]}}, referencedStudents:[…]}`.
@@ -252,15 +331,7 @@ PeriodRegisterData parsePeriodData(Object? raw) {
   for (final ev in loose) {
     final r = periods[ev.ttId];
     if (r == null) continue;
-    periods[r.ttId] = PeriodRegister(
-      ttId: r.ttId,
-      absenceChecked: r.absenceChecked,
-      studentIds: r.studentIds,
-      absences: r.absences,
-      topic: r.topic,
-      events: [...r.events, ev],
-      homework: r.homework,
-    );
+    periods[r.ttId] = r.copyWith(events: [...r.events, ev]);
   }
   return PeriodRegisterData(
     periods: periods,
